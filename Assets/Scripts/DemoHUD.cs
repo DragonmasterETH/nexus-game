@@ -10,6 +10,9 @@ namespace NexusGame
     {
         public GameController Game;
         public MobileInputController InputController;
+        public bool ShowDebugToggle = false;
+
+        bool _showBuyMenu;
 
         void Start()
         {
@@ -39,24 +42,56 @@ namespace NexusGame
             sb.AppendLine();
             sb.AppendLine("Controls:");
             sb.AppendLine("- Click/tap a hex: reveal exploration or select tile.");
-            sb.AppendLine("- In popup, use +/- to choose units to move, then click an adjacent hex twice to move them.");
-            sb.AppendLine("- Click 'Buy' buttons to deploy at your selected home-base hex (or default if none selected).");
+            sb.AppendLine("- In popup, use +/- to choose units to move, then click an adjacent hex to move them.");
+            sb.AppendLine("- Click moneybag to open the buy menu on a home-base hex.");
 
             GUI.Box(new Rect(10, 10, 320, 170), sb.ToString());
+
+            // Optional debug toggle
+            if (ShowDebugToggle && InputController != null)
+            {
+                bool newDebug = GUI.Toggle(new Rect(10, 165, 150, 20), InputController.DebugClicks, "Debug clicks");
+                InputController.DebugClicks = newDebug;
+            }
 
             if (GUI.Button(new Rect(10, 190, 120, 30), "End Turn"))
             {
                 Game.EndTurn();
+                _showBuyMenu = false;
             }
 
-            // Simple deploy buttons following classic costs
-            int y = 230;
-            DrawBuyButton(ref y, "Buy Human (1)", UnitType.Human, 1);
-            DrawBuyButton(ref y, "Buy Fungoid (2)", UnitType.Fungoid, 2);
-            DrawBuyButton(ref y, "Buy Crystalline (2)", UnitType.Crystalline, 2);
-            DrawBuyButton(ref y, "Buy Rock Strider (3)", UnitType.RockStrider, 3);
-            DrawBuyButton(ref y, "Buy Lava Leaper (4)", UnitType.LavaLeaper, 4);
-            DrawBuyButton(ref y, "Buy Rubium Dragon (8)", UnitType.RubiumDragon, 8);
+            // Moneybag button to open buy menu (enabled only when a valid home hex is selected)
+            bool canBuyHere = false;
+            if (InputController != null && InputController.SelectedTile != null)
+            {
+                var sel = InputController.SelectedTile;
+                if (sel.Type == TileType.HomeBase && sel.Owner == player)
+                {
+                    canBuyHere = true;
+                }
+            }
+
+            if (!canBuyHere)
+                GUI.enabled = false;
+
+            if (GUI.Button(new Rect(140, 190, 40, 30), "$"))
+            {
+                _showBuyMenu = !_showBuyMenu;
+            }
+
+            GUI.enabled = true;
+
+            // Contextual buy menu, shown only when toggled on and at a valid home hex
+            if (_showBuyMenu && canBuyHere)
+            {
+                int y = 230;
+                DrawBuyButton(ref y, "Buy Human (1)", UnitType.Human, 1);
+                DrawBuyButton(ref y, "Buy Fungoid (2)", UnitType.Fungoid, 2);
+                DrawBuyButton(ref y, "Buy Crystalline (2)", UnitType.Crystalline, 2);
+                DrawBuyButton(ref y, "Buy Rock Strider (3)", UnitType.RockStrider, 3);
+                DrawBuyButton(ref y, "Buy Lava Leaper (4)", UnitType.LavaLeaper, 4);
+                DrawBuyButton(ref y, "Buy Rubium Dragon (8)", UnitType.RubiumDragon, 8);
+            }
 
             // Tile popup: show units and group-move selection on selected tile
             var popupTile = InputController != null ? InputController.SelectedTile : null;
@@ -64,11 +99,44 @@ namespace NexusGame
             if (popupTile != null)
             {
                 string title = $"Tile ({popupTile.Type})";
-                var rect = new Rect(Screen.width - 260, 10, 250, 220);
+                // Make the popup taller so all unit lines fit comfortably.
+                var rect = new Rect(Screen.width - 260, 10, 250, 320);
                 GUI.Box(rect, title);
 
-                GUILayout.BeginArea(new Rect(rect.x + 10, rect.y + 25, rect.width - 20, rect.height - 45));
-                GUILayout.Label($"Owner: {(popupTile.Owner != null ? (popupTile.Owner.PlayerIndex + 1).ToString() : "None")}");
+                GUILayout.BeginArea(new Rect(rect.x + 10, rect.y + 25, rect.width - 20, rect.height - 55));
+
+                // Determine if this hex is contested (units from more than one player present)
+                bool hasAnyUnit = false;
+                bool hasOtherOwner = false;
+                int? soleOwnerIndex = null;
+                foreach (var unit in FindObjectsOfType<UnitInstance>())
+                {
+                    if (unit.Tile != popupTile)
+                        continue;
+
+                    hasAnyUnit = true;
+                    if (soleOwnerIndex == null)
+                    {
+                        soleOwnerIndex = unit.Owner.PlayerIndex;
+                    }
+                    else if (soleOwnerIndex != unit.Owner.PlayerIndex)
+                    {
+                        hasOtherOwner = true;
+                        break;
+                    }
+                }
+
+                if (hasAnyUnit && hasOtherOwner)
+                {
+                    var prevColor = GUI.color;
+                    GUI.color = Color.red;
+                    GUILayout.Label("Owner: CONTESTED");
+                    GUI.color = prevColor;
+                }
+                else
+                {
+                    GUILayout.Label($"Owner: {(popupTile.Owner != null ? (popupTile.Owner.PlayerIndex + 1).ToString() : "None")}");
+                }
                 GUILayout.Label($"Base Yield: {Game.Config.GetTile(popupTile.Type)?.RubiumYield ?? 0}");
                 GUILayout.Label($"Mine Bonus: {popupTile.ExtraMineYield}");
                 GUILayout.Space(5);

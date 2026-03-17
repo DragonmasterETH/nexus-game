@@ -8,6 +8,9 @@ namespace NexusGame
             public Camera MainCamera;
             public GameController Game;
 
+        [Header("Debug")]
+        public bool DebugClicks;
+
             BoardTile _popupTile;
             BoardTile _selectedTile;
             readonly System.Collections.Generic.Dictionary<UnitType, int> _moveSelection =
@@ -52,10 +55,27 @@ namespace NexusGame
 
             var ray = MainCamera.ScreenPointToRay(screenPos);
             var hits = Physics.RaycastAll(ray, 100f);
+
+            if (DebugClicks)
+            {
+                Debug.Log($"CLICK: screenPos={screenPos}, hits={hits.Length}");
+                foreach (var h in hits)
+                {
+                    var go = h.collider.gameObject;
+                    var proxy = go.GetComponentInParent<TileClickProxy>();
+                    var unit = go.GetComponentInParent<UnitInstance>();
+                    Debug.Log(
+                        $"  hit: go={go.name}, parent={go.transform.parent?.name}, " +
+                        $"proxy={(proxy != null ? $"{proxy.Q},{proxy.R}" : "none")}, " +
+                        $"unit={(unit != null ? unit.Definition.Type.ToString() : "none")}"
+                    );
+                }
+            }
+
             if (hits.Length == 0)
                 return;
 
-            // Determine the tile under the cursor/touch
+            // Determine the tile under the cursor/touch using TileClickProxy
             BoardTile clickedTile = null;
             foreach (var h in hits)
             {
@@ -67,22 +87,24 @@ namespace NexusGame
                     break;
                 }
 
-                var go = h.collider.gameObject;
-                foreach (var tile in Game.Board.AllTiles)
+                var proxy = h.collider.GetComponentInParent<TileClickProxy>();
+                if (proxy != null)
                 {
-                    if (tile.View == go)
-                    {
-                        clickedTile = tile;
+                    clickedTile = Game.Board.GetTile(proxy.Q, proxy.R);
+                    if (clickedTile != null)
                         break;
-                    }
                 }
-
-                if (clickedTile != null)
-                    break;
             }
 
             if (clickedTile == null)
+            {
+                if (DebugClicks)
+                    Debug.Log("CLICK RESOLVED: no tile");
                 return;
+            }
+
+            if (DebugClicks)
+                Debug.Log($"CLICK RESOLVED: tile=({clickedTile.Q},{clickedTile.R}) type={clickedTile.Type}");
 
             // If no source tile is selected yet, or we clicked the same tile, toggle selection/popup.
             if (_selectedTile == null || clickedTile == _selectedTile)
@@ -95,13 +117,6 @@ namespace NexusGame
                 {
                     SetSelectedTile(clickedTile);
                 }
-                return;
-            }
-
-            // If nothing is selected yet and this tile has an unrevealed exploration token, reveal it
-            if (!clickedTile.ExplorationRevealed && clickedTile.ExplorationReward != ExplorationReward.None)
-            {
-                RevealExploration(clickedTile);
                 return;
             }
 
@@ -153,27 +168,107 @@ namespace NexusGame
                 tile.ExplorationMarker = null;
             }
 
+            string debugMessage = $"RevealExploration at ({tile.Q},{tile.R}): ";
+
             switch (tile.ExplorationReward)
             {
                 case ExplorationReward.FreeHuman:
                     Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, tile);
+                    debugMessage += "Free Human";
                     break;
                 case ExplorationReward.FreeFungoid:
                     Game.SpawnUnit(Game.CurrentPlayer, UnitType.Fungoid, tile);
+                    debugMessage += "Free Fungoid";
+                    break;
+                case ExplorationReward.FreeRockStrider:
+                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.RockStrider, tile);
+                    debugMessage += "Free Rock Strider";
                     break;
                 case ExplorationReward.Mine1:
                     tile.ExtraMineYield = 1;
+                    UpdateMineLabel(tile);
+                    debugMessage += "Mine bonus +1";
                     break;
                 case ExplorationReward.Mine2:
                     tile.ExtraMineYield = 2;
+                    UpdateMineLabel(tile);
+                    debugMessage += "Mine bonus +2";
                     break;
                 case ExplorationReward.Mine3:
                     tile.ExtraMineYield = 3;
+                    UpdateMineLabel(tile);
+                    debugMessage += "Mine bonus +3";
                     break;
                 case ExplorationReward.FreeHumanAndMine2:
                     Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, tile);
                     tile.ExtraMineYield = 2;
+                    UpdateMineLabel(tile);
+                    debugMessage += "Free Human + Mine bonus +2";
                     break;
+                default:
+                    debugMessage += "No reward (None)";
+                    break;
+            }
+
+            Debug.Log(debugMessage);
+        }
+
+        void UpdateMineLabel(BoardTile tile)
+        {
+            // Remove label if no bonus.
+            if (tile.ExtraMineYield <= 0)
+            {
+                if (tile.MineLabel != null)
+                {
+                    Object.Destroy(tile.MineLabel);
+                    tile.MineLabel = null;
+                }
+                return;
+            }
+
+            if (tile.MineLabel == null)
+            {
+                // Container for background shape + number (inherits tile rotation)
+                var labelRoot = new GameObject("MineLabel");
+                labelRoot.transform.SetParent(tile.View.transform, worldPositionStays: false);
+                labelRoot.transform.localPosition = new Vector3(0f, 0.04f, 0f);
+                labelRoot.transform.localRotation = Quaternion.identity;
+                labelRoot.transform.localScale = Vector3.one * 0.2f;
+
+                // Simple background shape (small quad facing camera)
+                var bg = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                bg.name = "MineLabelBg";
+                bg.transform.SetParent(labelRoot.transform, worldPositionStays: false);
+                bg.transform.localPosition = Vector3.zero;
+                bg.transform.localRotation = Quaternion.identity;
+                bg.transform.localScale = Vector3.one * 0.6f;
+                var bgRenderer = bg.GetComponent<Renderer>();
+                if (bgRenderer != null)
+                {
+                    bgRenderer.material = new Material(Shader.Find("Sprites/Default"));
+                    bgRenderer.material.color = new Color(0f, 0f, 0f, 0.6f); // dark semi-transparent
+                }
+
+                // Number text (slightly in front of background)
+                var textGo = new GameObject("MineLabelText");
+                textGo.transform.SetParent(labelRoot.transform, worldPositionStays: false);
+                textGo.transform.localPosition = new Vector3(0f, 0f, -0.02f);
+                textGo.transform.localRotation = Quaternion.identity;
+                textGo.transform.localScale = Vector3.one * 0.4f;
+
+                var text = textGo.AddComponent<TextMesh>();
+                text.anchor = TextAnchor.MiddleCenter;
+                text.alignment = TextAlignment.Center;
+                text.fontSize = 64;
+                text.color = Color.yellow;
+
+                tile.MineLabel = labelRoot;
+            }
+
+            var tm = tile.MineLabel.GetComponentInChildren<TextMesh>();
+            if (tm != null)
+            {
+                tm.text = tile.ExtraMineYield.ToString();
             }
         }
 
@@ -222,6 +317,11 @@ namespace NexusGame
                     {
                         unit.MoveTo(target);
                         target.Owner = unit.Owner;
+                        // Reveal exploration only when a unit actually moves onto this hex.
+                        if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
+                        {
+                            RevealExploration(target);
+                        }
                         toMove--;
                         anyMoved = true;
                     }

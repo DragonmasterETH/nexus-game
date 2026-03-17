@@ -30,6 +30,7 @@ namespace NexusGame
         None,
         FreeHuman,
         FreeFungoid,
+        FreeRockStrider,
         Mine1,
         Mine2,
         Mine3,
@@ -75,15 +76,17 @@ namespace NexusGame
         {
             var config = CreateInstance<NexusConfig>();
 
+            // Base terrain tiles no longer give Rubium by themselves; all income comes from mines
+            // (home-base printed mines and exploration-discovered mines).
             config.TileDefinitions = new List<TileDefinition>
             {
-                new TileDefinition { Type = TileType.HomeBase, RubiumYield = 2, Color = Color.white },
-                new TileDefinition { Type = TileType.Monolith, RubiumYield = 3, Color = new Color(0.5f, 0.2f, 0.7f) },
-                new TileDefinition { Type = TileType.Plains, RubiumYield = 1, Color = new Color(0.8f, 0.8f, 0.8f) },
-                new TileDefinition { Type = TileType.Forest, RubiumYield = 1, Color = new Color(0.1f, 0.5f, 0.1f) },
-                new TileDefinition { Type = TileType.CrystalField, RubiumYield = 3, Color = new Color(0.2f, 0.8f, 0.9f) },
-                new TileDefinition { Type = TileType.Lava, RubiumYield = 2, Color = new Color(0.9f, 0.3f, 0.0f) },
-                new TileDefinition { Type = TileType.Rock, RubiumYield = 1, Color = new Color(0.4f, 0.4f, 0.4f) }
+                new TileDefinition { Type = TileType.HomeBase, RubiumYield = 0, Color = Color.white },
+                new TileDefinition { Type = TileType.Monolith, RubiumYield = 0, Color = new Color(0.5f, 0.2f, 0.7f) },
+                new TileDefinition { Type = TileType.Plains, RubiumYield = 0, Color = new Color(0.8f, 0.8f, 0.8f) },
+                new TileDefinition { Type = TileType.Forest, RubiumYield = 0, Color = new Color(0.1f, 0.5f, 0.1f) },
+                new TileDefinition { Type = TileType.CrystalField, RubiumYield = 0, Color = new Color(0.2f, 0.8f, 0.9f) },
+                new TileDefinition { Type = TileType.Lava, RubiumYield = 0, Color = new Color(0.9f, 0.3f, 0.0f) },
+                new TileDefinition { Type = TileType.Rock, RubiumYield = 0, Color = new Color(0.4f, 0.4f, 0.4f) }
             };
 
             config.UnitDefinitions = new List<UnitDefinition>
