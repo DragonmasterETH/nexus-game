@@ -1,0 +1,944 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
+using UnityEngine;
+
+namespace NexusGame
+{
+    public partial class GameController
+    {
+        [Header("Cards & full battle")]
+        [Tooltip("Interactive battle order, Energize, casualty pick, secrets. Off = legacy auto-resolve.")]
+        public bool UseFullBattleFlow = true;
+
+        [Tooltip("Skip arrangement/Energize/casualty UI; weakest-first casualties, auto-pass Energize.")]
+        public bool AutoResolveBattlesQuick = false;
+
+        Queue<UnifiedEnergizeDraw> _unifiedEnergizeDeck;
+        Queue<SecretMissionInHand> _secretDeck;
+        System.Random _cardRng;
+        int _nextSecretInstanceId = 1;
+
+        public bool BattlePhaseBlockingPlay { get; private set; }
+        public List<PlannedBattleEntry> BattlePlan { get; private set; } = new List<PlannedBattleEntry>();
+        public bool PendingBattleArrangement { get; private set; }
+
+        public PlayerState EnergizePromptPlayer { get; private set; }
+        public string EnergizeBattleContext { get; private set; }
+        bool _energizeRoundActive;
+        Coroutine _battleCoroutine;
+
+        public CasualtyPickState CasualtyPick { get; private set; }
+
+        public PlayerState FocusFirePicker { get; private set; }
+        public bool FocusFireForAttackerSide { get; private set; }
+        BoardTile _focusFireHex;
+        public BoardTile FocusFireBattleHex => _focusFireHex;
+
+        public SecretMissionOfferState SecretMissionOffer { get; private set; }
+
+        public DragonPhaseState DragonPhase { get; private set; }
+
+        PlayerState _battleAttacker;
+        PlayerState _battleDefender;
+        BoardTile _battleHex;
+        BattleEnergizeModifiers _mods;
+        System.Random _battleRng;
+        List<string> _liveBattleLines;
+
+        public void AppendBattleLog(string line)
+        {
+            _liveBattleLines?.Add(line);
+            Debug.Log("[Battle] " + line);
+        }
+
+        void InitCardDecks()
+        {
+            _cardRng = new System.Random(Environment.TickCount ^ 0x5EED);
+            _unifiedEnergizeDeck = CardDecks.BuildUnifiedEnergizeDeck(_cardRng);
+            _secretDeck = CardDecks.BuildSecretDeck(_cardRng, ref _nextSecretInstanceId);
+        }
+
+        void RunDrawPhase(PlayerState player)
+        {
+            if (player == null)
+                return;
+
+            DrawSecretMission(player, 1);
+            if (PlayerControlsMonolithAlone(player))
+                DrawEnergizeCards(player, 2);
+        }
+
+        bool PlayerControlsMonolithAlone(PlayerState player)
+        {
+            foreach (var tile in Board.AllTiles)
+            {
+                if (tile.Type != TileType.Monolith)
+                    continue;
+
+                PlayerState sole = null;
+                foreach (var u in FindObjectsOfType<UnitInstance>())
+                {
+                    if (u.Tile != tile)
+                        continue;
+                    if (sole == null)
+                        sole = u.Owner;
+                    else if (sole != u.Owner)
+                        return false;
+                }
+
+                return sole == player;
+            }
+
+            return false;
+        }
+
+        void DrawSecretMission(PlayerState p, int n)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (_secretDeck.Count == 0)
+                    _secretDeck = CardDecks.BuildSecretDeck(_cardRng, ref _nextSecretInstanceId);
+                if (_secretDeck.Count > 0)
+                    p.SecretMissions.Add(_secretDeck.Dequeue());
+            }
+        }
+
+        void DrawEnergizeCards(PlayerState p, int n)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (_unifiedEnergizeDeck.Count == 0)
+                    _unifiedEnergizeDeck = CardDecks.BuildUnifiedEnergizeDeck(_cardRng);
+                if (_unifiedEnergizeDeck.Count == 0)
+                    break;
+                var c = _unifiedEnergizeDeck.Dequeue();
+                if (c.IsDeployment)
+                    p.DeployEnergize.Add(c.Deploy);
+                else
+                    p.BattleEnergize.Add(c.Battle);
+            }
+        }
+
+        /// <summary>Play a Deployment-phase Energize. FreeHuman needs a home-base tile owned by current player.</summary>
+        public bool TryPlayDeploymentEnergize(EnergizeDeploymentId id, BoardTile selectedHomeHex)
+        {
+            if (BattlePhaseBlockingPlay || DragonPhase != null)
+                return false;
+
+            var p = CurrentPlayer;
+            if (p == null || !p.DeployEnergize.Contains(id))
+                return false;
+
+            switch (id)
+            {
+                case EnergizeDeploymentId.StripMine:
+                    p.Rubium += 2;
+                    break;
+                case EnergizeDeploymentId.Convoy:
+                    DrawEnergizeCards(p, 1);
+                    break;
+                case EnergizeDeploymentId.RushOrder:
+                    p.DeploymentPurchaseDiscountRubium += 2;
+                    break;
+                case EnergizeDeploymentId.FreeHuman:
+                    if (selectedHomeHex == null || selectedHomeHex.Type != TileType.HomeBase ||
+                        selectedHomeHex.Owner != p)
+                        return false;
+                    SpawnUnit(p, UnitType.Human, selectedHomeHex);
+                    break;
+                case EnergizeDeploymentId.SupplyRun:
+                    p.Rubium += 1;
+                    DrawEnergizeCards(p, 1);
+                    break;
+                default:
+                    return false;
+            }
+
+            p.DeployEnergize.Remove(id);
+            return true;
+        }
+
+        void BeginBattleArrangement(PlayerState attacker)
+        {
+            BattlePlan.Clear();
+            var hexes = BattleResolver.FindContestedHexesForAttacker(attacker);
+            hexes.Sort((a, b) =>
+            {
+                int c = a.Q.CompareTo(b.Q);
+                return c != 0 ? c : a.R.CompareTo(b.R);
+            });
+
+            foreach (var hex in hexes)
+            {
+                var opps = BattleResolver.OpponentsOnHex(hex, attacker);
+                if (opps.Count == 0)
+                    continue;
+                BattlePlan.Add(new PlannedBattleEntry
+                {
+                    Hex = hex,
+                    DefenderPlayerIndex = opps[0].PlayerIndex
+                });
+            }
+
+            if (BattlePlan.Count == 0)
+                return;
+
+            if (!UseFullBattleFlow)
+            {
+                RunLegacyAutoBattle(attacker);
+                PendingBattleArrangement = false;
+                BattlePhaseBlockingPlay = false;
+                return;
+            }
+
+            if (AutoResolveBattlesQuick)
+            {
+                PendingBattleArrangement = false;
+                StartBattleCoroutine(attacker);
+                return;
+            }
+
+            PendingBattleArrangement = true;
+            BattlePhaseBlockingPlay = true;
+        }
+
+        public void MoveBattlePlanEntry(int index, int delta)
+        {
+            int ni = index + delta;
+            if (index < 0 || index >= BattlePlan.Count || ni < 0 || ni >= BattlePlan.Count)
+                return;
+            var t = BattlePlan[index];
+            BattlePlan[index] = BattlePlan[ni];
+            BattlePlan[ni] = t;
+        }
+
+        public void SetBattleDefenderForEntry(int planIndex, int defenderPlayerIndex)
+        {
+            if (planIndex < 0 || planIndex >= BattlePlan.Count)
+                return;
+            var e = BattlePlan[planIndex];
+            var opps = BattleResolver.OpponentsOnHex(e.Hex, Players[_currentPlayerIndex]);
+            foreach (var o in opps)
+            {
+                if (o.PlayerIndex == defenderPlayerIndex)
+                {
+                    e.DefenderPlayerIndex = defenderPlayerIndex;
+                    break;
+                }
+            }
+        }
+
+        public void ConfirmBattleArrangement()
+        {
+            if (!PendingBattleArrangement)
+                return;
+            PendingBattleArrangement = false;
+            StartBattleCoroutine(CurrentPlayer);
+        }
+
+        void StartBattleCoroutine(PlayerState attacker)
+        {
+            if (_battleCoroutine != null)
+                StopCoroutine(_battleCoroutine);
+            _battleCoroutine = StartCoroutine(BattlePhaseCoroutine(attacker));
+        }
+
+        IEnumerator BattlePhaseCoroutine(PlayerState attacker)
+        {
+            BattlePhaseBlockingPlay = true;
+            var log = new StringBuilder();
+            _battleRng = new System.Random(Environment.TickCount ^ (attacker.PlayerIndex << 8));
+
+            if (BattlePlan.Count == 0)
+            {
+                BattlePhaseBlockingPlay = false;
+                _battleCoroutine = null;
+                yield break;
+            }
+
+            foreach (var entry in BattlePlan)
+            {
+                var hex = entry.Hex;
+                var defender = Players.Find(p => p.PlayerIndex == entry.DefenderPlayerIndex);
+                if (defender == null || hex == null)
+                    continue;
+
+                _mods = new BattleEnergizeModifiers();
+                _battleAttacker = attacker;
+                _battleDefender = defender;
+                _battleHex = hex;
+
+                if (!AutoResolveBattlesQuick)
+                    yield return StartCoroutine(EnergizePassCoroutine(attacker, defender, hex));
+
+                int defStart = CountParticipants(hex, defender);
+                bool defLostDragon = false;
+
+                var battleLines = new List<string>();
+                _liveBattleLines = battleLines;
+
+                yield return StartCoroutine(RunBattleStepsCoroutine(
+                    hex, attacker, defender, _battleRng,
+                    (a, d, line) => battleLines.Add(line),
+                    _ => { },
+                    () => { defLostDragon = true; }));
+
+                foreach (var l in battleLines)
+                    log.AppendLine(l);
+
+                _liveBattleLines = null;
+
+                RefreshPoolsLocal(hex, attacker, defender, out _, out var dLeft);
+                int defEnd = dLeft.Count;
+                int defCasualties = defStart - defEnd;
+                bool attackerWin = defEnd == 0;
+
+                if (attackerWin)
+                {
+                    attacker.VictoryPoints += 1;
+                    log.AppendLine($"P{attacker.PlayerIndex + 1} wins battle (+1 VP).");
+                    DrawEnergizeCards(defender, 1);
+                    if (!AutoResolveBattlesQuick)
+                    {
+                        SecretMissionOffer = BuildSecretOffer(attacker, defCasualties, defStart, defLostDragon);
+                        while (SecretMissionOffer != null && SecretMissionOffer.Waiting)
+                            yield return null;
+                        SecretMissionOffer = null;
+                    }
+                }
+                else
+                    log.AppendLine("Defender holds the hex.");
+
+                log.AppendLine("---");
+            }
+
+            LastBattlePhaseLog = log.ToString().TrimEnd();
+            BattlePlan.Clear();
+            BattlePhaseBlockingPlay = false;
+            _battleCoroutine = null;
+        }
+
+        SecretMissionOfferState BuildSecretOffer(PlayerState attacker, int casualtiesInflicted, int defStartCount, bool dragonKilled)
+        {
+            var eligible = new List<int>();
+            for (int i = 0; i < attacker.SecretMissions.Count; i++)
+            {
+                var s = attacker.SecretMissions[i];
+                if (s.Kind != SecretMissionKind.Battle)
+                    continue;
+                if (MeetsBattleMission(s, casualtiesInflicted, defStartCount, dragonKilled))
+                    eligible.Add(i);
+            }
+
+            if (eligible.Count == 0)
+                return null;
+
+            return new SecretMissionOfferState
+            {
+                Attacker = attacker,
+                EligibleIndices = eligible,
+                Waiting = true
+            };
+        }
+
+        static bool MeetsBattleMission(SecretMissionInHand s, int defenderCasualties, int _, bool dragonKilled)
+        {
+            switch (s.MissionTypeId)
+            {
+                case SecretMissionTypes.WinAnyBattle:
+                    return true;
+                case SecretMissionTypes.WinBattleKillTwoPlus:
+                    return defenderCasualties >= 2;
+                case SecretMissionTypes.WinBattleEnemyLostDragon:
+                    return dragonKilled;
+                default:
+                    return false;
+            }
+        }
+
+        public void PlaySecretMissionAtIndex(int indexInHand)
+        {
+            if (SecretMissionOffer == null || !SecretMissionOffer.Waiting)
+                return;
+            if (!SecretMissionOffer.EligibleIndices.Contains(indexInHand))
+                return;
+
+            var p = SecretMissionOffer.Attacker;
+            var s = p.SecretMissions[indexInHand];
+            p.VictoryPoints += s.VictoryPoints;
+            p.SecretMissions.RemoveAt(indexInHand);
+            SecretMissionOffer.Waiting = false;
+        }
+
+        public void SkipSecretMissionPlay()
+        {
+            if (SecretMissionOffer != null)
+                SecretMissionOffer.Waiting = false;
+        }
+
+        IEnumerator EnergizePassCoroutine(PlayerState attacker, PlayerState defender, BoardTile hex)
+        {
+            EnergizeBattleContext = $"Hex ({hex.Q},{hex.R}): P{attacker.PlayerIndex + 1} vs P{defender.PlayerIndex + 1}";
+            bool played;
+            do
+            {
+                played = false;
+                foreach (var p in EnergizePlayerOrder(attacker, defender))
+                {
+                    EnergizePromptPlayer = p;
+                    _energizeRoundActive = true;
+                    while (_energizeRoundActive)
+                        yield return null;
+
+                    if (_lastEnergizePlayed != EnergizeBattleId.None)
+                    {
+                        played = true;
+                        ApplyEnergizeCard(_lastEnergizePlayed, p, attacker, defender);
+                        _lastEnergizePlayed = EnergizeBattleId.None;
+                    }
+                }
+            } while (played);
+
+            EnergizePromptPlayer = null;
+            EnergizeBattleContext = null;
+        }
+
+        EnergizeBattleId _lastEnergizePlayed = EnergizeBattleId.None;
+
+        public void SubmitEnergizePass()
+        {
+            if (EnergizePromptPlayer == null)
+                return;
+            _lastEnergizePlayed = EnergizeBattleId.None;
+            _energizeRoundActive = false;
+        }
+
+        public void SubmitEnergizePlay(EnergizeBattleId id)
+        {
+            if (EnergizePromptPlayer == null || id == EnergizeBattleId.None)
+                return;
+            if (!EnergizePromptPlayer.BattleEnergize.Contains(id))
+                return;
+
+            EnergizePromptPlayer.BattleEnergize.Remove(id);
+            if (id == EnergizeBattleId.BattleCache)
+                DrawEnergizeCards(EnergizePromptPlayer, 1);
+
+            if (id == EnergizeBattleId.FocusFire)
+            {
+                _lastEnergizePlayed = id;
+                FocusFirePicker = EnergizePromptPlayer;
+                FocusFireForAttackerSide = EnergizePromptPlayer == _battleAttacker;
+                _focusFireHex = _battleHex;
+                _pendingFocusFireCard = true;
+                return;
+            }
+
+            _lastEnergizePlayed = id;
+            _energizeRoundActive = false;
+        }
+
+        bool _pendingFocusFireCard;
+
+        public void SubmitFocusFireUnitType(UnitType type)
+        {
+            if (FocusFirePicker == null || !_pendingFocusFireCard)
+                return;
+
+            if (FocusFireForAttackerSide)
+            {
+                _mods.AttackerFocusFireType = type;
+                _mods.AttackerFocusFireExtraDice = 2;
+            }
+            else
+            {
+                _mods.DefenderFocusFireType = type;
+                _mods.DefenderFocusFireExtraDice = 2;
+            }
+
+            FocusFirePicker = null;
+            _pendingFocusFireCard = false;
+            _energizeRoundActive = false;
+        }
+
+        public void CancelFocusFireRefund()
+        {
+            if (FocusFirePicker == null || !_pendingFocusFireCard)
+                return;
+            FocusFirePicker.BattleEnergize.Add(EnergizeBattleId.FocusFire);
+            FocusFirePicker = null;
+            _pendingFocusFireCard = false;
+            _lastEnergizePlayed = EnergizeBattleId.None;
+            _energizeRoundActive = false;
+        }
+
+        IEnumerable<PlayerState> EnergizePlayerOrder(PlayerState attacker, PlayerState defender)
+        {
+            yield return attacker;
+            yield return defender;
+            int n = Players.Count;
+            int start = (defender.PlayerIndex + 1) % n;
+            for (int k = 0; k < n; k++)
+            {
+                var p = Players[(start + k) % n];
+                if (p == attacker || p == defender)
+                    continue;
+                yield return p;
+            }
+        }
+
+        void ApplyEnergizeCard(EnergizeBattleId id, PlayerState who, PlayerState attacker, PlayerState defender)
+        {
+            bool isAtt = who == attacker;
+            switch (id)
+            {
+                case EnergizeBattleId.BattleFury:
+                    if (isAtt) _mods.AttackerDiceBonus++;
+                    else _mods.DefenderDiceBonus++;
+                    break;
+                case EnergizeBattleId.Elusive:
+                    if (isAtt) _mods.HitThresholdBonusWhenAttackingAttacker++;
+                    else _mods.HitThresholdBonusWhenAttackingDefender++;
+                    break;
+                case EnergizeBattleId.DeadlyAim:
+                    if (isAtt) _mods.AttackerHitThresholdReduction++;
+                    else _mods.DefenderHitThresholdReduction++;
+                    break;
+                case EnergizeBattleId.Aegis:
+                    if (isAtt) _mods.AttackerIgnoresNextHit = true;
+                    else _mods.DefenderIgnoresNextHit = true;
+                    break;
+                case EnergizeBattleId.BattleCache:
+                    break;
+                case EnergizeBattleId.FocusFire:
+                    break;
+            }
+        }
+
+        IEnumerator RunBattleStepsCoroutine(
+            BoardTile hex,
+            PlayerState attacker,
+            PlayerState defender,
+            System.Random rng,
+            Action<PlayerState, PlayerState, string> logLine,
+            Action<int> onDefenderCasualty,
+            Action onDefenderDragonKilled)
+        {
+            void Log(string s) => logLine(attacker, defender, s);
+
+            Log($"Battle at ({hex.Q},{hex.R}): P{attacker.PlayerIndex + 1} vs P{defender.PlayerIndex + 1}");
+
+            bool aegisAtt = _mods.AttackerIgnoresNextHit;
+            bool aegisDef = _mods.DefenderIgnoresNextHit;
+
+            foreach (var unitType in BattleResolver.BattleOrder)
+            {
+                RefreshPoolsLocal(hex, attacker, defender, out var aliveAtt, out var aliveDef);
+                if (aliveDef.Count == 0)
+                {
+                    Log("Defender eliminated.");
+                    yield break;
+                }
+
+                if (aliveAtt.Count == 0)
+                {
+                    Log("Attacker eliminated from hex.");
+                    yield break;
+                }
+
+                var attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
+                var defOfType = aliveDef.FindAll(u => u.Definition.Type == unitType);
+                if (attOfType.Count == 0 && defOfType.Count == 0)
+                    continue;
+
+                int hitsOnAttacker = 0;
+                foreach (var u in defOfType)
+                {
+                    int extra = _mods.DefenderDiceBonus;
+                    if (_mods.DefenderFocusFireType == unitType)
+                        extra += _mods.DefenderFocusFireExtraDice;
+                    int shift = _mods.HitThresholdBonusWhenAttackingAttacker - _mods.DefenderHitThresholdReduction;
+                    int h = BattleResolver.RollHitsForUnit(u.Definition, rng, extra, shift);
+                    hitsOnAttacker += h;
+                    Log($"  {unitType} (def): {h} hit(s)");
+                }
+
+                int hitsOnDefender = 0;
+                foreach (var u in attOfType)
+                {
+                    int extra = _mods.AttackerDiceBonus;
+                    if (_mods.AttackerFocusFireType == unitType)
+                        extra += _mods.AttackerFocusFireExtraDice;
+                    int shift = _mods.HitThresholdBonusWhenAttackingDefender - _mods.AttackerHitThresholdReduction;
+                    int h = BattleResolver.RollHitsForUnit(u.Definition, rng, extra, shift);
+                    hitsOnDefender += h;
+                    Log($"  {unitType} (atk): {h} hit(s)");
+                }
+
+                RefreshPoolsLocal(hex, attacker, defender, out aliveAtt, out aliveDef);
+
+                int capAtt = Mathf.Min(hitsOnAttacker, aliveAtt.Count);
+                if (aegisAtt && capAtt > 0)
+                {
+                    capAtt--;
+                    aegisAtt = false;
+                    Log("    Aegis: first hit vs attacker ignored.");
+                }
+
+                if (capAtt > 0)
+                {
+                    if (AutoResolveBattlesQuick || !UseFullBattleFlow)
+                    {
+                        foreach (var v in BattleResolver.PickCasualtiesWeakestFirst(aliveAtt, capAtt))
+                        {
+                            Log($"    → P{attacker.PlayerIndex + 1} loses {v.Definition.Type}");
+                            RemoveUnit(v);
+                        }
+                    }
+                    else
+                    {
+                        CasualtyPick = new CasualtyPickState
+                        {
+                            Owner = attacker,
+                            Pool = new List<UnitInstance>(aliveAtt),
+                            Required = capAtt,
+                            Selected = new List<UnitInstance>()
+                        };
+                        while (CasualtyPick != null)
+                            yield return null;
+                    }
+                }
+
+                RefreshPoolsLocal(hex, attacker, defender, out aliveAtt, out aliveDef);
+                int capDef = Mathf.Min(hitsOnDefender, aliveDef.Count);
+                if (aegisDef && capDef > 0)
+                {
+                    capDef--;
+                    aegisDef = false;
+                    Log("    Aegis: first hit vs defender ignored.");
+                }
+
+                if (capDef > 0)
+                {
+                    if (AutoResolveBattlesQuick || !UseFullBattleFlow)
+                    {
+                        foreach (var v in BattleResolver.PickCasualtiesWeakestFirst(aliveDef, capDef))
+                        {
+                            Log($"    → P{defender.PlayerIndex + 1} loses {v.Definition.Type}");
+                            onDefenderCasualty(1);
+                            if (v.Definition.Type == UnitType.RubiumDragon)
+                                onDefenderDragonKilled();
+                            RemoveUnit(v);
+                        }
+                    }
+                    else
+                    {
+                        CasualtyPick = new CasualtyPickState
+                        {
+                            Owner = defender,
+                            Pool = new List<UnitInstance>(aliveDef),
+                            Required = capDef,
+                            Selected = new List<UnitInstance>(),
+                            OnEachRemove = u =>
+                            {
+                                onDefenderCasualty(1);
+                                if (u.Definition.Type == UnitType.RubiumDragon)
+                                    onDefenderDragonKilled();
+                            }
+                        };
+                        while (CasualtyPick != null)
+                            yield return null;
+                    }
+                }
+            }
+        }
+
+        public void SubmitCasualtyPick()
+        {
+            if (CasualtyPick == null)
+                return;
+            if (CasualtyPick.Selected.Count != CasualtyPick.Required)
+                return;
+
+            foreach (var v in CasualtyPick.Selected)
+            {
+                AppendBattleLog(
+                    $"    → P{CasualtyPick.Owner.PlayerIndex + 1} loses {v.Definition.Type}");
+                CasualtyPick.OnEachRemove?.Invoke(v);
+                RemoveUnit(v);
+            }
+
+            CasualtyPick = null;
+        }
+
+        public void ToggleCasualtyUnit(UnitInstance u)
+        {
+            if (CasualtyPick == null || u == null || !CasualtyPick.Pool.Contains(u))
+                return;
+            if (CasualtyPick.Selected.Contains(u))
+                CasualtyPick.Selected.Remove(u);
+            else if (CasualtyPick.Selected.Count < CasualtyPick.Required)
+                CasualtyPick.Selected.Add(u);
+        }
+
+        static void RefreshPoolsLocal(BoardTile hex, PlayerState attacker, PlayerState defender,
+            out List<UnitInstance> aliveAtt, out List<UnitInstance> aliveDef)
+        {
+            aliveAtt = new List<UnitInstance>();
+            aliveDef = new List<UnitInstance>();
+            foreach (var u in UnityEngine.Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (u == null || u.Tile != hex)
+                    continue;
+                if (u.Owner == attacker)
+                    aliveAtt.Add(u);
+                else if (u.Owner == defender)
+                    aliveDef.Add(u);
+            }
+        }
+
+        static int CountParticipants(BoardTile hex, PlayerState p)
+        {
+            int n = 0;
+            foreach (var u in UnityEngine.Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (u.Tile == hex && u.Owner == p)
+                    n++;
+            }
+
+            return n;
+        }
+
+        static int CountTypeOnHex(BoardTile hex, PlayerState p, UnitType t)
+        {
+            int n = 0;
+            foreach (var u in UnityEngine.Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (u.Tile == hex && u.Owner == p && u.Definition.Type == t)
+                    n++;
+            }
+
+            return n;
+        }
+
+        /// <summary>Start or advance dragon strike phase before ending turn.</summary>
+        public void BeginDragonPhaseIfNeeded(Action onComplete)
+        {
+            DragonPhase = BuildDragonPhase(CurrentPlayer);
+            if (DragonPhase == null || DragonPhase.Options.Count == 0)
+            {
+                DragonPhase = null;
+                onComplete?.Invoke();
+                return;
+            }
+
+            DragonPhase.OnComplete = onComplete;
+        }
+
+        DragonPhaseState BuildDragonPhase(PlayerState player)
+        {
+            var options = new List<DragonStrikeOption>();
+            foreach (var u in FindObjectsOfType<UnitInstance>())
+            {
+                if (u.Owner != player || u.Definition.Type != UnitType.RubiumDragon)
+                    continue;
+                if (!IsHexControlledByPlayer(u.Tile, player))
+                    continue;
+                foreach (var n in Board.GetNeighbors(u.Tile))
+                {
+                    bool enemyHere = false;
+                    foreach (var o in FindObjectsOfType<UnitInstance>())
+                    {
+                        if (o.Tile == n && o.Owner != player)
+                        {
+                            enemyHere = true;
+                            break;
+                        }
+                    }
+
+                    if (enemyHere)
+                        options.Add(new DragonStrikeOption { Dragon = u, TargetHex = n });
+                }
+            }
+
+            if (options.Count == 0)
+                return null;
+
+            return new DragonPhaseState
+            {
+                Player = player,
+                Options = options,
+                Rng = new System.Random(Environment.TickCount)
+            };
+        }
+
+        static bool IsHexControlledByPlayer(BoardTile hex, PlayerState player)
+        {
+            if (hex == null)
+                return false;
+            PlayerState sole = null;
+            foreach (var u in UnityEngine.Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (u.Tile != hex)
+                    continue;
+                if (sole == null)
+                    sole = u.Owner;
+                else if (sole != u.Owner)
+                    return false;
+            }
+
+            return sole == player;
+        }
+
+        /// <summary>Rubium Dragon ranged: 1d6, hit on 4+ (same as melee profile).</summary>
+        public void ExecuteDragonStrike(DragonStrikeOption opt)
+        {
+            if (DragonPhase == null || opt == null || opt.Dragon == null)
+                return;
+
+            var enemies = new List<UnitInstance>();
+            foreach (var u in FindObjectsOfType<UnitInstance>())
+            {
+                if (u.Tile == opt.TargetHex && u.Owner != DragonPhase.Player)
+                    enemies.Add(u);
+            }
+
+            if (enemies.Count == 0)
+            {
+                DragonPhase.Options.Remove(opt);
+                if (DragonPhase.Options.Count == 0)
+                    FinishDragonPhase();
+                return;
+            }
+
+            int roll = DragonPhase.Rng.Next(1, 7);
+            opt.LastRoll = roll;
+            if (roll < 4)
+            {
+                DragonPhase.LastLog = $"Dragon ranged: roll {roll} — miss.";
+                RemoveAllDragonOptions(opt.Dragon);
+                return;
+            }
+
+            DragonPhase.PendingHit = opt;
+            DragonPhase.PendingEnemies = enemies;
+        }
+
+        void RemoveAllDragonOptions(UnitInstance dragon)
+        {
+            if (DragonPhase?.Options == null || dragon == null)
+                return;
+            DragonPhase.Options.RemoveAll(o => o.Dragon == dragon);
+            if (DragonPhase.Options.Count == 0)
+                FinishDragonPhase();
+        }
+
+        public void DragonStrikeChooseVictim(UnitInstance victim)
+        {
+            if (DragonPhase?.PendingHit == null || victim == null)
+                return;
+            if (!DragonPhase.PendingEnemies.Contains(victim))
+                return;
+
+            var dragon = DragonPhase.PendingHit.Dragon;
+            RemoveUnit(victim);
+            DragonPhase.LastLog =
+                $"Dragon ranged: roll {DragonPhase.PendingHit.LastRoll} — hit, removed {victim.Definition.Type}.";
+
+            DragonPhase.PendingHit = null;
+            DragonPhase.PendingEnemies = null;
+            RemoveAllDragonOptions(dragon);
+        }
+
+        public void SkipDragonStrikeOption(DragonStrikeOption opt)
+        {
+            if (DragonPhase == null || opt?.Dragon == null)
+                return;
+            RemoveAllDragonOptions(opt.Dragon);
+        }
+
+        public void SkipAllDragonStrikes()
+        {
+            FinishDragonPhase();
+        }
+
+        void FinishDragonPhase()
+        {
+            var cb = DragonPhase?.OnComplete;
+            DragonPhase = null;
+            cb?.Invoke();
+        }
+
+        void RunLegacyAutoBattle(PlayerState attacker)
+        {
+            var rng = new System.Random();
+            var log = new StringBuilder();
+            foreach (var entry in BattlePlan)
+            {
+                var defender = Players.Find(p => p.PlayerIndex == entry.DefenderPlayerIndex);
+                if (defender == null)
+                    continue;
+                var result = BattleResolver.ResolveBattle(entry.Hex, attacker, defender, Config, rng, RemoveUnit);
+                if (result.AttackerEliminatedDefender)
+                {
+                    attacker.VictoryPoints += result.VictoryPointsAwarded;
+                    DrawEnergizeCards(defender, 1);
+                }
+
+                foreach (var line in result.LogLines)
+                {
+                    log.AppendLine(line);
+                    Debug.Log("[Battle] " + line);
+                }
+
+                log.AppendLine("---");
+            }
+
+            LastBattlePhaseLog = log.ToString().TrimEnd();
+            BattlePlan.Clear();
+        }
+    }
+
+    [Serializable]
+    public class PlannedBattleEntry
+    {
+        public BoardTile Hex;
+        public int DefenderPlayerIndex;
+    }
+
+    public class CasualtyPickState
+    {
+        public PlayerState Owner;
+        public List<UnitInstance> Pool;
+        public int Required;
+        public List<UnitInstance> Selected = new List<UnitInstance>();
+        public Action<UnitInstance> OnEachRemove;
+    }
+
+    public class SecretMissionOfferState
+    {
+        public PlayerState Attacker;
+        public List<int> EligibleIndices;
+        public bool Waiting;
+    }
+
+    public class DragonPhaseState
+    {
+        public PlayerState Player;
+        public List<DragonStrikeOption> Options;
+        public System.Random Rng;
+        public DragonStrikeOption PendingHit;
+        public List<UnitInstance> PendingEnemies;
+        public string LastLog;
+        public Action OnComplete;
+    }
+
+    public class DragonStrikeOption
+    {
+        public UnitInstance Dragon;
+        public BoardTile TargetHex;
+        public int LastRoll;
+    }
+}

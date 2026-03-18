@@ -198,6 +198,19 @@ namespace NexusGame
         public Color Color;
         public int Rubium;
         public int VictoryPoints;
+
+        [NonSerialized]
+        public List<EnergizeBattleId> BattleEnergize = new List<EnergizeBattleId>();
+
+        [NonSerialized]
+        public List<EnergizeDeploymentId> DeployEnergize = new List<EnergizeDeploymentId>();
+
+        /// <summary>Rubium discounted from next deployment purchase (min cost 1).</summary>
+        [NonSerialized]
+        public int DeploymentPurchaseDiscountRubium;
+
+        [NonSerialized]
+        public List<SecretMissionInHand> SecretMissions = new List<SecretMissionInHand>();
     }
 }
 

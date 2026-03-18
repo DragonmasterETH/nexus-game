@@ -1,9 +1,10 @@
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace NexusGame
 {
-    public class GameController : MonoBehaviour
+    public partial class GameController : MonoBehaviour
     {
         [Header("Scene References")]
         public BoardGenerator Board;
@@ -12,6 +13,13 @@ namespace NexusGame
         [Header("Players")]
         public List<PlayerState> Players = new List<PlayerState>();
         public int StartingRubium = 10;
+
+        [Header("Battle")]
+        [Tooltip("Resolve battles at turn start (after draw + mining).")]
+        public bool RunBattlePhaseAtTurnStart = true;
+
+        /// <summary>Most recent battle phase log (for HUD / debugging).</summary>
+        public string LastBattlePhaseLog { get; private set; }
 
         int _currentPlayerIndex;
         readonly Dictionary<PlayerState, List<UnitInstance>> _unitsByPlayer =
@@ -36,6 +44,7 @@ namespace NexusGame
             }
 
             InitPlayers();
+            InitCardDecks();
             BeginTurn();
             SpawnStartingUnits();
         }
@@ -62,6 +71,10 @@ namespace NexusGame
             {
                 p.Rubium = StartingRubium;
                 p.VictoryPoints = 0;
+                p.BattleEnergize = new List<EnergizeBattleId>();
+                p.DeployEnergize = new List<EnergizeDeploymentId>();
+                p.DeploymentPurchaseDiscountRubium = 0;
+                p.SecretMissions = new List<SecretMissionInHand>();
                 _unitsByPlayer[p] = new List<UnitInstance>();
             }
 
@@ -233,10 +246,22 @@ namespace NexusGame
             return CreateUnit(owner, type, tile, hasAlreadyMovedThisTurn: true);
         }
 
-        public void EndTurn()
+        /// <summary>Call after dragon phase completes (or immediately if none).</summary>
+        public void AdvanceToNextPlayerTurn()
         {
             _currentPlayerIndex = (_currentPlayerIndex + 1) % Players.Count;
             BeginTurn();
+        }
+
+        /// <summary>End current turn: optional Rubium Dragon strikes, then next player.</summary>
+        public void EndTurn()
+        {
+            BeginDragonPhaseIfNeeded(() =>
+            {
+                if (Players != null && _currentPlayerIndex >= 0 && _currentPlayerIndex < Players.Count)
+                    Players[_currentPlayerIndex].DeploymentPurchaseDiscountRubium = 0;
+                AdvanceToNextPlayerTurn();
+            });
         }
 
         public PlayerState CurrentPlayer => Players[_currentPlayerIndex];
@@ -245,8 +270,18 @@ namespace NexusGame
         {
             var player = Players[_currentPlayerIndex];
 
-            // At the START of a player's turn, collect income from mines they actually occupy
-            // (and that are not contested).
+            RunDrawPhase(player);
+
+            if (_unitsByPlayer.TryGetValue(player, out var moveReset))
+            {
+                foreach (var u in moveReset)
+                {
+                    if (u != null)
+                        u.HasMovedThisTurn = false;
+                }
+            }
+
+            // Mining: collect from mines they occupy (uncontested).
             int income = 0;
             foreach (var tile in Board.AllTiles)
             {
@@ -275,15 +310,55 @@ namespace NexusGame
 
             player.Rubium += income;
 
-            // Reset HasMovedThisTurn for all units belonging to the current player
-            if (_unitsByPlayer.TryGetValue(player, out var list))
+            LastBattlePhaseLog = "";
+            PendingBattleArrangement = false;
+            BattlePhaseBlockingPlay = false;
+
+            if (RunBattlePhaseAtTurnStart && Config != null)
             {
-                foreach (var u in list)
-                {
-                    if (u != null)
-                        u.HasMovedThisTurn = false;
-                }
+                var contested = BattleResolver.FindContestedHexesForAttacker(player);
+                if (contested.Count > 0)
+                    BeginBattleArrangement(player);
             }
+        }
+
+        /// <summary>Legacy auto-resolve (no UI). Builds plan from board state.</summary>
+        public void RunBattlePhase(PlayerState attacker)
+        {
+            if (attacker == null || Config == null)
+                return;
+
+            BattlePlan.Clear();
+            var contested = BattleResolver.FindContestedHexesForAttacker(attacker);
+            contested.Sort((a, b) =>
+            {
+                int c = a.Q.CompareTo(b.Q);
+                return c != 0 ? c : a.R.CompareTo(b.R);
+            });
+            foreach (var hex in contested)
+            {
+                var opps = BattleResolver.OpponentsOnHex(hex, attacker);
+                if (opps.Count == 0)
+                    continue;
+                BattlePlan.Add(new PlannedBattleEntry
+                {
+                    Hex = hex,
+                    DefenderPlayerIndex = opps[0].PlayerIndex
+                });
+            }
+
+            RunLegacyAutoBattle(attacker);
+        }
+
+        public void RemoveUnit(UnitInstance unit)
+        {
+            if (unit == null)
+                return;
+
+            if (_unitsByPlayer.TryGetValue(unit.Owner, out var list))
+                list.Remove(unit);
+
+            Destroy(unit.gameObject);
         }
     }
 }

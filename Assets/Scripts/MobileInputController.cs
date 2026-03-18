@@ -274,6 +274,12 @@ namespace NexusGame
 
         void TryMoveGroupTo(BoardTile target)
         {
+            if (Game != null && Game.BattlePhaseBlockingPlay)
+            {
+                Debug.Log("Movement locked until battle phase completes.");
+                return;
+            }
+
             if (_selectedTile == null || target == null)
             {
                 Debug.LogWarning("MoveGroupTo failed: missing selected tile or target.");
