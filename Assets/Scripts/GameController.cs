@@ -221,15 +221,102 @@ namespace NexusGame
                 return null;
             }
 
-            var unitGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            unitGo.transform.position = tile.View.transform.position + Vector3.up * 0.25f;
-            unitGo.transform.localScale = Vector3.one * 0.35f;
+            // Distinct piece shapes per UnitType (so all units are visually unique).
+            PrimitiveType prim;
+            Quaternion rot = Quaternion.identity;
+            Vector3 scale;
+            float yOffset;
+
+            switch (type)
+            {
+                case UnitType.Human:
+                    prim = PrimitiveType.Capsule;
+                    scale = Vector3.one * 0.35f;
+                    yOffset = 0.25f;
+                    break;
+                case UnitType.Fungoid:
+                    prim = PrimitiveType.Sphere;
+                    scale = Vector3.one * 0.33f;
+                    yOffset = 0.27f;
+                    break;
+                case UnitType.Crystalline:
+                    prim = PrimitiveType.Cube;
+                    scale = Vector3.one * 0.31f;
+                    yOffset = 0.26f;
+                    rot = Quaternion.Euler(0f, 45f, 0f);
+                    break;
+                case UnitType.RockStrider:
+                    prim = PrimitiveType.Cylinder;
+                    // Flatten so it reads like a “stride” base.
+                    scale = new Vector3(0.34f, 0.20f, 0.34f);
+                    yOffset = 0.25f;
+                    break;
+                case UnitType.LavaLeaper:
+                    prim = PrimitiveType.Capsule;
+                    // Rotate + flatten, then add a small “flame” cube child.
+                    scale = new Vector3(0.40f, 0.22f, 0.40f);
+                    yOffset = 0.25f;
+                    rot = Quaternion.Euler(0f, 0f, 90f);
+                    break;
+                case UnitType.RubiumDragon:
+                    prim = PrimitiveType.Cylinder;
+                    // Taller body + two wings children.
+                    scale = new Vector3(0.42f, 0.30f, 0.42f);
+                    yOffset = 0.26f;
+                    break;
+                default:
+                    prim = PrimitiveType.Capsule;
+                    scale = Vector3.one * 0.35f;
+                    yOffset = 0.25f;
+                    break;
+            }
+
+            var unitGo = GameObject.CreatePrimitive(prim);
+            unitGo.name = type + "_Unit";
+            unitGo.transform.position = tile.View.transform.position + Vector3.up * yOffset;
+            unitGo.transform.rotation = rot;
+            unitGo.transform.localScale = scale;
 
             var rend = unitGo.GetComponentInChildren<Renderer>();
             if (rend != null)
             {
                 // Use existing material if available, just tint it
                 rend.material.color = owner.Color;
+            }
+
+            // Add small child parts so the “special” unit types read differently even if owner colors match.
+            if (type == UnitType.LavaLeaper)
+            {
+                var flame = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                flame.name = "LavaFlame";
+                flame.transform.SetParent(unitGo.transform, worldPositionStays: false);
+                flame.transform.localPosition = new Vector3(0f, 0.20f, 0f);
+                flame.transform.localRotation = Quaternion.identity;
+                flame.transform.localScale = new Vector3(0.12f, 0.25f, 0.12f);
+                var fr = flame.GetComponentInChildren<Renderer>();
+                if (fr != null)
+                    fr.material.color = new Color(1f, 0.45f, 0.05f, 1f);
+            }
+            else if (type == UnitType.RubiumDragon)
+            {
+                // Simple “wings”
+                var wingL = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                wingL.name = "WingL";
+                wingL.transform.SetParent(unitGo.transform, worldPositionStays: false);
+                wingL.transform.localPosition = new Vector3(-0.32f, 0.05f, 0f);
+                wingL.transform.localScale = new Vector3(0.28f, 0.06f, 0.12f);
+                var wlr = wingL.GetComponentInChildren<Renderer>();
+                if (wlr != null)
+                    wlr.material.color = owner.Color * 0.8f;
+
+                var wingR = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                wingR.name = "WingR";
+                wingR.transform.SetParent(unitGo.transform, worldPositionStays: false);
+                wingR.transform.localPosition = new Vector3(0.32f, 0.05f, 0f);
+                wingR.transform.localScale = new Vector3(0.28f, 0.06f, 0.12f);
+                var wr = wingR.GetComponentInChildren<Renderer>();
+                if (wr != null)
+                    wr.material.color = owner.Color * 0.8f;
             }
 
             var instance = unitGo.AddComponent<UnitInstance>();
@@ -355,10 +442,12 @@ namespace NexusGame
             if (unit == null)
                 return;
 
+            var tile = unit.Tile;
             if (_unitsByPlayer.TryGetValue(unit.Owner, out var list))
                 list.Remove(unit);
 
             Destroy(unit.gameObject);
+            UnitInstance.RelayoutTile(tile);
         }
     }
 }

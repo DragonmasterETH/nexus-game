@@ -16,6 +16,18 @@ namespace NexusGame
             readonly System.Collections.Generic.Dictionary<UnitType, int> _moveSelection =
                 new System.Collections.Generic.Dictionary<UnitType, int>();
 
+            // Drag-to-move support:
+            // - If user presses on a movable unit, dragging selects all movable units of that unit type on the source hex.
+            // - Releasing over a destination hex attempts to move that selected group.
+            bool _pendingTap;
+            bool _dragging;
+            Vector2 _pointerDownPos;
+            float _dragThresholdPixels = 6f;
+            bool _dragPrepared;
+            BoardTile _dragSourceTile;
+            UnitType _dragType;
+            UnitInstance _dragStartUnit;
+
             public BoardTile SelectedTile => _selectedTile;
             public System.Collections.Generic.IReadOnlyDictionary<UnitType, int> SelectedMoveCounts => _moveSelection;
 
@@ -35,7 +47,41 @@ namespace NexusGame
                 var touch = Input.GetTouch(0);
                 if (touch.phase == TouchPhase.Began)
                 {
-                    HandleTap(touch.position);
+                    _pendingTap = true;
+                    _dragging = false;
+                    _dragPrepared = false;
+                    _dragStartUnit = null;
+                    _pointerDownPos = touch.position;
+
+                    if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                        _pendingTap = false;
+
+                    PrepareDragFromPointer(touch.position);
+                }
+                else if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
+                {
+                    if (_pendingTap && !_dragging && _dragPrepared)
+                    {
+                        if (Vector2.Distance(touch.position, _pointerDownPos) >= _dragThresholdPixels)
+                            _dragging = true;
+                    }
+                }
+                else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                {
+                    if (_dragPrepared && (_dragging || Vector2.Distance(touch.position, _pointerDownPos) >= _dragThresholdPixels))
+                    {
+                        TryDragMove(touch.position);
+                    }
+                    else if (_pendingTap)
+                    {
+                        HandleTap(_pointerDownPos);
+                    }
+
+                    _pendingTap = false;
+                    _dragging = false;
+                    _dragPrepared = false;
+                    _dragSourceTile = null;
+                    _dragStartUnit = null;
                 }
             }
 
@@ -43,9 +89,145 @@ namespace NexusGame
 #if !UNITY_IOS && !UNITY_ANDROID
             if (Input.GetMouseButtonDown(0))
             {
-                HandleTap(Input.mousePosition);
+                _pendingTap = true;
+                _dragging = false;
+                _dragPrepared = false;
+                _dragStartUnit = null;
+                _pointerDownPos = Input.mousePosition;
+
+                if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                    _pendingTap = false;
+
+                PrepareDragFromPointer(Input.mousePosition);
+            }
+
+            if (Input.GetMouseButton(0))
+            {
+                if (_pendingTap && !_dragging && _dragPrepared)
+                {
+                    if (Vector2.Distance(Input.mousePosition, _pointerDownPos) >= _dragThresholdPixels)
+                        _dragging = true;
+                }
+            }
+
+            if (Input.GetMouseButtonUp(0))
+            {
+                if (_dragPrepared && (_dragging || Vector2.Distance(Input.mousePosition, _pointerDownPos) >= _dragThresholdPixels))
+                {
+                    TryDragMove(Input.mousePosition);
+                }
+                else if (_pendingTap)
+                {
+                    HandleTap(_pointerDownPos);
+                }
+
+                _pendingTap = false;
+                _dragging = false;
+                _dragPrepared = false;
+                _dragSourceTile = null;
+                _dragStartUnit = null;
             }
 #endif
+        }
+
+        void PrepareDragFromPointer(Vector2 screenPos)
+        {
+            if (Game == null || Game.CurrentPlayer == null)
+                return;
+            if (MainCamera == null)
+                return;
+
+            // Only prepare drag if pointer is on a movable unit belonging to current player.
+            var ray = MainCamera.ScreenPointToRay(screenPos);
+            var hits = Physics.RaycastAll(ray, 100f);
+            foreach (var h in hits)
+            {
+                var unitOnTile = h.collider.GetComponentInParent<UnitInstance>();
+                if (unitOnTile != null && unitOnTile.Tile != null &&
+                    unitOnTile.Owner == Game.CurrentPlayer &&
+                    !unitOnTile.HasMovedThisTurn)
+                {
+                    _dragSourceTile = unitOnTile.Tile;
+                    _dragType = unitOnTile.Definition.Type;
+                    _dragStartUnit = unitOnTile;
+                    _dragPrepared = true;
+                    // We already selected on pointer-down, so do not run tap logic on release.
+                    _pendingTap = false;
+
+                    // Auto-select all movable units of this type on the source hex.
+                    _moveSelection.Clear();
+                    SetSelectedTile(_dragSourceTile);
+                    _moveSelection.Clear();
+                    // Drag behavior: move the exact piece under the pointer.
+                    _moveSelection[_dragType] = 1;
+                    return;
+                }
+            }
+        }
+
+        void TryDragMove(Vector2 screenPos)
+        {
+            var target = ResolveTileFromPointer(screenPos);
+            if (target == null || _dragSourceTile == null)
+                return;
+            if (_dragSourceTile == target)
+                return;
+
+            bool moved = false;
+            if (_dragStartUnit != null &&
+                _dragStartUnit.Owner == Game.CurrentPlayer &&
+                !_dragStartUnit.HasMovedThisTurn &&
+                CanUnitMoveTo(_dragStartUnit, target))
+            {
+                _dragStartUnit.MoveTo(target);
+                target.Owner = _dragStartUnit.Owner;
+
+                // Reveal exploration only when a unit actually moves onto this hex.
+                if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
+                {
+                    RevealExploration(target);
+                }
+                moved = true;
+            }
+
+            // Fallback: if exact dragged unit path failed, use existing grouped move path.
+            if (!moved)
+                TryMoveGroupTo(target);
+
+            // After moving, focus selection on destination so the existing UI stays in sync.
+            SetSelectedTile(target);
+        }
+
+        BoardTile ResolveTileFromPointer(Vector2 screenPos)
+        {
+            if (MainCamera == null || Game == null || Game.Board == null)
+                return null;
+
+            var ray = MainCamera.ScreenPointToRay(screenPos);
+            var hits = Physics.RaycastAll(ray, 100f);
+            if (hits.Length == 0)
+                return null;
+
+            BoardTile clickedTile = null;
+            foreach (var h in hits)
+            {
+                var unitOnTile = h.collider.GetComponentInParent<UnitInstance>();
+                if (unitOnTile != null && unitOnTile.Tile != null)
+                {
+                    clickedTile = unitOnTile.Tile;
+                    break;
+                }
+
+                var proxy = h.collider.GetComponentInParent<TileClickProxy>();
+                if (proxy != null)
+                {
+                    clickedTile = Game.Board.GetTile(proxy.Q, proxy.R);
+                    if (clickedTile != null)
+                        break;
+                }
+            }
+
+            return clickedTile;
         }
 
         void HandleTap(Vector2 screenPos)
