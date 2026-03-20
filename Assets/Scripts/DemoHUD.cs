@@ -53,14 +53,15 @@ namespace NexusGame
 
             GUI.Box(new Rect(10, 10, 340, 155), sb.ToString());
 
-            if (!string.IsNullOrEmpty(Game.LastBattlePhaseLog) && !Game.PendingBattleArrangement)
+            string battleLog =
+                !string.IsNullOrEmpty(Game.LiveBattlePhaseLog) ? Game.LiveBattlePhaseLog : Game.LastBattlePhaseLog;
+
+            if (!string.IsNullOrEmpty(battleLog) && !Game.PendingBattleArrangement)
             {
-                var battleRect = new Rect(10, 175, 380, 100);
+                var battleRect = new Rect(10, 175, 420, 140);
                 GUI.Box(battleRect, "Battle log");
                 GUI.Label(new Rect(battleRect.x + 6, battleRect.y + 20, battleRect.width - 12, battleRect.height - 26),
-                    Game.LastBattlePhaseLog.Length > 280
-                        ? Game.LastBattlePhaseLog.Substring(0, 280) + "..."
-                        : Game.LastBattlePhaseLog);
+                    battleLog.Length > 560 ? battleLog.Substring(0, 560) + "..." : battleLog);
             }
 
             if (ShowDebugToggle && InputController != null)
@@ -69,7 +70,7 @@ namespace NexusGame
                 InputController.DebugClicks = newDebug;
             }
 
-            float topY = string.IsNullOrEmpty(Game.LastBattlePhaseLog) || Game.PendingBattleArrangement ? 175f : 285f;
+            float topY = string.IsNullOrEmpty(battleLog) || Game.PendingBattleArrangement ? 175f : 325f;
             if (Game.DragonPhase != null)
                 topY = Mathf.Max(topY, Screen.height - 220f);
 

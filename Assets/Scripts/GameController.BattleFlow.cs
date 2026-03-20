@@ -47,6 +47,25 @@ namespace NexusGame
         System.Random _battleRng;
         List<string> _liveBattleLines;
 
+        public string LiveBattlePhaseLog
+        {
+            get
+            {
+                if (_liveBattleLines == null || _liveBattleLines.Count == 0)
+                    return "";
+
+                // Keep this intentionally short so it fits the HUD box.
+                const int maxLines = 16;
+                int start = Mathf.Max(0, _liveBattleLines.Count - maxLines);
+
+                var sb = new StringBuilder();
+                for (int i = start; i < _liveBattleLines.Count; i++)
+                    sb.AppendLine(_liveBattleLines[i]);
+
+                return sb.ToString().TrimEnd();
+            }
+        }
+
         public void AppendBattleLog(string line)
         {
             _liveBattleLines?.Add(line);
@@ -560,9 +579,20 @@ namespace NexusGame
                     if (_mods.DefenderFocusFireType == unitType)
                         extra += _mods.DefenderFocusFireExtraDice;
                     int shift = _mods.HitThresholdBonusWhenAttackingAttacker - _mods.DefenderHitThresholdReduction;
-                    int h = BattleResolver.RollHitsForUnit(u.Definition, rng, extra, shift);
-                    hitsOnAttacker += h;
-                    Log($"  {unitType} (def): {h} hit(s)");
+                    var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
+                    hitsOnAttacker += roll.Hits;
+                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
+                    {
+                        Log($"  {unitType} (def): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
+                    }
+                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
+                    {
+                        Log($"  {unitType} (def): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
+                    }
+                    else
+                    {
+                        Log($"  {unitType} (def): {roll.Dice} dice => 0 hit(s)");
+                    }
                 }
 
                 int hitsOnDefender = 0;
@@ -572,9 +602,20 @@ namespace NexusGame
                     if (_mods.AttackerFocusFireType == unitType)
                         extra += _mods.AttackerFocusFireExtraDice;
                     int shift = _mods.HitThresholdBonusWhenAttackingDefender - _mods.AttackerHitThresholdReduction;
-                    int h = BattleResolver.RollHitsForUnit(u.Definition, rng, extra, shift);
-                    hitsOnDefender += h;
-                    Log($"  {unitType} (atk): {h} hit(s)");
+                    var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
+                    hitsOnDefender += roll.Hits;
+                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
+                    {
+                        Log($"  {unitType} (atk): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
+                    }
+                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
+                    {
+                        Log($"  {unitType} (atk): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
+                    }
+                    else
+                    {
+                        Log($"  {unitType} (atk): {roll.Dice} dice => 0 hit(s)");
+                    }
                 }
 
                 RefreshPoolsLocal(hex, attacker, defender, out aliveAtt, out aliveDef);
@@ -593,7 +634,7 @@ namespace NexusGame
                     {
                         foreach (var v in BattleResolver.PickCasualtiesWeakestFirst(aliveAtt, capAtt))
                         {
-                            Log($"    → P{attacker.PlayerIndex + 1} loses {v.Definition.Type}");
+                            Log($"    → P{attacker.PlayerIndex + 1} dies: {v.Definition.Type}");
                             RemoveUnit(v);
                         }
                     }
@@ -626,7 +667,7 @@ namespace NexusGame
                     {
                         foreach (var v in BattleResolver.PickCasualtiesWeakestFirst(aliveDef, capDef))
                         {
-                            Log($"    → P{defender.PlayerIndex + 1} loses {v.Definition.Type}");
+                            Log($"    → P{defender.PlayerIndex + 1} dies: {v.Definition.Type}");
                             onDefenderCasualty(1);
                             if (v.Definition.Type == UnitType.RubiumDragon)
                                 onDefenderDragonKilled();
@@ -665,7 +706,7 @@ namespace NexusGame
             foreach (var v in CasualtyPick.Selected)
             {
                 AppendBattleLog(
-                    $"    → P{CasualtyPick.Owner.PlayerIndex + 1} loses {v.Definition.Type}");
+                    $"    → P{CasualtyPick.Owner.PlayerIndex + 1} dies: {v.Definition.Type}");
                 CasualtyPick.OnEachRemove?.Invoke(v);
                 RemoveUnit(v);
             }

@@ -41,31 +41,73 @@ namespace NexusGame
             return RollHitsForUnit(def, rng, 0, 0);
         }
 
-        /// <param name="extraDice">Bonus dice (Energize, etc.).</param>
-        /// <param name="thresholdShift">Positive = harder to hit (need higher roll); negative = easier.</param>
-        public static int RollHitsForUnit(UnitDefinition def, System.Random rng, int extraDice, int thresholdShift)
+        public struct DiceRollResult
         {
+            public int Dice;
+            public int Need;
+            public bool ImpossibleToHit;
+            public int Hits;
+            public List<int> Rolls;
+        }
+
+        /// <summary>
+        /// Roll one unit's attack dice and return per-die outcomes.
+        /// </summary>
+        public static DiceRollResult RollDiceForUnit(
+            UnitDefinition def,
+            System.Random rng,
+            int extraDice,
+            int thresholdShift)
+        {
+            var result = new DiceRollResult
+            {
+                Dice = 0,
+                Need = 0,
+                ImpossibleToHit = false,
+                Hits = 0,
+                Rolls = new List<int>()
+            };
+
             if (def == null)
-                return 0;
+                return result;
 
             int dice = Mathf.Max(0, def.AttackDice + extraDice);
+            result.Dice = dice;
+
             if (dice <= 0)
-                return 0;
+                return result;
 
             int need = def.HitOnOrAbove + thresholdShift;
+            result.Need = need;
+
             if (need > 6)
-                return 0;
+            {
+                // Preserve legacy behavior: if it's impossible to hit, we don't roll.
+                result.ImpossibleToHit = true;
+                return result;
+            }
+
             need = Mathf.Max(2, need);
+            result.Need = need;
 
             int hits = 0;
             for (int i = 0; i < dice; i++)
             {
                 int roll = rng.Next(1, 7);
+                result.Rolls.Add(roll);
                 if (roll >= need)
                     hits++;
             }
 
-            return hits;
+            result.Hits = hits;
+            return result;
+        }
+
+        /// <param name="extraDice">Bonus dice (Energize, etc.).</param>
+        /// <param name="thresholdShift">Positive = harder to hit (need higher roll); negative = easier.</param>
+        public static int RollHitsForUnit(UnitDefinition def, System.Random rng, int extraDice, int thresholdShift)
+        {
+            return RollDiceForUnit(def, rng, extraDice, thresholdShift).Hits;
         }
 
         /// <summary>
@@ -219,17 +261,27 @@ namespace NexusGame
                 int hitsOnAttacker = 0;
                 foreach (var u in defOfType)
                 {
-                    int h = RollHitsForUnit(u.Definition, rng);
-                    hitsOnAttacker += h;
-                    log.AppendLine($"  {unitType} (def P{defender.PlayerIndex + 1}): {h} hit(s)");
+                    var roll = RollDiceForUnit(u.Definition, rng, 0, 0);
+                    hitsOnAttacker += roll.Hits;
+                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
+                        log.AppendLine($"  {unitType} (def P{defender.PlayerIndex + 1}): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
+                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
+                        log.AppendLine($"  {unitType} (def P{defender.PlayerIndex + 1}): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
+                    else
+                        log.AppendLine($"  {unitType} (def P{defender.PlayerIndex + 1}): {roll.Dice} dice => 0 hit(s)");
                 }
 
                 int hitsOnDefender = 0;
                 foreach (var u in attOfType)
                 {
-                    int h = RollHitsForUnit(u.Definition, rng);
-                    hitsOnDefender += h;
-                    log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {h} hit(s)");
+                    var roll = RollDiceForUnit(u.Definition, rng, 0, 0);
+                    hitsOnDefender += roll.Hits;
+                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
+                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
+                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
+                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
+                    else
+                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice} dice => 0 hit(s)");
                 }
 
                 // Attacker removes casualties first (defender's successful rolls), then defender.
@@ -240,7 +292,7 @@ namespace NexusGame
                     var victims = PickCasualtiesWeakestFirst(aliveAtt, capAtt);
                     foreach (var v in victims)
                     {
-                        log.AppendLine($"    → P{attacker.PlayerIndex + 1} loses {v.Definition.Type}");
+                        log.AppendLine($"    → P{attacker.PlayerIndex + 1} dies: {v.Definition.Type}");
                         destroyUnit(v);
                     }
                 }
@@ -252,7 +304,7 @@ namespace NexusGame
                     var victims = PickCasualtiesWeakestFirst(aliveDef, capDef);
                     foreach (var v in victims)
                     {
-                        log.AppendLine($"    → P{defender.PlayerIndex + 1} loses {v.Definition.Type}");
+                        log.AppendLine($"    → P{defender.PlayerIndex + 1} dies: {v.Definition.Type}");
                         destroyUnit(v);
                     }
                 }
