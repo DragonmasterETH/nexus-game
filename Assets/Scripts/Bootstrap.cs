@@ -8,45 +8,26 @@ namespace NexusGame
         {
             MainMenu,
             MapSelect,
-            Lobby,
-            Store,
+            Rulebook,
             InGame
         }
 
         public Texture2D TwoToFourPlayerMapPreview;
 
-        [Tooltip("Optional: assign a looping music clip for menus (MainMenu / MapSelect / Lobby / Store).")]
-        public AudioClip MenuMusicClip;
-
         UiState _state = UiState.MainMenu;
         BoardLayoutMode _selectedLayout = BoardLayoutMode.OneVOne;
         bool _debugMode;
         bool _vsAi;
-        bool _watchAiVsAi;
+        bool _aiVsAi;
+
+        Vector2 _rulebookScroll;
+        GUIStyle _rulebookBodyStyle;
+        int _rulebookTab; // 0 = rules, 1 = units
 
         void Awake()
         {
             EnsureCamera();
             EnsureLight();
-            EnsureMenuMusic();
-            EnsureMetaProgression();
-        }
-
-        void EnsureMenuMusic()
-        {
-            var mm = GetComponent<MenuMusicController>();
-            if (mm == null)
-                mm = gameObject.AddComponent<MenuMusicController>();
-            if (MenuMusicClip != null)
-                mm.MenuLoop = MenuMusicClip;
-        }
-
-        void EnsureMetaProgression()
-        {
-            if (FindObjectOfType<MetaProgression>() != null)
-                return;
-            var go = new GameObject("MetaProgression");
-            go.AddComponent<MetaProgression>();
         }
 
         void EnsureCamera()
@@ -87,8 +68,8 @@ namespace NexusGame
                 board = boardGo.AddComponent<BoardGenerator>();
             }
 
-            // VS AI / Watch AI always uses the 1v1 board (two seats).
-            board.LayoutMode = (_vsAi || _watchAiVsAi) ? BoardLayoutMode.OneVOne : _selectedLayout;
+            // VS AI / AI test always uses the 1v1 board (two seats).
+            board.LayoutMode = _vsAi || _aiVsAi ? BoardLayoutMode.OneVOne : _selectedLayout;
             board.Regenerate();
 
             var game = FindObjectOfType<GameController>();
@@ -101,8 +82,8 @@ namespace NexusGame
             }
 
             game.Board = board;
-            game.VsAiMode = _vsAi || _watchAiVsAi;
-            game.WatchAiVsAiMode = _watchAiVsAi;
+            game.AiVsAiMode = _aiVsAi;
+            game.VsAiMode = _vsAi && !_aiVsAi;
             game.AiPlayerIndex = 1;
             game.ResetAndStartNewMatch();
 
@@ -116,7 +97,7 @@ namespace NexusGame
 
             input.Game = game;
             input.DebugClicks = _debugMode;
-            input.SuppressMovementDiagnosticLogs = _vsAi || _watchAiVsAi;
+            input.SuppressMovementDiagnosticLogs = _vsAi || _aiVsAi;
 
             var hud = FindObjectOfType<DemoHUD>();
             if (hud == null)
@@ -136,7 +117,7 @@ namespace NexusGame
                 ai = game.gameObject.AddComponent<SimpleAiController>();
             ai.Game = game;
             ai.Input = input;
-            ai.enabled = _vsAi || _watchAiVsAi;
+            ai.enabled = _vsAi || _aiVsAi;
         }
 
         void OnGUI()
@@ -149,11 +130,8 @@ namespace NexusGame
                 case UiState.MapSelect:
                     DrawMapSelect();
                     break;
-                case UiState.Lobby:
-                    DrawLobby();
-                    break;
-                case UiState.Store:
-                    DrawStoreMenu();
+                case UiState.Rulebook:
+                    DrawRulebook();
                     break;
                 case UiState.InGame:
                     // In-game UI is handled by DemoHUD.
@@ -164,7 +142,7 @@ namespace NexusGame
         void DrawMainMenu()
         {
             const int w = 260;
-            const int h = 400;
+            const int h = 280;
             var rect = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(rect, "Nexus Ops");
 
@@ -176,7 +154,7 @@ namespace NexusGame
             {
                 _debugMode = false;
                 _vsAi = false;
-                _watchAiVsAi = false;
+                _aiVsAi = false;
                 _state = UiState.MapSelect;
             }
             y += 40f;
@@ -185,42 +163,23 @@ namespace NexusGame
             {
                 _debugMode = false;
                 _vsAi = true;
-                _watchAiVsAi = false;
+                _aiVsAi = false;
                 _state = UiState.MapSelect;
             }
             y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Watch AI vs AI (testing)"))
+            if (GUI.Button(new Rect(x, y, bw, 30f), "AI vs AI (test)"))
             {
                 _debugMode = false;
-                _vsAi = true;
-                _watchAiVsAi = true;
+                _vsAi = false;
+                _aiVsAi = true;
                 _state = UiState.MapSelect;
-            }
-            y += 40f;
-
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Lobby / matchmaking (stub)"))
-            {
-                _state = UiState.Lobby;
-            }
-            y += 40f;
-
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Store (stub)"))
-            {
-                _state = UiState.Store;
-            }
-            y += 40f;
-
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Secondary modes (info)"))
-            {
-                Debug.Log("[Modes] " + GameModeCatalog.GetName(SecondaryGameModeId.Standard) + " | " +
-                          GameModeCatalog.GetName(SecondaryGameModeId.Skirmish));
             }
             y += 40f;
 
             if (GUI.Button(new Rect(x, y, bw, 30f), "Multiplayer"))
             {
-                _state = UiState.Lobby;
+                Debug.Log("Multiplayer: placeholder option.");
             }
             y += 40f;
 
@@ -230,9 +189,11 @@ namespace NexusGame
             }
             y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Help (Rules)"))
+            if (GUI.Button(new Rect(x, y, bw, 30f), "How to Play"))
             {
-                Debug.Log("[Monolith] " + MonolithRulesDoc.ShortSummary);
+                _rulebookScroll = Vector2.zero;
+                _rulebookTab = 0;
+                _state = UiState.Rulebook;
             }
             y += 40f;
 
@@ -241,68 +202,9 @@ namespace NexusGame
                 // Enter map selection with click-debugging enabled.
                 _debugMode = true;
                 _vsAi = false;
-                _watchAiVsAi = false;
+                _aiVsAi = false;
                 _state = UiState.MapSelect;
             }
-        }
-
-        void DrawLobby()
-        {
-            const int w = 360;
-            const int h = 280;
-            var rect = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
-            GUI.Box(rect, "Lobby / online (stub)");
-
-            float y = rect.y + 36f;
-            float x = rect.x + 20f;
-            float bw = w - 40f;
-
-            GUI.Label(new Rect(x, y, bw, 40f),
-                "Placeholders: find match, scoring, leave session, replay — wire to netcode later.");
-            y += 48f;
-
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Find match"))
-                Debug.Log("[Lobby] Find match (not implemented).");
-            y += 36f;
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Scoring / results UI"))
-                Debug.Log("[Lobby] Scoring UI (not implemented).");
-            y += 36f;
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Leave / cancel search"))
-                Debug.Log("[Lobby] Leave (not implemented).");
-            y += 36f;
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Back"))
-                _state = UiState.MainMenu;
-        }
-
-        void DrawStoreMenu()
-        {
-            const int w = 360;
-            const int h = 300;
-            var rect = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
-            GUI.Box(rect, "Store (stub)");
-
-            float y = rect.y + 36f;
-            float x = rect.x + 20f;
-            float bw = w - 40f;
-
-            var meta = FindObjectOfType<MetaProgression>();
-            GUI.Label(new Rect(x, y, bw, 44f),
-                meta != null ? $"XP: {meta.XP}  |  Currency: {meta.Currency}  |  Rank: {meta.RankLabel}"
-                    : "MetaProgression not found.");
-            y += 52f;
-
-            GUI.Label(new Rect(x, y, bw, 22f), "Skin slots (placeholder):");
-            y += 26f;
-            for (int i = 0; i < 6; i++)
-            {
-                GUI.enabled = false;
-                GUI.Button(new Rect(x, y, bw, 26f), $"Skin slot {i + 1} — locked");
-                GUI.enabled = true;
-                y += 30f;
-            }
-
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Back"))
-                _state = UiState.MainMenu;
         }
 
         void DrawMapSelect()
@@ -359,6 +261,70 @@ namespace NexusGame
             {
                 _state = UiState.MainMenu;
             }
+        }
+
+        void EnsureRulebookStyles()
+        {
+            if (_rulebookBodyStyle != null)
+                return;
+            _rulebookBodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                wordWrap = true,
+                richText = false
+            };
+        }
+
+        void DrawRulebook()
+        {
+            EnsureRulebookStyles();
+
+            float pad = 14f;
+            var panel = new Rect(pad, pad, Screen.width - 2f * pad, Screen.height - 2f * pad);
+            GUI.Box(panel, "");
+
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 17,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            string header = _rulebookTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
+            GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 28f), header, titleStyle);
+
+            const float tabH = 28f;
+            float tabY = panel.y + 36f;
+            if (GUI.Button(new Rect(panel.x + 14f, tabY, 100f, tabH), "Rules"))
+            {
+                if (_rulebookTab != 0)
+                    _rulebookScroll = Vector2.zero;
+                _rulebookTab = 0;
+            }
+
+            if (GUI.Button(new Rect(panel.x + 122f, tabY, 100f, tabH), "Units"))
+            {
+                if (_rulebookTab != 1)
+                    _rulebookScroll = Vector2.zero;
+                _rulebookTab = 1;
+            }
+
+            string body = _rulebookTab == 0
+                ? NexusRulebook.Body
+                : NexusUnitQuickReference.Build(null);
+
+            const float backH = 38f;
+            var scrollRect = new Rect(panel.x + 12f, panel.y + 36f + tabH + 8f, panel.width - 24f,
+                panel.height - 36f - tabH - 8f - backH - 20f);
+            float innerW = scrollRect.width - 22f;
+            float contentH = _rulebookBodyStyle.CalcHeight(new GUIContent(body), innerW);
+            contentH = Mathf.Max(contentH + 32f, scrollRect.height * 0.45f);
+
+            _rulebookScroll = GUI.BeginScrollView(scrollRect, _rulebookScroll, new Rect(0f, 0f, innerW, contentH));
+            GUI.Label(new Rect(8f, 8f, innerW - 16f, contentH), body, _rulebookBodyStyle);
+            GUI.EndScrollView();
+
+            if (GUI.Button(new Rect(panel.x + 20f, panel.yMax - backH - 12f, 180f, backH), "Back to menu"))
+                _state = UiState.MainMenu;
         }
     }
 }

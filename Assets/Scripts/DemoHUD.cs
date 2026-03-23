@@ -17,6 +17,11 @@ namespace NexusGame
         public bool ShowDebugToggle = false;
 
         bool _showBuyMenu;
+        bool _showQuickRef;
+        int _quickRefTab; // 0 = rules, 1 = units
+        Vector2 _scrollQuickRef;
+        GUIStyle _quickRefBodyStyle;
+
         Vector2 _scrollBattle;
         Vector2 _scrollHand;
         Vector2 _scrollHandBattle;
@@ -109,12 +114,29 @@ namespace NexusGame
             if (Game.BattlePhaseBlockingPlay)
                 sb.AppendLine("(Finish battle phase to move.)");
 
+            if (Game.AiVsAiMode)
+            {
+                sb.AppendLine();
+                sb.AppendLine(
+                    $"[AI test] Goal {Game.AiTestVictoryTargetVp} VP  |  draw cap {Game.AiTestMaxTotalDrawPhases} (T{Game.TurnNumber})");
+                if (Game.AiTestMatchCompleted && Game.AiTestWinner != null)
+                    sb.AppendLine(
+                        $"MATCH OVER — P{Game.AiTestWinner.PlayerIndex + 1} wins ({Game.AiTestWinner.VictoryPoints} VP)");
+            }
+
             sb.AppendLine();
-            sb.AppendLine("- $ : buy units + Deployment Energize. Free Human: select home hex first.");
-            sb.AppendLine("- End Turn: Dragon shots, then next player.");
+            if (Game.AiVsAiMode)
+            {
+                sb.AppendLine("(AI vs AI — both seats automated.)");
+            }
+            else
+            {
+                sb.AppendLine("- $ : buy units + Deployment Energize. Free Human: select home hex first.");
+                sb.AppendLine("- End Turn: Dragon shots, then next player.");
+            }
 
-            GUI.Box(new Rect(10, 10, 340, 185), sb.ToString());
-
+            float hudH = Game.AiVsAiMode ? 200f : 155f;
+            GUI.Box(new Rect(10, 10, 340, hudH), sb.ToString());
             float panelRight = Screen.width - 210f;
             if (GUI.Button(new Rect(panelRight, 10f, 98f, 22f), "Unit codex"))
                 _showCodex = !_showCodex;
@@ -217,6 +239,81 @@ namespace NexusGame
             DrawAuxiliaryPanels(player);
 
             DrawTilePopup(player);
+
+            if (_showQuickRef)
+                DrawQuickReferenceOverlay();
+            else if (GUI.Button(new Rect(Screen.width - 108, 12, 98, 26), "Quick ref"))
+                _showQuickRef = true;
+        }
+
+        void EnsureQuickRefBodyStyle()
+        {
+            if (_quickRefBodyStyle != null)
+                return;
+            _quickRefBodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                wordWrap = true
+            };
+        }
+
+        void DrawQuickReferenceOverlay()
+        {
+            EnsureQuickRefBodyStyle();
+
+            var dim = new Color(0.02f, 0.02f, 0.06f, 0.72f);
+            var prev = GUI.color;
+            GUI.color = dim;
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            GUI.color = prev;
+
+            float pad = 16f;
+            var panel = new Rect(pad, pad, Screen.width - 2f * pad, Screen.height - 2f * pad);
+            GUI.Box(panel, "");
+
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 16,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            string header = _quickRefTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
+            GUI.Label(new Rect(panel.x, panel.y + 6f, panel.width, 26f), header, titleStyle);
+
+            const float tabH = 26f;
+            float tabY = panel.y + 34f;
+            if (GUI.Button(new Rect(panel.x + 12f, tabY, 88f, tabH), "Rules"))
+            {
+                if (_quickRefTab != 0)
+                    _scrollQuickRef = Vector2.zero;
+                _quickRefTab = 0;
+            }
+
+            if (GUI.Button(new Rect(panel.x + 106f, tabY, 88f, tabH), "Units"))
+            {
+                if (_quickRefTab != 1)
+                    _scrollQuickRef = Vector2.zero;
+                _quickRefTab = 1;
+            }
+
+            var cfg = Game != null ? Game.Config : null;
+            string body = _quickRefTab == 0
+                ? NexusRulebook.Body
+                : NexusUnitQuickReference.Build(cfg);
+
+            const float closeH = 36f;
+            var scrollRect = new Rect(panel.x + 12f, panel.y + 34f + tabH + 6f, panel.width - 24f,
+                panel.height - 34f - tabH - 6f - closeH - 14f);
+            float innerW = scrollRect.width - 22f;
+            float contentH = _quickRefBodyStyle.CalcHeight(new GUIContent(body), innerW);
+            contentH = Mathf.Max(contentH + 32f, scrollRect.height * 0.45f);
+
+            _scrollQuickRef = GUI.BeginScrollView(scrollRect, _scrollQuickRef, new Rect(0f, 0f, innerW, contentH));
+            GUI.Label(new Rect(8f, 8f, innerW - 16f, contentH), body, _quickRefBodyStyle);
+            GUI.EndScrollView();
+
+            if (GUI.Button(new Rect(panel.xMax - 188f, panel.yMax - closeH - 10f, 168f, closeH), "Close"))
+                _showQuickRef = false;
         }
 
         void DrawIncomeFlash()

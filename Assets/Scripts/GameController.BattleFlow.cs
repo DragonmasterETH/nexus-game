@@ -49,6 +49,12 @@ namespace NexusGame
         PlayerState _battleAttacker;
         PlayerState _battleDefender;
         BoardTile _battleHex;
+
+        /// <summary>Active battle (attacker vs defender); set during interactive battle resolution.</summary>
+        public PlayerState BattleContextAttacker => _battleAttacker;
+
+        public PlayerState BattleContextDefender => _battleDefender;
+        public BoardTile BattleContextHex => _battleHex;
         BattleEnergizeModifiers _mods;
         System.Random _battleRng;
         List<string> _liveBattleLines;

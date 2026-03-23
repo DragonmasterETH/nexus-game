@@ -21,6 +21,7 @@ namespace NexusGame
             }
 
             HardResetFlowState();
+            ResetAiTestMatch();
 
             foreach (var u in FindObjectsOfType<UnitInstance>())
             {

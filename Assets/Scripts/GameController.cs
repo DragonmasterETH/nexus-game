@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 
@@ -31,6 +32,20 @@ namespace NexusGame
 
         [Tooltip("Default: 1 = second player (red in 1v1).")]
         public int AiPlayerIndex = 1;
+
+        [Header("AI vs AI (test)")]
+        [Tooltip("Both seats use SimpleAiController until a win condition is met.")]
+        public bool AiVsAiMode;
+
+        [Min(1)]
+        public int AiTestVictoryTargetVp = 10;
+
+        [Tooltip("Safety stop: total draw phases (see TurnNumber) before highest VP wins.")]
+        [Min(20)]
+        public int AiTestMaxTotalDrawPhases = 500;
+
+        public bool AiTestMatchCompleted { get; private set; }
+        public PlayerState AiTestWinner { get; private set; }
 
         /// <summary>Most recent battle phase log (for HUD / debugging).</summary>
         public string LastBattlePhaseLog { get; private set; }
@@ -88,7 +103,7 @@ namespace NexusGame
             {
                 // VS AI is always a 2-player match on the current board layout.
                 var layout = Board != null ? Board.LayoutMode : BoardLayoutMode.OneVOne;
-                int playerCount = VsAiMode
+                int playerCount = VsAiMode || AiVsAiMode
                     ? 2
                     : (layout == BoardLayoutMode.TwoToFour || layout == BoardLayoutMode.TwoToFourSmall ? 4 : 2);
 
@@ -388,9 +403,49 @@ namespace NexusGame
 
         public PlayerState CurrentPlayer => Players[_currentPlayerIndex];
 
-        /// <summary>True if this player seat is run by the AI in VsAiMode.</summary>
-        public bool IsAiControlled(PlayerState p) =>
-            VsAiMode && p != null && (WatchAiVsAiMode || p.PlayerIndex == AiPlayerIndex);
+        /// <summary>True if this seat is automated (PvAI or AI vs AI test).</summary>
+        public bool IsAiControlled(PlayerState p)
+        {
+            if (p == null || Players == null)
+                return false;
+            if (AiVsAiMode && Players.Count >= 2 && p.PlayerIndex >= 0 && p.PlayerIndex <= 1)
+                return true;
+            return VsAiMode && (WatchAiVsAiMode || p.PlayerIndex == AiPlayerIndex);
+        }
+
+        public void ResetAiTestMatch()
+        {
+            AiTestMatchCompleted = false;
+            AiTestWinner = null;
+        }
+
+        /// <summary>End simulation when someone hits VP target or turn cap (AI vs AI only).</summary>
+        public void CheckAiTestMatchEndIfNeeded()
+        {
+            if (!AiVsAiMode || AiTestMatchCompleted || Players == null || Players.Count == 0)
+                return;
+
+            foreach (var p in Players)
+            {
+                if (p.VictoryPoints >= AiTestVictoryTargetVp)
+                {
+                    AiTestMatchCompleted = true;
+                    AiTestWinner = p;
+                    Debug.Log(
+                        $"[AI vs AI] P{p.PlayerIndex + 1} wins — {p.VictoryPoints} VP (target {AiTestVictoryTargetVp}).");
+                    return;
+                }
+            }
+
+            if (TurnNumber > AiTestMaxTotalDrawPhases)
+            {
+                AiTestMatchCompleted = true;
+                AiTestWinner = Players.OrderByDescending(x => x.VictoryPoints).First();
+                var w = AiTestWinner;
+                Debug.Log(
+                    $"[AI vs AI] Turn cap ({AiTestMaxTotalDrawPhases}) — P{w.PlayerIndex + 1} wins by VP ({w.VictoryPoints}).");
+            }
+        }
 
         /// <summary>Find any home-base tile owned by the player (for purchases / AI).</summary>
         public BoardTile FindHomeBaseForPlayer(PlayerState player)
