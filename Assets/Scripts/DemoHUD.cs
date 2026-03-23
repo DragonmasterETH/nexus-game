@@ -17,6 +17,18 @@ namespace NexusGame
         bool _showBuyMenu;
         Vector2 _scrollBattle;
         Vector2 _scrollHand;
+        Vector2 _scrollHandBattle;
+        Vector2 _scrollHandDeploy;
+        Vector2 _scrollHandSecret;
+
+        GUIStyle _cardTitleStyle;
+        GUIStyle _cardBodyStyle;
+        GUIStyle _cardBadgeStyle;
+        GUIStyle _cardColumnLabelStyle;
+
+        const float CardBarHeight = 152f;
+        const float CardTileW = 112f;
+        const float CardTileH = 104f;
 
         void Start()
         {
@@ -24,6 +36,40 @@ namespace NexusGame
                 Game = FindObjectOfType<GameController>();
             if (InputController == null)
                 InputController = FindObjectOfType<MobileInputController>();
+        }
+
+        void EnsureCardStyles()
+        {
+            if (_cardTitleStyle != null)
+                return;
+            _cardTitleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                wordWrap = true,
+                normal = { textColor = Color.white }
+            };
+            _cardBodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 10,
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true,
+                normal = { textColor = new Color(0.15f, 0.15f, 0.15f) }
+            };
+            _cardBadgeStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleRight,
+                normal = { textColor = Color.yellow }
+            };
+            _cardColumnLabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = Color.white }
+            };
         }
 
         void OnGUI()
@@ -52,6 +98,10 @@ namespace NexusGame
             sb.AppendLine("- End Turn: Dragon shots, then next player.");
 
             GUI.Box(new Rect(10, 10, 340, 155), sb.ToString());
+            if (!string.IsNullOrEmpty(Game.LastDrawPhaseLog))
+            {
+                GUI.Box(new Rect(360, 10, 600, 46), Game.LastDrawPhaseLog);
+            }
 
             string battleLog =
                 !string.IsNullOrEmpty(Game.LiveBattlePhaseLog) ? Game.LiveBattlePhaseLog : Game.LastBattlePhaseLog;
@@ -73,6 +123,9 @@ namespace NexusGame
             float topY = string.IsNullOrEmpty(battleLog) || Game.PendingBattleArrangement ? 175f : 325f;
             if (Game.DragonPhase != null)
                 topY = Mathf.Max(topY, Screen.height - 220f);
+            // Keep main buttons above bottom card strip + dragon strip
+            float reserveBottom = CardBarHeight + 18f + (Game.DragonPhase != null ? 200f : 0f);
+            topY = Mathf.Min(topY, Mathf.Max(60f, Screen.height - reserveBottom));
 
             if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null)
                 GUI.enabled = false;
@@ -96,6 +149,7 @@ namespace NexusGame
                 GUI.enabled = false;
             if (GUI.Button(new Rect(150, topY, 40, 28), "$"))
                 _showBuyMenu = !_showBuyMenu;
+
             GUI.enabled = true;
 
             if (_showBuyMenu && canBuyHere)
@@ -129,7 +183,154 @@ namespace NexusGame
                 GUILayout.EndArea();
             }
 
+            DrawBottomCardHand(player);
+
             DrawTilePopup(player);
+        }
+
+        void DrawBottomCardHand(PlayerState player)
+        {
+            EnsureCardStyles();
+
+            float barY = Game.DragonPhase != null
+                ? Screen.height - 200f - CardBarHeight - 8f
+                : Screen.height - CardBarHeight - 8f;
+            barY = Mathf.Max(40f, barY);
+
+            float barX = 8f;
+            float barW = Screen.width - 16f;
+            GUI.Box(new Rect(barX, barY, barW, CardBarHeight), "");
+
+            string deckLine = $"P{player.PlayerIndex + 1} hand  |  Secret deck: {Game.SecretDeckCount}  Energize deck: {Game.EnergizeDeckCount}";
+            GUI.Label(new Rect(barX + 8, barY + 4, barW - 16, 18), deckLine, _cardColumnLabelStyle);
+
+            float colGap = 8f;
+            float colY = barY + 24f;
+            float colH = CardBarHeight - 32f;
+            float colW = (barW - 16f - colGap * 2f) / 3f;
+
+            var battleGroups = player.BattleEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
+            float battleContentW = battleGroups.Count == 0
+                ? CardTileW + 8f
+                : battleGroups.Count * (CardTileW + 8f);
+            DrawCardColumn(new Rect(barX + 8f, colY, colW, colH), "Battle Energize", ref _scrollHandBattle,
+                battleContentW, () =>
+                {
+                    if (battleGroups.Count == 0)
+                        DrawPlaceholderCard(new Rect(0, 0, CardTileW, CardTileH), "No cards");
+                    else
+                    {
+                        float x = 0f;
+                        foreach (var g in battleGroups)
+                        {
+                            string full = EnergizeBattleCatalog.GetName(g.Key);
+                            DrawPlayingCard(new Rect(x, 0, CardTileW, CardTileH), new Color(0.15f, 0.28f, 0.55f),
+                                CardShortTitle(full), CardDetailFromName(full), g.Count());
+                            x += CardTileW + 8f;
+                        }
+                    }
+                });
+
+            var deployGroups = player.DeployEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
+            float deployContentW = deployGroups.Count == 0
+                ? CardTileW + 8f
+                : deployGroups.Count * (CardTileW + 8f);
+            DrawCardColumn(new Rect(barX + 8f + colW + colGap, colY, colW, colH), "Deployment",
+                ref _scrollHandDeploy, deployContentW, () =>
+                {
+                    if (deployGroups.Count == 0)
+                        DrawPlaceholderCard(new Rect(0, 0, CardTileW, CardTileH), "No cards");
+                    else
+                    {
+                        float x = 0f;
+                        foreach (var g in deployGroups)
+                        {
+                            string full = EnergizeDeploymentCatalog.GetName(g.Key);
+                            DrawPlayingCard(new Rect(x, 0, CardTileW, CardTileH), new Color(0.15f, 0.45f, 0.25f),
+                                CardShortTitle(full), CardDetailFromName(full), g.Count());
+                            x += CardTileW + 8f;
+                        }
+                    }
+                });
+
+            int secretCount = player.SecretMissions.Count;
+            float secretContentW = secretCount == 0 ? CardTileW + 8f : secretCount * (CardTileW + 8f);
+            DrawCardColumn(new Rect(barX + 8f + (colW + colGap) * 2f, colY, colW, colH), "Secret missions",
+                ref _scrollHandSecret, secretContentW, () =>
+                {
+                    if (secretCount == 0)
+                        DrawPlaceholderCard(new Rect(0, 0, CardTileW, CardTileH), "No missions");
+                    else
+                    {
+                        float x = 0f;
+                        for (int i = 0; i < player.SecretMissions.Count; i++)
+                        {
+                            var s = player.SecretMissions[i];
+                            string full = SecretMissionLabel(s) + " (+" + s.VictoryPoints + " VP)";
+                            DrawPlayingCard(new Rect(x, 0, CardTileW, CardTileH), new Color(0.42f, 0.15f, 0.5f),
+                                "#" + i + " " + CardShortTitle(full), CardDetailFromName(full), 1);
+                            x += CardTileW + 8f;
+                        }
+                    }
+                });
+        }
+
+        void DrawCardColumn(Rect area, string columnTitle, ref Vector2 scroll, float contentWidth,
+            System.Action drawInsideScroll)
+        {
+            GUI.Label(new Rect(area.x, area.y - 2f, area.width, 16f), columnTitle, _cardColumnLabelStyle);
+
+            Rect view = new Rect(area.x, area.y + 14f, area.width, area.height - 14f);
+            float cw = Mathf.Max(contentWidth, view.width);
+            scroll = GUI.BeginScrollView(view, scroll, new Rect(0, 0, cw, CardTileH));
+            drawInsideScroll();
+            GUI.EndScrollView();
+        }
+
+        void DrawPlaceholderCard(Rect r, string text)
+        {
+            GUI.Box(r, "");
+            DrawTintedRect(new Rect(r.x + 2, r.y + 2, r.width - 4, 22), new Color(0.3f, 0.3f, 0.3f));
+            GUI.Label(new Rect(r.x + 6, r.y + 32, r.width - 12, r.height - 38), text, _cardBodyStyle);
+        }
+
+        void DrawPlayingCard(Rect r, Color headerColor, string title, string detail, int stack)
+        {
+            GUI.Box(r, "");
+            DrawTintedRect(new Rect(r.x + 2, r.y + 2, r.width - 4, 22), headerColor);
+            GUI.Label(new Rect(r.x + 4, r.y + 3, r.width - 32, 20), title, _cardTitleStyle);
+            if (stack > 1)
+                GUI.Label(new Rect(r.x + r.width - 30, r.y + 3, 26, 20), "x" + stack, _cardBadgeStyle);
+            GUI.Label(new Rect(r.x + 6, r.y + 26, r.width - 12, r.height - 32), detail, _cardBodyStyle);
+        }
+
+        static void DrawTintedRect(Rect r, Color c)
+        {
+            Color prev = GUI.color;
+            GUI.color = c;
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            GUI.color = prev;
+        }
+
+        static string CardShortTitle(string fullName)
+        {
+            if (string.IsNullOrEmpty(fullName))
+                return "";
+            int cut = fullName.IndexOf('(');
+            string s = cut > 0 ? fullName.Substring(0, cut).Trim() : fullName;
+            if (s.Length > 22)
+                s = s.Substring(0, 20) + "...";
+            return s;
+        }
+
+        static string CardDetailFromName(string fullName)
+        {
+            if (string.IsNullOrEmpty(fullName))
+                return "";
+            int cut = fullName.IndexOf('(');
+            if (cut > 0 && cut < fullName.Length - 1)
+                return fullName.Substring(cut).Trim();
+            return fullName;
         }
 
         void DrawFullBattleOverlays(PlayerState currentPlayer)

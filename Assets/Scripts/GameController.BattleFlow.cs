@@ -19,6 +19,12 @@ namespace NexusGame
         Queue<SecretMissionInHand> _secretDeck;
         System.Random _cardRng;
         int _nextSecretInstanceId = 1;
+        int _turnNumber = 1;
+
+        public string LastDrawPhaseLog { get; private set; } = "";
+        public int EnergizeDeckCount => _unifiedEnergizeDeck != null ? _unifiedEnergizeDeck.Count : 0;
+        public int SecretDeckCount => _secretDeck != null ? _secretDeck.Count : 0;
+        public int TurnNumber => _turnNumber;
 
         public bool BattlePhaseBlockingPlay { get; private set; }
         public List<PlannedBattleEntry> BattlePlan { get; private set; } = new List<PlannedBattleEntry>();
@@ -84,9 +90,27 @@ namespace NexusGame
             if (player == null)
                 return;
 
+            int secretBefore = player.SecretMissions.Count;
+            int battleBefore = player.BattleEnergize.Count;
+            int deployBefore = player.DeployEnergize.Count;
             DrawSecretMission(player, 1);
+            bool monolith = false;
             if (PlayerControlsMonolithAlone(player))
+            {
                 DrawEnergizeCards(player, 2);
+                monolith = true;
+            }
+
+            int secretGained = player.SecretMissions.Count - secretBefore;
+            int battleGained = player.BattleEnergize.Count - battleBefore;
+            int deployGained = player.DeployEnergize.Count - deployBefore;
+
+            LastDrawPhaseLog =
+                $"Turn {_turnNumber} Draw: P{player.PlayerIndex + 1} +{secretGained} Secret" +
+                (monolith ? $" | Monolith +{battleGained + deployGained} Energize ({battleGained} battle, {deployGained} deploy)" : "") +
+                $" | Decks: Secret {SecretDeckCount}, Energize {EnergizeDeckCount}";
+
+            _turnNumber++;
         }
 
         bool PlayerControlsMonolithAlone(PlayerState player)
