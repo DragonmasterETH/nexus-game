@@ -76,6 +76,7 @@ namespace NexusGame
         {
             _liveBattleLines?.Add(line);
             Debug.Log("[Battle] " + line);
+            NexusBattleDebug.LogBattle(line);
         }
 
         void InitCardDecks()
@@ -370,6 +371,8 @@ namespace NexusGame
                 {
                     attacker.VictoryPoints += 1;
                     log.AppendLine($"P{attacker.PlayerIndex + 1} wins battle (+1 VP).");
+                    if (MetaProgression.Instance != null)
+                        MetaProgression.Instance.OnBattleWinReward();
                     DrawEnergizeCards(defender, 1);
                     if (!AutoResolveBattlesQuick)
                     {
@@ -977,6 +980,8 @@ namespace NexusGame
                 if (result.AttackerEliminatedDefender)
                 {
                     attacker.VictoryPoints += result.VictoryPointsAwarded;
+                    if (MetaProgression.Instance != null)
+                        MetaProgression.Instance.OnBattleWinReward();
                     DrawEnergizeCards(defender, 1);
                 }
 
@@ -984,6 +989,7 @@ namespace NexusGame
                 {
                     log.AppendLine(line);
                     Debug.Log("[Battle] " + line);
+                    NexusBattleDebug.LogBattle(line);
                 }
 
                 log.AppendLine("---");

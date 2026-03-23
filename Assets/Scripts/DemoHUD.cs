@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace NexusGame
 {
@@ -20,6 +22,11 @@ namespace NexusGame
         Vector2 _scrollHandBattle;
         Vector2 _scrollHandDeploy;
         Vector2 _scrollHandSecret;
+        Vector2 _scrollCodex;
+
+        bool _showCodex;
+        bool _showCardsReference;
+        bool _showStoreStub;
 
         GUIStyle _cardTitleStyle;
         GUIStyle _cardBodyStyle;
@@ -91,6 +98,14 @@ namespace NexusGame
                 $"Battle cards: {player.BattleEnergize?.Count ?? 0}  Deploy: {player.DeployEnergize?.Count ?? 0}  Secrets: {player.SecretMissions?.Count ?? 0}");
             if (player.DeploymentPurchaseDiscountRubium > 0)
                 sb.AppendLine($"Next buy discount: up to {player.DeploymentPurchaseDiscountRubium} Rubium");
+            if (MetaProgression.Instance != null)
+            {
+                var m = MetaProgression.Instance;
+                sb.AppendLine($"Meta: XP {m.XP} | ¤ {m.Currency} | Rank {m.RankLabel}");
+            }
+
+            if (player.LastMiningIncomeCollectedThisTurn > 0)
+                sb.AppendLine($"Last mine income: +{player.LastMiningIncomeCollectedThisTurn} Rubium");
             if (Game.BattlePhaseBlockingPlay)
                 sb.AppendLine("(Finish battle phase to move.)");
 
@@ -98,7 +113,19 @@ namespace NexusGame
             sb.AppendLine("- $ : buy units + Deployment Energize. Free Human: select home hex first.");
             sb.AppendLine("- End Turn: Dragon shots, then next player.");
 
-            GUI.Box(new Rect(10, 10, 340, 155), sb.ToString());
+            GUI.Box(new Rect(10, 10, 340, 185), sb.ToString());
+
+            float panelRight = Screen.width - 210f;
+            if (GUI.Button(new Rect(panelRight, 10f, 98f, 22f), "Unit codex"))
+                _showCodex = !_showCodex;
+            if (GUI.Button(new Rect(panelRight + 102f, 10f, 98f, 22f), "Cards ref."))
+                _showCardsReference = !_showCardsReference;
+            if (GUI.Button(new Rect(panelRight, 36f, 98f, 22f), "Store (stub)"))
+                _showStoreStub = !_showStoreStub;
+            NexusBattleDebug.VerboseBattleLogs = GUI.Toggle(new Rect(panelRight + 102f, 36f, 98f, 22f),
+                NexusBattleDebug.VerboseBattleLogs, "Battle log++");
+            if (GUI.Button(new Rect(panelRight, 62f, 200f, 22f), "Restart scene (menu)"))
+                SceneManager.LoadScene(SceneManager.GetActiveScene().name);
             if (!string.IsNullOrEmpty(Game.LastDrawPhaseLog))
             {
                 GUI.Box(new Rect(360, 10, 600, 46), Game.LastDrawPhaseLog);
@@ -186,7 +213,98 @@ namespace NexusGame
 
             DrawBottomCardHand(player);
 
+            DrawIncomeFlash();
+            DrawAuxiliaryPanels(player);
+
             DrawTilePopup(player);
+        }
+
+        void DrawIncomeFlash()
+        {
+            if (Game == null || Time.time > Game.IncomeFlashUntil || Game.LastMiningIncomeAmount <= 0)
+                return;
+
+            var prev = GUI.color;
+            GUI.color = new Color(1f, 0.92f, 0.2f, 1f);
+            GUI.Box(new Rect(Screen.width * 0.5f - 120f, 70f, 240f, 36f),
+                $"+{Game.LastMiningIncomeAmount} Rubium from mines");
+            GUI.color = prev;
+        }
+
+        void DrawAuxiliaryPanels(PlayerState player)
+        {
+            if (_showCodex)
+            {
+                float h = Mathf.Clamp(Screen.height * 0.38f, 160f, 420f);
+                var r = new Rect(8f, Screen.height - h - 8f, Screen.width - 16f, h);
+                GUI.Box(r, "Unit codex (pull-up)");
+                if (GUI.Button(new Rect(r.xMax - 44f, r.y + 4f, 40f, 22f), "X"))
+                    _showCodex = false;
+
+                var inner = new Rect(r.x + 8f, r.y + 28f, r.width - 16f, r.height - 36f);
+                _scrollCodex = GUI.BeginScrollView(inner, _scrollCodex,
+                    new Rect(0, 0, inner.width - 20f, Enum.GetValues(typeof(UnitType)).Length * 56f));
+                float y = 0f;
+                foreach (UnitType t in Enum.GetValues(typeof(UnitType)))
+                {
+                    GUI.Label(new Rect(0, y, inner.width - 24f, 52f), $"{t}\n{UnitCodexData.GetBody(t)}");
+                    y += 56f;
+                }
+
+                GUI.EndScrollView();
+            }
+
+            if (_showCardsReference)
+            {
+                var r = new Rect(12f, 120f, Mathf.Min(520f, Screen.width - 24f), Mathf.Min(380f, Screen.height - 140f));
+                GUI.Window(950, r, id =>
+                {
+                    GUILayout.Label("Battle Energize", GUI.skin.box);
+                    foreach (EnergizeBattleId e in Enum.GetValues(typeof(EnergizeBattleId)))
+                    {
+                        if (e == EnergizeBattleId.None)
+                            continue;
+                        GUILayout.Label($"• {EnergizeBattleCatalog.GetName(e)}");
+                    }
+
+                    GUILayout.Space(6f);
+                    GUILayout.Label("Deployment Energize", GUI.skin.box);
+                    foreach (EnergizeDeploymentId e in Enum.GetValues(typeof(EnergizeDeploymentId)))
+                    {
+                        if (e == EnergizeDeploymentId.None)
+                            continue;
+                        GUILayout.Label($"• {EnergizeDeploymentCatalog.GetName(e)}");
+                    }
+
+                    if (GUILayout.Button("Close"))
+                        _showCardsReference = false;
+                }, "Card mechanics (reference)");
+            }
+
+            if (_showStoreStub)
+            {
+                var r = new Rect(12f, 120f, Mathf.Min(420f, Screen.width - 24f), 260f);
+                GUI.Window(951, r, id =>
+                {
+                    GUILayout.Label("Store — placeholder. Currency & XP persist via MetaProgression (PlayerPrefs).",
+                        GUI.skin.box);
+                    GUILayout.Label($"XP: {MetaProgression.Instance?.XP ?? 0}  |  ¤: {MetaProgression.Instance?.Currency ?? 0}");
+                    GUILayout.Space(4f);
+                    GUILayout.Label("Skin slots (coming soon):", GUI.skin.box);
+                    for (int i = 0; i < 6; i++)
+                    {
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Label($"Skin slot {i + 1}", GUILayout.Width(90f));
+                        GUI.enabled = false;
+                        GUILayout.Button("Locked");
+                        GUI.enabled = true;
+                        GUILayout.EndHorizontal();
+                    }
+
+                    if (GUILayout.Button("Close"))
+                        _showStoreStub = false;
+                }, "Store (stub)");
+            }
         }
 
         void DrawBottomCardHand(PlayerState player)

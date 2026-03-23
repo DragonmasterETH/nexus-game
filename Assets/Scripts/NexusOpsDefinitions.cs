@@ -211,6 +211,10 @@ namespace NexusGame
 
         [NonSerialized]
         public List<SecretMissionInHand> SecretMissions = new List<SecretMissionInHand>();
+
+        /// <summary>Rubium mined from uncontested mines at the start of this turn (for UI feedback).</summary>
+        [NonSerialized]
+        public int LastMiningIncomeCollectedThisTurn;
     }
 }
 

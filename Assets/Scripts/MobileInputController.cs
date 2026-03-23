@@ -582,6 +582,17 @@ namespace NexusGame
                 return false;
             }
 
+            if (Game != null && Game.EnforceRetreatRules)
+            {
+                var retreat = MovementRetreatRules.Evaluate(unit, target, Game);
+                if (!retreat.Allowed)
+                {
+                    if (!SuppressMovementDiagnosticLogs)
+                        Debug.LogWarning($"CanUnitMoveTo: {retreat.Reason}");
+                    return false;
+                }
+            }
+
             var def = unit.Definition;
             if (!CanEnter(def, target.Type))
             {

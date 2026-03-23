@@ -18,15 +18,30 @@ namespace NexusGame
         [Tooltip("Resolve battles at turn start (after draw + mining).")]
         public bool RunBattlePhaseAtTurnStart = true;
 
+        [Header("Rules (movement)")]
+        [Tooltip("If true, optional retreat constraints are enforced (see MovementRetreatRules).")]
+        public bool EnforceRetreatRules = true;
+
         [Header("VS AI")]
         [Tooltip("When true, AiPlayerIndex is controlled by SimpleAiController (hotseat).")]
         public bool VsAiMode;
+
+        [Tooltip("With VsAiMode: both seats are AI — for watch / stress testing.")]
+        public bool WatchAiVsAiMode;
 
         [Tooltip("Default: 1 = second player (red in 1v1).")]
         public int AiPlayerIndex = 1;
 
         /// <summary>Most recent battle phase log (for HUD / debugging).</summary>
         public string LastBattlePhaseLog { get; private set; }
+
+        /// <summary>HUD: last mining income amount (for +Rubium popup).</summary>
+        public int LastMiningIncomeAmount { get; private set; }
+
+        public float IncomeFlashUntil { get; private set; }
+
+        [Min(0.5f)]
+        public float IncomeFlashSeconds = 2.5f;
 
         int _currentPlayerIndex;
         readonly Dictionary<PlayerState, List<UnitInstance>> _unitsByPlayer =
@@ -375,7 +390,7 @@ namespace NexusGame
 
         /// <summary>True if this player seat is run by the AI in VsAiMode.</summary>
         public bool IsAiControlled(PlayerState p) =>
-            VsAiMode && p != null && p.PlayerIndex == AiPlayerIndex;
+            VsAiMode && p != null && (WatchAiVsAiMode || p.PlayerIndex == AiPlayerIndex);
 
         /// <summary>Find any home-base tile owned by the player (for purchases / AI).</summary>
         public BoardTile FindHomeBaseForPlayer(PlayerState player)
@@ -456,6 +471,9 @@ namespace NexusGame
             }
 
             player.Rubium += income;
+            player.LastMiningIncomeCollectedThisTurn = income;
+            LastMiningIncomeAmount = income;
+            IncomeFlashUntil = Time.time + IncomeFlashSeconds;
 
             LastBattlePhaseLog = "";
             PendingBattleArrangement = false;
