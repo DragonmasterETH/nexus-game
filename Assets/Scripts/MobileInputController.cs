@@ -347,6 +347,10 @@ namespace NexusGame
             }
         }
 
+        // Slight lift above hex mesh to avoid z-fighting; centered on the hex (not floating over units).
+        const float MineChipLocalY = 0.035f;
+        const float MineChipScaleMul = 1.12f;
+
         public void RevealExploration(BoardTile tile)
         {
             tile.ExplorationRevealed = true;
@@ -414,50 +418,42 @@ namespace NexusGame
                 return;
             }
 
+            // Drop legacy number+text labels; revealed mines use ore chip art on a quad.
+            if (tile.MineLabel != null && tile.MineLabel.GetComponentInChildren<TextMesh>() != null)
+            {
+                Object.Destroy(tile.MineLabel);
+                tile.MineLabel = null;
+            }
+
+            float hexR = Game != null && Game.Board != null ? Game.Board.HexRadius : 0.7f;
+
             if (tile.MineLabel == null)
             {
-                // Container for background shape + number (inherits tile rotation)
                 var labelRoot = new GameObject("MineLabel");
                 labelRoot.transform.SetParent(tile.View.transform, worldPositionStays: false);
-                labelRoot.transform.localPosition = new Vector3(0f, 0.04f, 0f);
                 labelRoot.transform.localRotation = Quaternion.identity;
-                labelRoot.transform.localScale = Vector3.one * 0.2f;
+                labelRoot.transform.localScale = Vector3.one;
 
-                // Simple background shape (small quad facing camera)
-                var bg = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                bg.name = "MineLabelBg";
-                bg.transform.SetParent(labelRoot.transform, worldPositionStays: false);
-                bg.transform.localPosition = Vector3.zero;
-                bg.transform.localRotation = Quaternion.identity;
-                bg.transform.localScale = Vector3.one * 0.6f;
-                var bgRenderer = bg.GetComponent<Renderer>();
-                if (bgRenderer != null)
-                {
-                    bgRenderer.material = new Material(Shader.Find("Sprites/Default"));
-                    bgRenderer.material.color = new Color(0f, 0f, 0f, 0.6f); // dark semi-transparent
-                }
-
-                // Number text (slightly in front of background)
-                var textGo = new GameObject("MineLabelText");
-                textGo.transform.SetParent(labelRoot.transform, worldPositionStays: false);
-                textGo.transform.localPosition = new Vector3(0f, 0f, -0.02f);
-                textGo.transform.localRotation = Quaternion.identity;
-                textGo.transform.localScale = Vector3.one * 0.4f;
-
-                var text = textGo.AddComponent<TextMesh>();
-                text.anchor = TextAnchor.MiddleCenter;
-                text.alignment = TextAlignment.Center;
-                text.fontSize = 64;
-                text.color = Color.yellow;
+                var chip = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                chip.name = "MineOreChip";
+                chip.transform.SetParent(labelRoot.transform, worldPositionStays: false);
+                chip.transform.localPosition = Vector3.zero;
+                chip.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
                 tile.MineLabel = labelRoot;
             }
 
-            var tm = tile.MineLabel.GetComponentInChildren<TextMesh>();
-            if (tm != null)
-            {
-                tm.text = tile.ExtraMineYield.ToString();
-            }
+            tile.MineLabel.transform.localPosition = new Vector3(0f, MineChipLocalY, 0f);
+            var chipTf = tile.MineLabel.transform.Find("MineOreChip");
+            if (chipTf != null)
+                chipTf.localScale = Vector3.one * (hexR * MineChipScaleMul);
+
+            int yv = tile.ExtraMineYield;
+            int matKey = yv < 1 ? 1 : (yv > 3 ? 3 : yv);
+            var mat = NexusGuiArt.GetSharedWorldOreChipMaterial(matKey);
+            var rend = tile.MineLabel.GetComponentInChildren<Renderer>();
+            if (rend != null && mat != null)
+                rend.sharedMaterial = mat;
         }
 
         void TryMoveGroupTo(BoardTile target)

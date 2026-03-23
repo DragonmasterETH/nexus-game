@@ -14,6 +14,28 @@ namespace NexusGame
         public MobileInputController InputController;
         public bool ShowDebugToggle = false;
 
+        [Header("UI art")]
+        [Tooltip("Rubium icon. Leave empty to load Assets/Resources/Sprites/Rubium.png at runtime.")]
+        public Texture2D RubiumIcon;
+
+        [Tooltip("Optional: assign a Sprite instead (e.g. if Texture Type is Sprite 2D). Overrides Resources path when set.")]
+        public Sprite RubiumSprite;
+
+        [Tooltip("Victory points icon. Default: Resources/Sprites/VP.png")]
+        public Texture2D VPIcon;
+
+        public Sprite VPSprite;
+
+        [Tooltip("Mine yield icons (1–3 Rubium). Default: Resources/Sprites/OreChip1..3.png")]
+        public Texture2D OreChip1Icon;
+
+        public Texture2D OreChip2Icon;
+        public Texture2D OreChip3Icon;
+
+        public Sprite OreChip1Sprite;
+        public Sprite OreChip2Sprite;
+        public Sprite OreChip3Sprite;
+
         bool _showBuyMenu;
         bool _showQuickRef;
         int _quickRefTab; // 0 = rules, 1 = units
@@ -35,12 +57,100 @@ namespace NexusGame
         const float CardTileW = 112f;
         const float CardTileH = 104f;
 
+        /// <summary>Main HUD row: Rubium + VP icons (larger than discount line).</summary>
+        const float MainHudIconHeight = 28f;
+
+        const float DiscountLineIconHeight = 22f;
+
+        NexusGuiImage _rubiumResources;
+        bool _rubiumResourcesTried;
+
+        NexusGuiImage _vpResources;
+        bool _vpResourcesTried;
+
+        NexusGuiImage _oreResources1;
+        NexusGuiImage _oreResources2;
+        NexusGuiImage _oreResources3;
+        bool _oreResourcesTried;
+
         void Start()
         {
             if (Game == null)
                 Game = FindObjectOfType<GameController>();
             if (InputController == null)
                 InputController = FindObjectOfType<MobileInputController>();
+        }
+
+        NexusGuiImage GetRubiumGui()
+        {
+            var direct = NexusGuiArt.FromFields(RubiumIcon, RubiumSprite);
+            if (!direct.IsEmpty)
+                return direct;
+            if (!_rubiumResourcesTried)
+            {
+                _rubiumResourcesTried = true;
+                _rubiumResources = NexusGuiArt.Load("Sprites/Rubium", "Sprites/rubium");
+            }
+
+            return _rubiumResources;
+        }
+
+        NexusGuiImage GetVPGui()
+        {
+            var direct = NexusGuiArt.FromFields(VPIcon, VPSprite);
+            if (!direct.IsEmpty)
+                return direct;
+            if (!_vpResourcesTried)
+            {
+                _vpResourcesTried = true;
+                _vpResources = NexusGuiArt.Load("Sprites/VP", "Sprites/Vp");
+            }
+
+            return _vpResources;
+        }
+
+        void EnsureOreChipResources()
+        {
+            if (_oreResourcesTried)
+                return;
+            _oreResourcesTried = true;
+            _oreResources1 = NexusGuiArt.Load("Sprites/OreChip1", "Sprites/Ore_Chip_1", "Sprites/Ore Chip 1");
+            _oreResources2 = NexusGuiArt.Load("Sprites/OreChip2", "Sprites/Ore_Chip_2", "Sprites/Ore Chip 2");
+            _oreResources3 = NexusGuiArt.Load("Sprites/OreChip3", "Sprites/Ore_Chip_3", "Sprites/Ore Chip 3");
+        }
+
+        /// <summary>Ore chip for mine yield 1–3; empty if yield is 0 or no art.</summary>
+        NexusGuiImage GetOreChipGui(int mineYield)
+        {
+            switch (mineYield)
+            {
+                case 1:
+                {
+                    var d = NexusGuiArt.FromFields(OreChip1Icon, OreChip1Sprite);
+                    if (!d.IsEmpty)
+                        return d;
+                    EnsureOreChipResources();
+                    return _oreResources1;
+                }
+                case 2:
+                {
+                    var d = NexusGuiArt.FromFields(OreChip2Icon, OreChip2Sprite);
+                    if (!d.IsEmpty)
+                        return d;
+                    EnsureOreChipResources();
+                    return _oreResources2;
+                }
+                case 3:
+                {
+                    var d = NexusGuiArt.FromFields(OreChip3Icon, OreChip3Sprite);
+                    if (!d.IsEmpty)
+                        return d;
+                    EnsureOreChipResources();
+                    return _oreResources3;
+                }
+                default:
+                    return default;
+            }
         }
 
         void EnsureCardStyles()
@@ -87,21 +197,63 @@ namespace NexusGame
             DrawFullBattleOverlays(player);
             DrawDragonPhaseOverlay();
 
-            var sb = new StringBuilder();
-            sb.AppendLine("Nexus Ops");
-            sb.AppendLine("--------------------");
-            sb.AppendLine(
-                $"Current: P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}  Rubium: {player.Rubium}  VP: {player.VictoryPoints}");
-            sb.AppendLine(
-                $"Battle cards: {player.BattleEnergize?.Count ?? 0}  Deploy: {player.DeployEnergize?.Count ?? 0}  Secrets: {player.SecretMissions?.Count ?? 0}");
+            float hudH = Game.AiVsAiMode ? 206f : 166f;
+            var hudRect = new Rect(10, 10, 380, hudH);
+            GUI.Box(hudRect, "");
+
+            var rubGui = GetRubiumGui();
+            var hudLabel = GUI.skin.label;
+            float lx = hudRect.x + 10f;
+            float ly = hudRect.y + 8f;
+            float lw = hudRect.width - 20f;
+
+            GUI.Label(new Rect(lx, ly, lw, 20f), "Nexus Ops", hudLabel);
+            ly += 18f;
+            GUI.Label(new Rect(lx, ly, lw, 16f), "--------------------", hudLabel);
+            ly += 16f;
+
+            string curPrefix =
+                $"Current: P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}";
+            GUI.Label(new Rect(lx, ly, lw, 20f), curPrefix, hudLabel);
+            ly += 22f;
+
+            // Resources: icons only + amounts (no "Rubium" / "VP" text)
+            float resLineH = Mathf.Max(22f, MainHudIconHeight + 2f);
+            var vpGui = GetVPGui();
+            float rx = lx;
+            if (!rubGui.IsEmpty)
+                rx += rubGui.Draw(rx, ly + 1f, MainHudIconHeight) + 6f;
+            GUI.Label(new Rect(rx, ly, 80f, resLineH), player.Rubium.ToString(), hudLabel);
+            rx += Mathf.Max(36f, hudLabel.CalcSize(new GUIContent(player.Rubium.ToString())).x) + 14f;
+            if (!vpGui.IsEmpty)
+                rx += vpGui.Draw(rx, ly + 1f, MainHudIconHeight) + 6f;
+            GUI.Label(new Rect(rx, ly, 60f, resLineH), player.VictoryPoints.ToString(), hudLabel);
+            ly += resLineH + 6f;
+
+            // Card hand counts: symbol prefixes only (⚔ battle, ▲ deploy, ★ secrets)
+            int b = player.BattleEnergize?.Count ?? 0;
+            int d = player.DeployEnergize?.Count ?? 0;
+            int s = player.SecretMissions?.Count ?? 0;
+            GUI.Label(new Rect(lx, ly, lw, 22f), $"⚔{b}     ▲{d}     ★{s}", hudLabel);
+            ly += 24f;
+
             if (player.DeploymentPurchaseDiscountRubium > 0)
-                sb.AppendLine($"Next buy discount: up to {player.DeploymentPurchaseDiscountRubium} Rubium");
+            {
+                float dx = lx;
+                if (!rubGui.IsEmpty)
+                    dx += rubGui.Draw(dx, ly + 1f, DiscountLineIconHeight) + 6f;
+                GUI.Label(new Rect(dx, ly, 80f, 20f), player.DeploymentPurchaseDiscountRubium.ToString(), hudLabel);
+                ly += 22f;
+            }
+
+            var sb = new StringBuilder();
             if (Game.BattlePhaseBlockingPlay)
                 sb.AppendLine("(Finish battle phase to move.)");
 
             if (Game.AiVsAiMode)
             {
-                sb.AppendLine();
+                if (sb.Length > 0)
+                    sb.AppendLine();
                 sb.AppendLine(
                     $"[AI test] Goal {Game.AiTestVictoryTargetVp} VP  |  draw cap {Game.AiTestMaxTotalDrawPhases} (T{Game.TurnNumber})");
                 if (Game.AiTestMatchCompleted && Game.AiTestWinner != null)
@@ -111,17 +263,16 @@ namespace NexusGame
 
             sb.AppendLine();
             if (Game.AiVsAiMode)
-            {
                 sb.AppendLine("(AI vs AI — both seats automated.)");
-            }
             else
             {
                 sb.AppendLine("- $ : buy units + Deployment Energize. Free Human: select home hex first.");
                 sb.AppendLine("- End Turn: Dragon shots, then next player.");
             }
 
-            float hudH = Game.AiVsAiMode ? 200f : 155f;
-            GUI.Box(new Rect(10, 10, 340, hudH), sb.ToString());
+            float bodyH = Mathf.Max(24f, hudRect.yMax - ly - 8f);
+            var bodyStyle = new GUIStyle(hudLabel) { wordWrap = true };
+            GUI.Label(new Rect(lx, ly, lw, bodyH), sb.ToString(), bodyStyle);
             if (!string.IsNullOrEmpty(Game.LastDrawPhaseLog))
             {
                 GUI.Box(new Rect(360, 10, 600, 46), Game.LastDrawPhaseLog);
@@ -130,9 +281,11 @@ namespace NexusGame
             string battleLog =
                 !string.IsNullOrEmpty(Game.LiveBattlePhaseLog) ? Game.LiveBattlePhaseLog : Game.LastBattlePhaseLog;
 
+            float hudBottom = hudRect.yMax;
+            const float battleLogPanelH = 140f;
             if (!string.IsNullOrEmpty(battleLog) && !Game.PendingBattleArrangement)
             {
-                var battleRect = new Rect(10, 175, 420, 140);
+                var battleRect = new Rect(10, hudBottom + 8f, 420, battleLogPanelH);
                 GUI.Box(battleRect, "Battle log");
                 GUI.Label(new Rect(battleRect.x + 6, battleRect.y + 20, battleRect.width - 12, battleRect.height - 26),
                     battleLog.Length > 560 ? battleLog.Substring(0, 560) + "..." : battleLog);
@@ -144,7 +297,9 @@ namespace NexusGame
                 InputController.DebugClicks = newDebug;
             }
 
-            float topY = string.IsNullOrEmpty(battleLog) || Game.PendingBattleArrangement ? 175f : 325f;
+            float topY = string.IsNullOrEmpty(battleLog) || Game.PendingBattleArrangement
+                ? hudBottom + 8f
+                : hudBottom + 8f + battleLogPanelH + 10f;
             if (Game.DragonPhase != null)
                 topY = Mathf.Max(topY, Screen.height - 220f);
             // Keep main buttons above bottom card strip + dragon strip
@@ -705,6 +860,7 @@ namespace NexusGame
             bool canAfford = player.Rubium >= pay;
             if (!canAfford)
                 GUI.enabled = false;
+            // Text-only: GUIContent(image) makes Unity draw a huge icon on each unit row (looked like Rubium troops).
             if (GUILayout.Button(line) && canAfford)
             {
                 BoardTile homeTile = null;
@@ -762,7 +918,19 @@ namespace NexusGame
             else
                 GUILayout.Label("Owner: " + (popupTile.Owner != null ? (popupTile.Owner.PlayerIndex + 1).ToString() : "None"));
 
-            GUILayout.Label("Mine: " + popupTile.ExtraMineYield);
+            GUILayout.BeginHorizontal();
+            int my = popupTile.ExtraMineYield;
+            var chipGui = GetOreChipGui(my);
+            if (chipGui.IsEmpty && my > 0)
+                chipGui = GetRubiumGui();
+            if (!chipGui.IsEmpty)
+            {
+                var ir = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(30f), GUILayout.Height(26f));
+                chipGui.Draw(ir);
+            }
+
+            GUILayout.Label(my > 0 ? my.ToString() : "—", GUILayout.Width(48));
+            GUILayout.EndHorizontal();
             GUILayout.Space(5);
             GUILayout.Label("Move selection:");
             var counts = new Dictionary<UnitType, int>();

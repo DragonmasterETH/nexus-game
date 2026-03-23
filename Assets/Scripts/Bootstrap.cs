@@ -111,6 +111,50 @@ namespace NexusGame
             hud.Game = game;
             hud.InputController = input;
             hud.ShowDebugToggle = _debugMode;
+            if (hud.RubiumIcon == null && hud.RubiumSprite == null)
+            {
+                var rub = NexusGuiArt.Load("Sprites/Rubium", "Sprites/rubium");
+                if (rub.Sprite != null)
+                    hud.RubiumSprite = rub.Sprite;
+                else if (rub.Texture != null)
+                    hud.RubiumIcon = rub.Texture;
+            }
+
+            if (hud.VPIcon == null && hud.VPSprite == null)
+            {
+                var vp = NexusGuiArt.Load("Sprites/VP", "Sprites/Vp");
+                if (vp.Sprite != null)
+                    hud.VPSprite = vp.Sprite;
+                else if (vp.Texture != null)
+                    hud.VPIcon = vp.Texture;
+            }
+
+            if (hud.OreChip1Icon == null && hud.OreChip1Sprite == null)
+            {
+                var o = NexusGuiArt.Load("Sprites/OreChip1", "Sprites/Ore_Chip_1", "Sprites/Ore Chip 1");
+                if (o.Sprite != null)
+                    hud.OreChip1Sprite = o.Sprite;
+                else if (o.Texture != null)
+                    hud.OreChip1Icon = o.Texture;
+            }
+
+            if (hud.OreChip2Icon == null && hud.OreChip2Sprite == null)
+            {
+                var o = NexusGuiArt.Load("Sprites/OreChip2", "Sprites/Ore_Chip_2", "Sprites/Ore Chip 2");
+                if (o.Sprite != null)
+                    hud.OreChip2Sprite = o.Sprite;
+                else if (o.Texture != null)
+                    hud.OreChip2Icon = o.Texture;
+            }
+
+            if (hud.OreChip3Icon == null && hud.OreChip3Sprite == null)
+            {
+                var o = NexusGuiArt.Load("Sprites/OreChip3", "Sprites/Ore_Chip_3", "Sprites/Ore Chip 3");
+                if (o.Sprite != null)
+                    hud.OreChip3Sprite = o.Sprite;
+                else if (o.Texture != null)
+                    hud.OreChip3Icon = o.Texture;
+            }
 
             var ai = game.GetComponent<SimpleAiController>();
             if (ai == null)
