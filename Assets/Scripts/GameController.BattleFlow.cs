@@ -85,6 +85,34 @@ namespace NexusGame
             _secretDeck = CardDecks.BuildSecretDeck(_cardRng, ref _nextSecretInstanceId);
         }
 
+        /// <summary>Stop battle coroutine and clear interactive battle / dragon UI state (new match).</summary>
+        public void HardResetFlowState()
+        {
+            if (_battleCoroutine != null)
+            {
+                StopCoroutine(_battleCoroutine);
+                _battleCoroutine = null;
+            }
+
+            BattlePhaseBlockingPlay = false;
+            PendingBattleArrangement = false;
+            BattlePlan.Clear();
+            EnergizePromptPlayer = null;
+            EnergizeBattleContext = null;
+            _energizeRoundActive = false;
+            CasualtyPick = null;
+            FocusFirePicker = null;
+            SecretMissionOffer = null;
+            DragonPhase = null;
+            _liveBattleLines = null;
+            _lastEnergizePlayed = EnergizeBattleId.None;
+            _pendingFocusFireCard = false;
+            _turnNumber = 1;
+            _nextSecretInstanceId = 1;
+            LastDrawPhaseLog = "";
+            LastBattlePhaseLog = "";
+        }
+
         void RunDrawPhase(PlayerState player)
         {
             if (player == null)

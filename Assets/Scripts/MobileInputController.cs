@@ -5,11 +5,14 @@ namespace NexusGame
 {
         public class MobileInputController : MonoBehaviour
         {
-            public Camera MainCamera;
-            public GameController Game;
+        public Camera MainCamera;
+        public GameController Game;
 
         [Header("Debug")]
         public bool DebugClicks;
+
+        [Tooltip("Hides verbose CanUnitMoveTo / move warnings (used when AI pathfinding).")]
+        public bool SuppressMovementDiagnosticLogs;
 
             BoardTile _popupTile;
             BoardTile _selectedTile;
@@ -41,6 +44,9 @@ namespace NexusGame
 
         void Update()
         {
+            if (Game != null && Game.IsAiControlled(Game.CurrentPlayer))
+                return;
+
             // Touch input for mobile
             if (Input.touchCount > 0)
             {
@@ -132,7 +138,7 @@ namespace NexusGame
 
         void PrepareDragFromPointer(Vector2 screenPos)
         {
-            if (Game == null || Game.CurrentPlayer == null)
+            if (Game == null || Game.CurrentPlayer == null || Game.IsAiControlled(Game.CurrentPlayer))
                 return;
             if (MainCamera == null)
                 return;
@@ -341,7 +347,7 @@ namespace NexusGame
             }
         }
 
-        void RevealExploration(BoardTile tile)
+        public void RevealExploration(BoardTile tile)
         {
             tile.ExplorationRevealed = true;
             if (tile.ExplorationMarker != null)
@@ -458,7 +464,8 @@ namespace NexusGame
         {
             if (Game != null && Game.BattlePhaseBlockingPlay)
             {
-                Debug.Log("Movement locked until battle phase completes.");
+                if (!SuppressMovementDiagnosticLogs)
+                    Debug.Log("Movement locked until battle phase completes.");
                 return;
             }
 
@@ -558,25 +565,28 @@ namespace NexusGame
             SetSelectedTile(null);
         }
 
-        bool CanUnitMoveTo(UnitInstance unit, BoardTile target)
+        public bool CanUnitMoveTo(UnitInstance unit, BoardTile target)
         {
             if (unit.Tile == null || target == null || unit.Tile == target)
             {
-                Debug.LogWarning("CanUnitMoveTo: invalid source/target tile.");
+                if (!SuppressMovementDiagnosticLogs)
+                    Debug.LogWarning("CanUnitMoveTo: invalid source/target tile.");
                 return false;
             }
 
             // A unit may only move once per player turn.
             if (unit.HasMovedThisTurn)
             {
-                Debug.Log($"CanUnitMoveTo: {unit.Definition.Type} already moved this turn.");
+                if (!SuppressMovementDiagnosticLogs)
+                    Debug.Log($"CanUnitMoveTo: {unit.Definition.Type} already moved this turn.");
                 return false;
             }
 
             var def = unit.Definition;
             if (!CanEnter(def, target.Type))
             {
-                Debug.Log($"CanUnitMoveTo: {unit.Definition.Type} cannot enter terrain type {target.Type}.");
+                if (!SuppressMovementDiagnosticLogs)
+                    Debug.Log($"CanUnitMoveTo: {unit.Definition.Type} cannot enter terrain type {target.Type}.");
                 return false;
             }
 
@@ -626,7 +636,9 @@ namespace NexusGame
                     {
                         if (n == target)
                         {
-                            Debug.Log($"CanUnitMoveTo: path found for {unit.Definition.Type} from ({unit.Tile.Q},{unit.Tile.R}) to ({target.Q},{target.R}) in {ndist} step(s).");
+                            if (!SuppressMovementDiagnosticLogs)
+                                Debug.Log(
+                                    $"CanUnitMoveTo: path found for {unit.Definition.Type} from ({unit.Tile.Q},{unit.Tile.R}) to ({target.Q},{target.R}) in {ndist} step(s).");
                             return true;
                         }
 
@@ -641,8 +653,59 @@ namespace NexusGame
             int dr = unit.Tile.R - target.R;
             int ds = -(unit.Tile.Q + unit.Tile.R) - (-(target.Q + target.R));
             int axialDist = (Mathf.Abs(dq) + Mathf.Abs(dr) + Mathf.Abs(ds)) / 2;
-            Debug.LogWarning($"CanUnitMoveTo: no path for {unit.Definition.Type} from ({unit.Tile.Q},{unit.Tile.R}) to ({target.Q},{target.R}); axialDist={axialDist}, maxDist={maxDist}.");
+            if (!SuppressMovementDiagnosticLogs)
+                Debug.LogWarning(
+                    $"CanUnitMoveTo: no path for {unit.Definition.Type} from ({unit.Tile.Q},{unit.Tile.R}) to ({target.Q},{target.R}); axialDist={axialDist}, maxDist={maxDist}.");
             return false;
+        }
+
+        /// <summary>All tiles this unit can legally move to this turn (for AI).</summary>
+        public System.Collections.Generic.List<BoardTile> GetReachableTiles(UnitInstance unit)
+        {
+            var list = new System.Collections.Generic.List<BoardTile>();
+            if (unit == null || Game == null || Game.Board == null)
+                return list;
+
+            bool prev = SuppressMovementDiagnosticLogs;
+            SuppressMovementDiagnosticLogs = true;
+            try
+            {
+                foreach (var t in Game.Board.AllTiles)
+                {
+                    if (t != null && t != unit.Tile && CanUnitMoveTo(unit, t))
+                        list.Add(t);
+                }
+            }
+            finally
+            {
+                SuppressMovementDiagnosticLogs = prev;
+            }
+
+            return list;
+        }
+
+        /// <summary>Move one unit without using the selection UI (AI / automation).</summary>
+        public bool TryAiMoveUnit(UnitInstance unit, BoardTile target)
+        {
+            if (Game == null || Game.BattlePhaseBlockingPlay || Game.DragonPhase != null)
+                return false;
+            if (unit == null || unit.Tile == null || target == null || unit.Tile == target)
+                return false;
+            if (unit.Owner != Game.CurrentPlayer || unit.HasMovedThisTurn)
+                return false;
+
+            bool prev = SuppressMovementDiagnosticLogs;
+            SuppressMovementDiagnosticLogs = true;
+            bool can = CanUnitMoveTo(unit, target);
+            SuppressMovementDiagnosticLogs = prev;
+            if (!can)
+                return false;
+
+            unit.MoveTo(target);
+            target.Owner = unit.Owner;
+            if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
+                RevealExploration(target);
+            return true;
         }
 
         bool CanEnter(UnitDefinition def, TileType type)

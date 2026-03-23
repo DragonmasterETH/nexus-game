@@ -18,12 +18,22 @@ namespace NexusGame
         [Tooltip("Resolve battles at turn start (after draw + mining).")]
         public bool RunBattlePhaseAtTurnStart = true;
 
+        [Header("VS AI")]
+        [Tooltip("When true, AiPlayerIndex is controlled by SimpleAiController (hotseat).")]
+        public bool VsAiMode;
+
+        [Tooltip("Default: 1 = second player (red in 1v1).")]
+        public int AiPlayerIndex = 1;
+
         /// <summary>Most recent battle phase log (for HUD / debugging).</summary>
         public string LastBattlePhaseLog { get; private set; }
 
         int _currentPlayerIndex;
         readonly Dictionary<PlayerState, List<UnitInstance>> _unitsByPlayer =
             new Dictionary<PlayerState, List<UnitInstance>>();
+
+        /// <summary>Set before AddComponent when Bootstrap will call <see cref="ResetAndStartNewMatch"/>.</summary>
+        public static bool SkipStartInitOnce;
 
         void Start()
         {
@@ -43,6 +53,12 @@ namespace NexusGame
                 return;
             }
 
+            if (SkipStartInitOnce)
+            {
+                SkipStartInitOnce = false;
+                return;
+            }
+
             InitPlayers();
             InitCardDecks();
             BeginTurn();
@@ -51,11 +67,15 @@ namespace NexusGame
 
         void InitPlayers()
         {
+            _unitsByPlayer.Clear();
+
             if (Players.Count == 0)
             {
-                // Default to 2 players; if the board is in any 2–4 player mode, prepare 4 players.
+                // VS AI is always a 2-player match on the current board layout.
                 var layout = Board != null ? Board.LayoutMode : BoardLayoutMode.OneVOne;
-                int playerCount = (layout == BoardLayoutMode.TwoToFour || layout == BoardLayoutMode.TwoToFourSmall) ? 4 : 2;
+                int playerCount = VsAiMode
+                    ? 2
+                    : (layout == BoardLayoutMode.TwoToFour || layout == BoardLayoutMode.TwoToFourSmall ? 4 : 2);
 
                 if (playerCount >= 1)
                     Players.Add(new PlayerState { PlayerIndex = 0, Color = Color.blue, Rubium = StartingRubium });
@@ -352,6 +372,46 @@ namespace NexusGame
         }
 
         public PlayerState CurrentPlayer => Players[_currentPlayerIndex];
+
+        /// <summary>True if this player seat is run by the AI in VsAiMode.</summary>
+        public bool IsAiControlled(PlayerState p) =>
+            VsAiMode && p != null && p.PlayerIndex == AiPlayerIndex;
+
+        /// <summary>Find any home-base tile owned by the player (for purchases / AI).</summary>
+        public BoardTile FindHomeBaseForPlayer(PlayerState player)
+        {
+            if (player == null || Board == null)
+                return null;
+            foreach (var t in Board.AllTiles)
+            {
+                if (t != null && t.Type == TileType.HomeBase && t.Owner == player)
+                    return t;
+            }
+
+            return null;
+        }
+
+        /// <summary>Buy a unit on a home hex (same rules as HUD buy buttons).</summary>
+        public bool TryPurchaseUnit(PlayerState player, UnitType type, int baseCost)
+        {
+            if (player != CurrentPlayer || BattlePhaseBlockingPlay || DragonPhase != null)
+                return false;
+
+            var homeTile = FindHomeBaseForPlayer(player);
+            if (homeTile == null)
+                return false;
+
+            int maxOff = Mathf.Max(0, baseCost - 1);
+            int use = Mathf.Min(maxOff, player.DeploymentPurchaseDiscountRubium);
+            int pay = baseCost - use;
+            if (player.Rubium < pay)
+                return false;
+
+            player.DeploymentPurchaseDiscountRubium -= use;
+            player.Rubium -= pay;
+            SpawnUnit(player, type, homeTile);
+            return true;
+        }
 
         void BeginTurn()
         {

@@ -16,6 +16,7 @@ namespace NexusGame
         UiState _state = UiState.MainMenu;
         BoardLayoutMode _selectedLayout = BoardLayoutMode.OneVOne;
         bool _debugMode;
+        bool _vsAi;
 
         void Awake()
         {
@@ -61,17 +62,23 @@ namespace NexusGame
                 board = boardGo.AddComponent<BoardGenerator>();
             }
 
-            // Apply selected layout and regenerate board to match.
-            board.LayoutMode = _selectedLayout;
+            // VS AI always uses the 1v1 board (two seats: you vs AI).
+            board.LayoutMode = _vsAi ? BoardLayoutMode.OneVOne : _selectedLayout;
             board.Regenerate();
 
             var game = FindObjectOfType<GameController>();
             if (game == null)
             {
                 var gameGo = new GameObject("GameController");
+                GameController.SkipStartInitOnce = true;
                 game = gameGo.AddComponent<GameController>();
                 game.Board = board;
             }
+
+            game.Board = board;
+            game.VsAiMode = _vsAi;
+            game.AiPlayerIndex = 1;
+            game.ResetAndStartNewMatch();
 
             var input = FindObjectOfType<MobileInputController>();
             if (input == null)
@@ -80,7 +87,10 @@ namespace NexusGame
                 input = inputGo.AddComponent<MobileInputController>();
                 input.Game = game;
             }
+
+            input.Game = game;
             input.DebugClicks = _debugMode;
+            input.SuppressMovementDiagnosticLogs = _vsAi;
 
             var hud = FindObjectOfType<DemoHUD>();
             if (hud == null)
@@ -90,7 +100,17 @@ namespace NexusGame
                 hud.Game = game;
                 hud.InputController = input;
             }
+
+            hud.Game = game;
+            hud.InputController = input;
             hud.ShowDebugToggle = _debugMode;
+
+            var ai = game.GetComponent<SimpleAiController>();
+            if (ai == null)
+                ai = game.gameObject.AddComponent<SimpleAiController>();
+            ai.Game = game;
+            ai.Input = input;
+            ai.enabled = _vsAi;
         }
 
         void OnGUI()
@@ -112,7 +132,7 @@ namespace NexusGame
         void DrawMainMenu()
         {
             const int w = 260;
-            const int h = 200;
+            const int h = 240;
             var rect = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(rect, "Nexus Ops");
 
@@ -123,6 +143,15 @@ namespace NexusGame
             if (GUI.Button(new Rect(x, y, bw, 30f), "Play"))
             {
                 _debugMode = false;
+                _vsAi = false;
+                _state = UiState.MapSelect;
+            }
+            y += 40f;
+
+            if (GUI.Button(new Rect(x, y, bw, 30f), "Play vs AI"))
+            {
+                _debugMode = false;
+                _vsAi = true;
                 _state = UiState.MapSelect;
             }
             y += 40f;
@@ -149,6 +178,7 @@ namespace NexusGame
             {
                 // Enter map selection with click-debugging enabled.
                 _debugMode = true;
+                _vsAi = false;
                 _state = UiState.MapSelect;
             }
         }

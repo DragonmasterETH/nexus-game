@@ -85,7 +85,8 @@ namespace NexusGame
             var sb = new StringBuilder();
             sb.AppendLine("Nexus Ops");
             sb.AppendLine("--------------------");
-            sb.AppendLine($"Current: P{player.PlayerIndex + 1}  Rubium: {player.Rubium}  VP: {player.VictoryPoints}");
+            sb.AppendLine(
+                $"Current: P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}  Rubium: {player.Rubium}  VP: {player.VictoryPoints}");
             sb.AppendLine(
                 $"Battle cards: {player.BattleEnergize?.Count ?? 0}  Deploy: {player.DeployEnergize?.Count ?? 0}  Secrets: {player.SecretMissions?.Count ?? 0}");
             if (player.DeploymentPurchaseDiscountRubium > 0)
@@ -127,7 +128,7 @@ namespace NexusGame
             float reserveBottom = CardBarHeight + 18f + (Game.DragonPhase != null ? 200f : 0f);
             topY = Mathf.Min(topY, Mathf.Max(60f, Screen.height - reserveBottom));
 
-            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null)
+            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || Game.IsAiControlled(player))
                 GUI.enabled = false;
             if (GUI.Button(new Rect(10, topY, 130, 28), "End Turn"))
             {
@@ -337,6 +338,8 @@ namespace NexusGame
         {
             if (Game.PendingBattleArrangement && Game.BattlePlan != null && Game.BattlePlan.Count > 0)
             {
+                if (Game.IsAiControlled(Game.CurrentPlayer))
+                    return;
                 GUI.Window(900, new Rect(60, 40, Screen.width - 120, Screen.height - 120), WindowBattleArrange,
                     "Arrange battles");
                 return;
@@ -344,6 +347,8 @@ namespace NexusGame
 
             if (Game.EnergizePromptPlayer != null && Game.FocusFirePicker == null)
             {
+                if (Game.IsAiControlled(Game.EnergizePromptPlayer))
+                    return;
                 GUI.Window(901, new Rect(80, 80, Screen.width - 160, 320), WindowEnergizeBattle,
                     WindowTitleEnergize());
                 return;
@@ -351,6 +356,8 @@ namespace NexusGame
 
             if (Game.FocusFirePicker != null)
             {
+                if (Game.IsAiControlled(Game.FocusFirePicker))
+                    return;
                 GUI.Window(902, new Rect(100, 120, Screen.width - 200, 280), WindowFocusFire,
                     "Focus Fire");
                 return;
@@ -358,6 +365,8 @@ namespace NexusGame
 
             if (Game.CasualtyPick != null)
             {
+                if (Game.IsAiControlled(Game.CasualtyPick.Owner))
+                    return;
                 GUI.Window(903, new Rect(80, 100, Screen.width - 160, 400), WindowCasualty,
                     WindowTitleCasualty());
                 return;
@@ -365,6 +374,8 @@ namespace NexusGame
 
             if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
             {
+                if (Game.IsAiControlled(Game.SecretMissionOffer.Attacker))
+                    return;
                 GUI.Window(904, new Rect(100, 100, Screen.width - 200, 340), WindowSecretMission,
                     "Secret mission");
             }
@@ -539,6 +550,15 @@ namespace NexusGame
             var dp = Game.DragonPhase;
             if (dp == null)
                 return;
+
+            if (Game.IsAiControlled(dp.Player))
+            {
+                GUI.Box(new Rect(20, Screen.height - 200, Screen.width - 40, 190),
+                    "Rubium Dragon — AI is choosing…");
+                if (!string.IsNullOrEmpty(dp.LastLog))
+                    GUI.Label(new Rect(30, Screen.height - 175, Screen.width - 60, 22), dp.LastLog);
+                return;
+            }
 
             GUI.Box(new Rect(20, Screen.height - 200, Screen.width - 40, 190), "Rubium Dragon (end of movement)");
 
