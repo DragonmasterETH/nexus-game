@@ -63,6 +63,27 @@ namespace NexusGame
             };
         }
 
+        /// <summary>Full rules text for UI tooltips / help popup.</summary>
+        public static string GetDescription(EnergizeBattleId id)
+        {
+            return id switch
+            {
+                EnergizeBattleId.BattleFury =>
+                    "During this battle, each of your units rolls one extra attack die on every attack step where they participate.",
+                EnergizeBattleId.Elusive =>
+                    "During this battle, enemy attacks against your units need +1 on each d6 to count as a hit (harder for them to hit you).",
+                EnergizeBattleId.DeadlyAim =>
+                    "During this battle, your attacks treat the hit threshold as 1 lower than normal (minimum 2 on the die).",
+                EnergizeBattleId.Aegis =>
+                    "During this battle, the first hit that would be applied to your units is ignored.",
+                EnergizeBattleId.FocusFire =>
+                    "After you play this card, you choose one unit type present in this battle; that type rolls +2 extra attack dice for the rest of the fight.",
+                EnergizeBattleId.BattleCache =>
+                    "When played, you immediately draw one card from the Energize deck (battle or deployment, depending on the draw).",
+                _ => ""
+            };
+        }
+
         public static bool AppliesDuringBattle(EnergizeBattleId id) => id != EnergizeBattleId.None;
     }
 
@@ -94,6 +115,25 @@ namespace NexusGame
                 EnergizeDeploymentId.FreeHuman => "Free Human (deploy on home hex)",
                 EnergizeDeploymentId.SupplyRun => "Supply Run (+1 Rubium, draw 1)",
                 _ => id.ToString()
+            };
+        }
+
+        /// <summary>Full rules text for UI tooltips / help popup.</summary>
+        public static string GetDescription(EnergizeDeploymentId id)
+        {
+            return id switch
+            {
+                EnergizeDeploymentId.StripMine =>
+                    "Gain 2 Rubium immediately. Usable during Deployment (buy phase) on your turn.",
+                EnergizeDeploymentId.Convoy =>
+                    "Draw 1 card from the Energize deck immediately (may be a battle or deployment card).",
+                EnergizeDeploymentId.RushOrder =>
+                    "The next unit you purchase this Deployment phase costs up to 2 less Rubium (you still pay at least 1).",
+                EnergizeDeploymentId.FreeHuman =>
+                    "Place 1 Human on a home-base hex you control for free (select the hex, then play this card). Humans cannot be placed on invalid terrain.",
+                EnergizeDeploymentId.SupplyRun =>
+                    "Gain 1 Rubium and draw 1 Energize card from the deck.",
+                _ => ""
             };
         }
     }

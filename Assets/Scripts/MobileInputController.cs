@@ -44,6 +44,8 @@ namespace NexusGame
 
         void Update()
         {
+            if (Game != null && Game.IsGameOver)
+                return;
             if (Game != null && Game.IsAiControlled(Game.CurrentPlayer))
                 return;
 
@@ -361,9 +363,20 @@ namespace NexusGame
             switch (tile.ExplorationReward)
             {
                 case ExplorationReward.FreeHuman:
-                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, tile);
-                    debugMessage += "Free Human";
+                {
+                    var spawn = Game.ResolveExplorationUnitSpawnTile(UnitType.Human, tile, Game.CurrentPlayer);
+                    if (spawn != null)
+                    {
+                        Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, spawn);
+                        debugMessage += spawn != tile
+                            ? "Free Human (placed on home — lava hex cannot hold Humans)"
+                            : "Free Human";
+                    }
+                    else
+                        debugMessage += "Free Human (skipped — no valid spawn for lava reward)";
+
                     break;
+                }
                 case ExplorationReward.FreeFungoid:
                     Game.SpawnUnit(Game.CurrentPlayer, UnitType.Fungoid, tile);
                     debugMessage += "Free Fungoid";
@@ -388,11 +401,22 @@ namespace NexusGame
                     debugMessage += "Mine bonus +3";
                     break;
                 case ExplorationReward.FreeHumanAndMine2:
-                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, tile);
+                {
+                    var spawn = Game.ResolveExplorationUnitSpawnTile(UnitType.Human, tile, Game.CurrentPlayer);
+                    if (spawn != null)
+                    {
+                        Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, spawn);
+                        debugMessage += spawn != tile
+                            ? "Free Human (on home) + Mine +2 on hex"
+                            : "Free Human + Mine bonus +2";
+                    }
+                    else
+                        debugMessage += "Human skipped (no home for lava) + Mine bonus +2";
+
                     tile.ExtraMineYield = 2;
                     UpdateMineLabel(tile);
-                    debugMessage += "Free Human + Mine bonus +2";
                     break;
+                }
                 default:
                     debugMessage += "No reward (None)";
                     break;
@@ -567,6 +591,9 @@ namespace NexusGame
 
         public bool CanUnitMoveTo(UnitInstance unit, BoardTile target)
         {
+            if (Game != null && Game.IsGameOver)
+                return false;
+
             if (unit.Tile == null || target == null || unit.Tile == target)
             {
                 if (!SuppressMovementDiagnosticLogs)

@@ -49,12 +49,6 @@ namespace NexusGame
         PlayerState _battleAttacker;
         PlayerState _battleDefender;
         BoardTile _battleHex;
-
-        /// <summary>Active battle (attacker vs defender); set during interactive battle resolution.</summary>
-        public PlayerState BattleContextAttacker => _battleAttacker;
-
-        public PlayerState BattleContextDefender => _battleDefender;
-        public BoardTile BattleContextHex => _battleHex;
         BattleEnergizeModifiers _mods;
         System.Random _battleRng;
         List<string> _liveBattleLines;
@@ -202,7 +196,7 @@ namespace NexusGame
         /// <summary>Play a Deployment-phase Energize. FreeHuman needs a home-base tile owned by current player.</summary>
         public bool TryPlayDeploymentEnergize(EnergizeDeploymentId id, BoardTile selectedHomeHex)
         {
-            if (BattlePhaseBlockingPlay || DragonPhase != null)
+            if (IsGameOver || BattlePhaseBlockingPlay || DragonPhase != null)
                 return false;
 
             var p = CurrentPlayer;
@@ -240,6 +234,9 @@ namespace NexusGame
 
         void BeginBattleArrangement(PlayerState attacker)
         {
+            if (IsGameOver)
+                return;
+
             BattlePlan.Clear();
             var hexes = BattleResolver.FindContestedHexesForAttacker(attacker);
             hexes.Sort((a, b) =>
@@ -338,6 +335,9 @@ namespace NexusGame
 
             foreach (var entry in BattlePlan)
             {
+                if (IsGameOver)
+                    yield break;
+
                 var hex = entry.Hex;
                 var defender = Players.Find(p => p.PlayerIndex == entry.DefenderPlayerIndex);
                 if (defender == null || hex == null)
@@ -379,6 +379,13 @@ namespace NexusGame
                     log.AppendLine($"P{attacker.PlayerIndex + 1} wins battle (+1 VP).");
                     if (MetaProgression.Instance != null)
                         MetaProgression.Instance.OnBattleWinReward();
+                    if (CheckGameEndAfterVpChange())
+                    {
+                        log.AppendLine("Game over.");
+                        log.AppendLine("---");
+                        break;
+                    }
+
                     DrawEnergizeCards(defender, 1);
                     if (!AutoResolveBattlesQuick)
                     {
@@ -386,6 +393,11 @@ namespace NexusGame
                         while (SecretMissionOffer != null && SecretMissionOffer.Waiting)
                             yield return null;
                         SecretMissionOffer = null;
+                        if (IsGameOver)
+                        {
+                            log.AppendLine("---");
+                            break;
+                        }
                     }
                 }
                 else
@@ -450,6 +462,7 @@ namespace NexusGame
             p.VictoryPoints += s.VictoryPoints;
             p.SecretMissions.RemoveAt(indexInHand);
             SecretMissionOffer.Waiting = false;
+            CheckGameEndAfterVpChange();
         }
 
         public void SkipSecretMissionPlay()
@@ -828,6 +841,12 @@ namespace NexusGame
         /// <summary>Start or advance dragon strike phase before ending turn.</summary>
         public void BeginDragonPhaseIfNeeded(Action onComplete)
         {
+            if (IsGameOver)
+            {
+                onComplete?.Invoke();
+                return;
+            }
+
             DragonPhase = BuildDragonPhase(CurrentPlayer);
             if (DragonPhase == null || DragonPhase.Options.Count == 0)
             {
@@ -989,6 +1008,8 @@ namespace NexusGame
                     if (MetaProgression.Instance != null)
                         MetaProgression.Instance.OnBattleWinReward();
                     DrawEnergizeCards(defender, 1);
+                    if (CheckGameEndAfterVpChange())
+                        break;
                 }
 
                 foreach (var line in result.LogLines)

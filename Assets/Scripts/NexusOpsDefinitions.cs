@@ -42,6 +42,7 @@ namespace NexusGame
     {
         public UnitType Type;
         public int Cost;
+        [Tooltip("Base number of d6 rolled per attack step for this unit (default config: 1 for all). Energize adds extra dice.")]
         public int AttackDice;
         [Range(1, 6)]
         public int HitOnOrAbove;
@@ -89,6 +90,8 @@ namespace NexusGame
                 new TileDefinition { Type = TileType.Rock, RubiumYield = 0, Color = new Color(0.4f, 0.4f, 0.4f) }
             };
 
+            // Every unit rolls 1d6 per attack step; strength is mostly hit threshold + movement/cost.
+            // Energize cards add extra dice in battle (see BattleEnergizeModifiers).
             config.UnitDefinitions = new List<UnitDefinition>
             {
                 new UnitDefinition
@@ -109,7 +112,7 @@ namespace NexusGame
                 {
                     Type = UnitType.Fungoid,
                     Cost = 2,
-                    AttackDice = 2,
+                    AttackDice = 1,
                     HitOnOrAbove = 5,
                     MaxMoveDistance = 1,
                     CanEnterPlains = true,
@@ -123,7 +126,7 @@ namespace NexusGame
                 {
                     Type = UnitType.Crystalline,
                     Cost = 2,
-                    AttackDice = 2,
+                    AttackDice = 1,
                     HitOnOrAbove = 4,
                     MaxMoveDistance = 1,
                     CanEnterPlains = true,
@@ -137,7 +140,7 @@ namespace NexusGame
                 {
                     Type = UnitType.RockStrider,
                     Cost = 3,
-                    AttackDice = 3,
+                    AttackDice = 1,
                     HitOnOrAbove = 5,
                     MaxMoveDistance = 2,
                     CanEnterPlains = true,
@@ -151,7 +154,7 @@ namespace NexusGame
                 {
                     Type = UnitType.LavaLeaper,
                     Cost = 4,
-                    AttackDice = 3,
+                    AttackDice = 1,
                     HitOnOrAbove = 4,
                     MaxMoveDistance = 1,
                     CanEnterPlains = true,
@@ -165,7 +168,7 @@ namespace NexusGame
                 {
                     Type = UnitType.RubiumDragon,
                     Cost = 8,
-                    AttackDice = 4,
+                    AttackDice = 1,
                     HitOnOrAbove = 4,
                     MaxMoveDistance = 1,
                     CanEnterPlains = true,

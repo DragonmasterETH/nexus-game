@@ -8,7 +8,7 @@ namespace NexusGame
     /// <summary>
     /// Nexus Ops battle rules (see rulebook Battle section):
     /// - Battle order (strongest first): Rubium Dragon → Lava Leaper → Rock Strider → Crystalline → Fungoid → Human.
-    /// - For each step, only units of that type that are still alive may roll; each unit rolls once (AttackDice vs HitOnOrAbove).
+    /// - For each step, only units of that type that are still alive may roll; each unit rolls once using AttackDice d6 (Energize adds extra dice).
     /// - Attacker removes casualties from defender's hits first, then defender removes casualties from attacker's hits.
     /// - Only the active player (attacker) and chosen defender fight; other factions in the hex do not roll or take hits.
     /// - Attacker wins if all defender units in the battle are destroyed (including mutual destruction). +1 VP.

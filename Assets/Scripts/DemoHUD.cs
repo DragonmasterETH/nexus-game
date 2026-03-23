@@ -17,11 +17,6 @@ namespace NexusGame
         public bool ShowDebugToggle = false;
 
         bool _showBuyMenu;
-        bool _showQuickRef;
-        int _quickRefTab; // 0 = rules, 1 = units
-        Vector2 _scrollQuickRef;
-        GUIStyle _quickRefBodyStyle;
-
         Vector2 _scrollBattle;
         Vector2 _scrollHand;
         Vector2 _scrollHandBattle;
@@ -32,6 +27,10 @@ namespace NexusGame
         bool _showCodex;
         bool _showCardsReference;
         bool _showStoreStub;
+        bool _showMyEnergizeHelp;
+        Vector2 _scrollMyEnergizeHelp;
+        /// <summary>Whose hand to describe in the Energize help popup (set when opened).</summary>
+        PlayerState _energizeHelpSubject;
 
         GUIStyle _cardTitleStyle;
         GUIStyle _cardBodyStyle;
@@ -41,6 +40,27 @@ namespace NexusGame
         const float CardBarHeight = 152f;
         const float CardTileW = 112f;
         const float CardTileH = 104f;
+
+        static Texture2D _dimTex;
+
+        /// <summary>
+        /// ★ = earned VP, ☆ = still needed to reach <paramref name="goal"/> (win threshold).
+        /// </summary>
+        public static string VpStarsString(int vp, int goal)
+        {
+            goal = Mathf.Max(1, goal);
+            vp = Mathf.Max(0, vp);
+            if (goal > 16)
+                return $"{vp} / {goal}";
+
+            var sb = new StringBuilder(goal * 2 + 8);
+            for (int i = 0; i < goal; i++)
+                sb.Append(i < vp ? "\u2605 " : "\u2606 ");
+            if (vp > goal)
+                sb.Append($"(+{vp - goal}) ");
+            sb.Append($"({vp})");
+            return sb.ToString().TrimEnd();
+        }
 
         void Start()
         {
@@ -89,6 +109,12 @@ namespace NexusGame
             if (Game == null || Game.Players.Count == 0)
                 return;
 
+            if (Game.IsGameOver && Game.FinalSnapshot != null)
+            {
+                DrawEndGameOverlay(Game.FinalSnapshot);
+                return;
+            }
+
             var player = Game.CurrentPlayer;
 
             DrawFullBattleOverlays(player);
@@ -98,7 +124,15 @@ namespace NexusGame
             sb.AppendLine("Nexus Ops");
             sb.AppendLine("--------------------");
             sb.AppendLine(
-                $"Current: P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}  Rubium: {player.Rubium}  VP: {player.VictoryPoints}");
+                $"Current: P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}  Rubium: {player.Rubium}");
+            sb.AppendLine($"VP: {VpStarsString(player.VictoryPoints, Game.VictoryPointsToWin)}");
+            sb.AppendLine("VP (all players):");
+            foreach (var p in Game.Players.OrderBy(x => x.PlayerIndex))
+            {
+                string tag = p.PlayerIndex == player.PlayerIndex ? " <- turn" : "";
+                sb.AppendLine($"  P{p.PlayerIndex + 1}: {VpStarsString(p.VictoryPoints, Game.VictoryPointsToWin)}{tag}");
+            }
+
             sb.AppendLine(
                 $"Battle cards: {player.BattleEnergize?.Count ?? 0}  Deploy: {player.DeployEnergize?.Count ?? 0}  Secrets: {player.SecretMissions?.Count ?? 0}");
             if (player.DeploymentPurchaseDiscountRubium > 0)
@@ -114,34 +148,24 @@ namespace NexusGame
             if (Game.BattlePhaseBlockingPlay)
                 sb.AppendLine("(Finish battle phase to move.)");
 
-            if (Game.AiVsAiMode)
-            {
-                sb.AppendLine();
-                sb.AppendLine(
-                    $"[AI test] Goal {Game.AiTestVictoryTargetVp} VP  |  draw cap {Game.AiTestMaxTotalDrawPhases} (T{Game.TurnNumber})");
-                if (Game.AiTestMatchCompleted && Game.AiTestWinner != null)
-                    sb.AppendLine(
-                        $"MATCH OVER — P{Game.AiTestWinner.PlayerIndex + 1} wins ({Game.AiTestWinner.VictoryPoints} VP)");
-            }
-
             sb.AppendLine();
-            if (Game.AiVsAiMode)
-            {
-                sb.AppendLine("(AI vs AI — both seats automated.)");
-            }
-            else
-            {
-                sb.AppendLine("- $ : buy units + Deployment Energize. Free Human: select home hex first.");
-                sb.AppendLine("- End Turn: Dragon shots, then next player.");
-            }
+            sb.AppendLine("- $ : buy units + Deployment Energize. Free Human: select home hex first.");
+            sb.AppendLine("- End Turn: Dragon shots, then next player.");
 
-            float hudH = Game.AiVsAiMode ? 200f : 155f;
+            float hudH = Mathf.Clamp(210f + Game.Players.Count * 18f, 220f, 320f);
             GUI.Box(new Rect(10, 10, 340, hudH), sb.ToString());
+            float battleLogTop = 20f + hudH;
+
             float panelRight = Screen.width - 210f;
             if (GUI.Button(new Rect(panelRight, 10f, 98f, 22f), "Unit codex"))
                 _showCodex = !_showCodex;
             if (GUI.Button(new Rect(panelRight + 102f, 10f, 98f, 22f), "Cards ref."))
                 _showCardsReference = !_showCardsReference;
+            if (GUI.Button(new Rect(panelRight, 88f, 200f, 22f), "My Energize (help)"))
+            {
+                _energizeHelpSubject = player;
+                _showMyEnergizeHelp = true;
+            }
             if (GUI.Button(new Rect(panelRight, 36f, 98f, 22f), "Store (stub)"))
                 _showStoreStub = !_showStoreStub;
             NexusBattleDebug.VerboseBattleLogs = GUI.Toggle(new Rect(panelRight + 102f, 36f, 98f, 22f),
@@ -158,7 +182,7 @@ namespace NexusGame
 
             if (!string.IsNullOrEmpty(battleLog) && !Game.PendingBattleArrangement)
             {
-                var battleRect = new Rect(10, 175, 420, 140);
+                var battleRect = new Rect(10, battleLogTop, 420, 140);
                 GUI.Box(battleRect, "Battle log");
                 GUI.Label(new Rect(battleRect.x + 6, battleRect.y + 20, battleRect.width - 12, battleRect.height - 26),
                     battleLog.Length > 560 ? battleLog.Substring(0, 560) + "..." : battleLog);
@@ -170,7 +194,9 @@ namespace NexusGame
                 InputController.DebugClicks = newDebug;
             }
 
-            float topY = string.IsNullOrEmpty(battleLog) || Game.PendingBattleArrangement ? 175f : 325f;
+            float topY = string.IsNullOrEmpty(battleLog) || Game.PendingBattleArrangement
+                ? battleLogTop
+                : battleLogTop + 150f;
             if (Game.DragonPhase != null)
                 topY = Mathf.Max(topY, Screen.height - 220f);
             // Keep main buttons above bottom card strip + dragon strip
@@ -239,81 +265,6 @@ namespace NexusGame
             DrawAuxiliaryPanels(player);
 
             DrawTilePopup(player);
-
-            if (_showQuickRef)
-                DrawQuickReferenceOverlay();
-            else if (GUI.Button(new Rect(Screen.width - 108, 12, 98, 26), "Quick ref"))
-                _showQuickRef = true;
-        }
-
-        void EnsureQuickRefBodyStyle()
-        {
-            if (_quickRefBodyStyle != null)
-                return;
-            _quickRefBodyStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 13,
-                wordWrap = true
-            };
-        }
-
-        void DrawQuickReferenceOverlay()
-        {
-            EnsureQuickRefBodyStyle();
-
-            var dim = new Color(0.02f, 0.02f, 0.06f, 0.72f);
-            var prev = GUI.color;
-            GUI.color = dim;
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill);
-            GUI.color = prev;
-
-            float pad = 16f;
-            var panel = new Rect(pad, pad, Screen.width - 2f * pad, Screen.height - 2f * pad);
-            GUI.Box(panel, "");
-
-            var titleStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 16,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter
-            };
-            string header = _quickRefTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
-            GUI.Label(new Rect(panel.x, panel.y + 6f, panel.width, 26f), header, titleStyle);
-
-            const float tabH = 26f;
-            float tabY = panel.y + 34f;
-            if (GUI.Button(new Rect(panel.x + 12f, tabY, 88f, tabH), "Rules"))
-            {
-                if (_quickRefTab != 0)
-                    _scrollQuickRef = Vector2.zero;
-                _quickRefTab = 0;
-            }
-
-            if (GUI.Button(new Rect(panel.x + 106f, tabY, 88f, tabH), "Units"))
-            {
-                if (_quickRefTab != 1)
-                    _scrollQuickRef = Vector2.zero;
-                _quickRefTab = 1;
-            }
-
-            var cfg = Game != null ? Game.Config : null;
-            string body = _quickRefTab == 0
-                ? NexusRulebook.Body
-                : NexusUnitQuickReference.Build(cfg);
-
-            const float closeH = 36f;
-            var scrollRect = new Rect(panel.x + 12f, panel.y + 34f + tabH + 6f, panel.width - 24f,
-                panel.height - 34f - tabH - 6f - closeH - 14f);
-            float innerW = scrollRect.width - 22f;
-            float contentH = _quickRefBodyStyle.CalcHeight(new GUIContent(body), innerW);
-            contentH = Mathf.Max(contentH + 32f, scrollRect.height * 0.45f);
-
-            _scrollQuickRef = GUI.BeginScrollView(scrollRect, _scrollQuickRef, new Rect(0f, 0f, innerW, contentH));
-            GUI.Label(new Rect(8f, 8f, innerW - 16f, contentH), body, _quickRefBodyStyle);
-            GUI.EndScrollView();
-
-            if (GUI.Button(new Rect(panel.xMax - 188f, panel.yMax - closeH - 10f, 168f, closeH), "Close"))
-                _showQuickRef = false;
         }
 
         void DrawIncomeFlash()
@@ -402,6 +353,69 @@ namespace NexusGame
                         _showStoreStub = false;
                 }, "Store (stub)");
             }
+
+            if (_showMyEnergizeHelp)
+            {
+                float winH = Mathf.Min(480f, Screen.height - 100f);
+                var r = new Rect(12f, 80f, Mathf.Min(580f, Screen.width - 24f), winH);
+                GUI.Window(953, r, MyEnergizeHelpWindow, "Your Energize cards");
+            }
+        }
+
+        void MyEnergizeHelpWindow(int windowId)
+        {
+            var subject = _energizeHelpSubject != null ? _energizeHelpSubject : Game.CurrentPlayer;
+            if (subject == null)
+            {
+                if (GUILayout.Button("Close"))
+                    _showMyEnergizeHelp = false;
+                return;
+            }
+
+            GUILayout.Label(
+                $"P{subject.PlayerIndex + 1}{(Game.IsAiControlled(subject) ? " (AI)" : "")} — Energize in hand",
+                GUI.skin.box);
+
+            float scrollH = rHeightForMyEnergizeHelp();
+            _scrollMyEnergizeHelp = GUILayout.BeginScrollView(_scrollMyEnergizeHelp, GUILayout.Height(scrollH));
+
+            bool hasBattle = subject.BattleEnergize != null && subject.BattleEnergize.Count > 0;
+            bool hasDeploy = subject.DeployEnergize != null && subject.DeployEnergize.Count > 0;
+            if (!hasBattle && !hasDeploy)
+                GUILayout.Label(
+                    "You have no Energize cards in hand. Gain them from the draw phase, Monolith bonus, or other effects.");
+
+            if (hasBattle)
+            {
+                GUILayout.Label("Battle (pre-dice step)", GUI.skin.box);
+                foreach (var g in subject.BattleEnergize.GroupBy(x => x).OrderBy(x => x.Key.ToString()))
+                {
+                    GUILayout.Label($"• {EnergizeBattleCatalog.GetName(g.Key)}  ×{g.Count()}");
+                    GUILayout.Label(EnergizeBattleCatalog.GetDescription(g.Key));
+                    GUILayout.Space(6f);
+                }
+            }
+
+            if (hasDeploy)
+            {
+                GUILayout.Label("Deployment (buy phase)", GUI.skin.box);
+                foreach (var g in subject.DeployEnergize.GroupBy(x => x).OrderBy(x => x.Key.ToString()))
+                {
+                    GUILayout.Label($"• {EnergizeDeploymentCatalog.GetName(g.Key)}  ×{g.Count()}");
+                    GUILayout.Label(EnergizeDeploymentCatalog.GetDescription(g.Key));
+                    GUILayout.Space(6f);
+                }
+            }
+
+            GUILayout.EndScrollView();
+            if (GUILayout.Button("Close"))
+                _showMyEnergizeHelp = false;
+        }
+
+        float rHeightForMyEnergizeHelp()
+        {
+            float winH = Mathf.Min(480f, Screen.height - 100f);
+            return Mathf.Max(120f, winH - 110f);
         }
 
         void DrawBottomCardHand(PlayerState player)
@@ -418,7 +432,12 @@ namespace NexusGame
             GUI.Box(new Rect(barX, barY, barW, CardBarHeight), "");
 
             string deckLine = $"P{player.PlayerIndex + 1} hand  |  Secret deck: {Game.SecretDeckCount}  Energize deck: {Game.EnergizeDeckCount}";
-            GUI.Label(new Rect(barX + 8, barY + 4, barW - 16, 18), deckLine, _cardColumnLabelStyle);
+            GUI.Label(new Rect(barX + 8, barY + 4, barW - 132f, 18), deckLine, _cardColumnLabelStyle);
+            if (GUI.Button(new Rect(barX + barW - 118f, barY + 2f, 112f, 18f), "Energize help"))
+            {
+                _energizeHelpSubject = player;
+                _showMyEnergizeHelp = true;
+            }
 
             float colGap = 8f;
             float colY = barY + 24f;
@@ -672,6 +691,14 @@ namespace NexusGame
             var p = Game.EnergizePromptPlayer;
             GUILayout.Label(Game.EnergizeBattleContext ?? "");
             GUILayout.Label("P" + (p.PlayerIndex + 1) + ": Battle Energize or pass.");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("What do my cards do?", GUILayout.Height(26)))
+            {
+                _energizeHelpSubject = p;
+                _showMyEnergizeHelp = true;
+            }
+
+            GUILayout.EndHorizontal();
             _scrollHand = GUILayout.BeginScrollView(_scrollHand, GUILayout.MinHeight(160));
             var distinct = p.BattleEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString());
             foreach (var g in distinct)
@@ -930,6 +957,74 @@ namespace NexusGame
             }
 
             return null;
+        }
+
+        void DrawEndGameOverlay(GameEndSnapshot snap)
+        {
+            if (snap == null)
+                return;
+
+            if (_dimTex == null)
+            {
+                _dimTex = new Texture2D(1, 1);
+                _dimTex.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.82f));
+                _dimTex.Apply();
+            }
+
+            GUI.depth = -50;
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _dimTex);
+
+            float w = Mathf.Min(540f, Screen.width - 24f);
+            float h = Mathf.Min(440f, Screen.height - 24f);
+            var box = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
+            GUI.Box(box, "");
+
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 20,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white }
+            };
+            GUI.Label(new Rect(box.x + 12f, box.y + 10f, box.width - 24f, 32f),
+                $"Game over — P{snap.WinnerPlayerIndex + 1} wins", titleStyle);
+
+            var reasonStyle = new GUIStyle(GUI.skin.label)
+            {
+                wordWrap = true,
+                alignment = TextAnchor.UpperCenter,
+                normal = { textColor = new Color(0.9f, 0.9f, 0.9f) }
+            };
+            GUI.Label(new Rect(box.x + 16f, box.y + 46f, box.width - 32f, 44f), snap.WinReason ?? "", reasonStyle);
+
+            int vpGoal = Game != null ? Game.VictoryPointsToWin : 10;
+            var sb = new StringBuilder();
+            sb.AppendLine("Player   VP (stars)   Rubium   Units");
+            sb.AppendLine("------------------------------------");
+            for (int i = 0; i < snap.PlayerIndex.Length; i++)
+            {
+                string winTag = snap.PlayerIndex[i] == snap.WinnerPlayerIndex ? " *" : "";
+                string vpLine = VpStarsString(snap.VictoryPoints[i], vpGoal);
+                sb.AppendLine(
+                    $"P{snap.PlayerIndex[i] + 1}{winTag}  {vpLine}  {snap.Rubium[i]}  {snap.UnitCounts[i]}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine($"Completed player-turns (End Turn): {snap.TurnsElapsed}");
+            sb.AppendLine($"VP goal: {Game.VictoryPointsToWin}  |  Turn limit: {(Game.MaxPlayerTurnsBeforeTiebreak > 0 ? Game.MaxPlayerTurnsBeforeTiebreak.ToString() : "off")}");
+
+            var bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                alignment = TextAnchor.UpperLeft,
+                normal = { textColor = Color.white },
+                wordWrap = true
+            };
+
+            GUI.Label(new Rect(box.x + 16f, box.y + 96f, box.width - 32f, h - 150f), sb.ToString(), bodyStyle);
+
+            if (GUI.Button(new Rect(box.x + box.width / 2f - 110f, box.yMax - 48f, 220f, 36f), "Restart scene (menu)"))
+                SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
     }
 }
