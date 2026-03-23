@@ -6,7 +6,7 @@ using UnityEngine;
 namespace NexusGame
 {
     /// <summary>
-    /// Drives player 2 in <see cref="GameController.VsAiMode"/>: battles, dragon, buys, moves, end turn.
+    /// Drives automated seats in <see cref="GameController.VsAiMode"/> (P2) or <see cref="GameController.AiVsAiMode"/> (both).
     /// </summary>
     public class SimpleAiController : MonoBehaviour
     {
@@ -50,14 +50,22 @@ namespace NexusGame
             while (enabled)
             {
                 yield return null;
-                if (Game == null || !Game.VsAiMode)
+                if (Game == null || (!Game.VsAiMode && !Game.AiVsAiMode))
                     continue;
 
-                var cur = Game.CurrentPlayer;
-                if (!Game.IsAiControlled(cur))
-                    continue;
+                Game.CheckAiTestMatchEndIfNeeded();
 
+                // Battle prompts (Energize, casualties, etc.) target the player whose turn it is in that *step*,
+                // not necessarily Game.CurrentPlayer (turn owner stays the attacker for the whole battle phase).
+                // Keep resolving even after AI-test match ends so any in-flight battle can finish.
                 yield return AiResolveBlockingUi(wait, tick);
+
+                if (Game.AiVsAiMode && Game.AiTestMatchCompleted)
+                    continue;
+
+                if (!Game.IsAiControlled(Game.CurrentPlayer))
+                    continue;
+
                 yield return AiDoMainTurn(wait, tick);
             }
         }
@@ -121,31 +129,131 @@ namespace NexusGame
                 return;
             }
 
-            if (Random.value < 0.42f)
+            var att = Game.BattleContextAttacker;
+            var def = Game.BattleContextDefender;
+            bool isAttacker = att != null && pl == att;
+            bool isDefender = def != null && pl == def;
+
+            int myPower = CountFriendlyCombatPowerOnHex(Game.BattleContextHex, pl);
+            int enemyPower = 0;
+            if (isAttacker && def != null)
+                enemyPower = CountFriendlyCombatPowerOnHex(Game.BattleContextHex, def);
+            else if (isDefender && att != null)
+                enemyPower = CountFriendlyCombatPowerOnHex(Game.BattleContextHex, att);
+
+            // Defender: protect high-value stack; don't burn cards when we're already favored.
+            if (isDefender && !isAttacker)
             {
+                if (enemyPower <= 1 && Random.value < 0.55f)
+                {
+                    Game.SubmitEnergizePass();
+                    return;
+                }
+
+                if (TrySubmitFirstEnergize(pl,
+                        EnergizeBattleId.Aegis,
+                        EnergizeBattleId.Elusive,
+                        EnergizeBattleId.DeadlyAim))
+                    return;
+
+                if (myPower >= enemyPower + 2 && Random.value < 0.35f)
+                {
+                    Game.SubmitEnergizePass();
+                    return;
+                }
+
+                if (TrySubmitFirstEnergize(pl,
+                        EnergizeBattleId.BattleFury,
+                        EnergizeBattleId.FocusFire,
+                        EnergizeBattleId.BattleCache))
+                    return;
+
                 Game.SubmitEnergizePass();
                 return;
             }
 
-            var prio = new[]
+            // Attacker (or unknown): pressure — dice and hit mods first; Focus Fire when we have several dice bodies.
+            if (isAttacker || !isDefender)
             {
-                EnergizeBattleId.BattleFury,
-                EnergizeBattleId.DeadlyAim,
-                EnergizeBattleId.Aegis,
-                EnergizeBattleId.Elusive,
-                EnergizeBattleId.FocusFire,
-                EnergizeBattleId.BattleCache
-            };
+                if (TrySubmitFirstEnergize(pl,
+                        EnergizeBattleId.BattleFury,
+                        EnergizeBattleId.DeadlyAim))
+                    return;
 
-            foreach (var id in prio)
-            {
-                if (!pl.BattleEnergize.Contains(id))
-                    continue;
-                Game.SubmitEnergizePlay(id);
+                int diceBodies = CountDiceRollingBodiesOnHex(Game.BattleContextHex, pl);
+                if (diceBodies >= 2 &&
+                    pl.BattleEnergize.Contains(EnergizeBattleId.FocusFire) &&
+                    CountFriendlyOnHex(Game.BattleContextHex, pl) > 0)
+                {
+                    Game.SubmitEnergizePlay(EnergizeBattleId.FocusFire);
+                    return;
+                }
+
+                if (TrySubmitFirstEnergize(pl,
+                        EnergizeBattleId.Aegis,
+                        EnergizeBattleId.Elusive))
+                    return;
+
+                if (TrySubmitFirstEnergize(pl, EnergizeBattleId.BattleCache))
+                    return;
+
+                if (pl.BattleEnergize.Contains(EnergizeBattleId.FocusFire) &&
+                    CountFriendlyOnHex(Game.BattleContextHex, pl) > 0)
+                {
+                    Game.SubmitEnergizePlay(EnergizeBattleId.FocusFire);
+                    return;
+                }
+
+                Game.SubmitEnergizePass();
                 return;
             }
 
             Game.SubmitEnergizePass();
+        }
+
+        /// <summary>Sum of attack dice on hex (rough fight weight).</summary>
+        static int CountFriendlyCombatPowerOnHex(BoardTile hex, PlayerState owner)
+        {
+            if (hex == null || owner == null)
+                return 0;
+            var n = 0;
+            foreach (var u in Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (u.Tile != hex || u.Owner != owner || u.Definition == null)
+                    continue;
+                n += Mathf.Max(0, u.Definition.AttackDice);
+            }
+
+            return n;
+        }
+
+        static int CountDiceRollingBodiesOnHex(BoardTile hex, PlayerState owner)
+        {
+            if (hex == null || owner == null)
+                return 0;
+            var n = 0;
+            foreach (var u in Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (u.Tile != hex || u.Owner != owner || u.Definition == null)
+                    continue;
+                if (u.Definition.AttackDice > 0)
+                    n++;
+            }
+
+            return n;
+        }
+
+        bool TrySubmitFirstEnergize(PlayerState pl, params EnergizeBattleId[] order)
+        {
+            foreach (var id in order)
+            {
+                if (!pl.BattleEnergize.Contains(id))
+                    continue;
+                Game.SubmitEnergizePlay(id);
+                return true;
+            }
+
+            return false;
         }
 
         UnitType PickFocusFireUnitType()
@@ -155,28 +263,17 @@ namespace NexusGame
             if (hex == null || me == null)
                 return UnitType.Human;
 
-            // Match HUD: pick one of *your* unit types present on the battle hex for +2 dice.
-            var counts = new Dictionary<UnitType, int>();
-            foreach (var u in Object.FindObjectsOfType<UnitInstance>())
+            // Same ordering as HUD FocusFireWindow: first type in battle order you have on the hex.
+            foreach (var t in BattleResolver.BattleOrder)
             {
-                if (u.Tile != hex || u.Owner != me)
-                    continue;
-                counts.TryGetValue(u.Definition.Type, out int n);
-                counts[u.Definition.Type] = n + 1;
-            }
-
-            UnitType best = UnitType.Human;
-            var bestC = -1;
-            foreach (var kv in counts)
-            {
-                if (kv.Value > bestC)
+                foreach (var u in Object.FindObjectsOfType<UnitInstance>())
                 {
-                    bestC = kv.Value;
-                    best = kv.Key;
+                    if (u.Tile == hex && u.Owner == me && u.Definition.Type == t)
+                        return t;
                 }
             }
 
-            return best;
+            return UnitType.Human;
         }
 
         void SubmitAiCasualties()
@@ -187,8 +284,15 @@ namespace NexusGame
 
             var victims = BattleResolver.PickCasualtiesWeakestFirst(pick.Pool, pick.Required);
             foreach (var u in victims)
-                Game.ToggleCasualtyUnit(u);
-            Game.SubmitCasualtyPick();
+            {
+                if (u == null || !pick.Pool.Contains(u))
+                    continue;
+                if (!pick.Selected.Contains(u))
+                    Game.ToggleCasualtyUnit(u);
+            }
+
+            if (pick.Selected.Count == pick.Required)
+                Game.SubmitCasualtyPick();
         }
 
         void PlayBestSecretOrSkip()
