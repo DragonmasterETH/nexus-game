@@ -37,6 +37,9 @@ namespace NexusGame
 
         public BoardLayoutMode LayoutMode = BoardLayoutMode.OneVOne;
 
+        /// <summary>Shared material for unrevealed exploration markers (<c>Ore Unrevealed.png</c> in Resources).</summary>
+        Material _explorationUnrevealedSharedMat;
+
         public Dictionary<(int q, int r), BoardTile> Tiles { get; private set; } =
             new Dictionary<(int q, int r), BoardTile>();
 
@@ -563,6 +566,14 @@ namespace NexusGame
                 seed = (seed * 1103515245 + 12345) & 0x7fffffff;
             }
 
+            if (_explorationUnrevealedSharedMat == null)
+            {
+                _explorationUnrevealedSharedMat = new Material(Shader.Find("Sprites/Default"));
+                NexusGuiArt.ApplyImageToMaterial(_explorationUnrevealedSharedMat,
+                    NexusGuiArt.Load("Sprites/Ore Unrevealed", "Sprites/OreUnrevealed"),
+                    new Color(1f, 1f, 0.4f, 0.9f));
+            }
+
             int count = Mathf.Min(rewards.Count, eligible.Count);
             for (int i = 0; i < count; i++)
             {
@@ -570,19 +581,17 @@ namespace NexusGame
                 tile.ExplorationReward = rewards[i];
                 tile.ExplorationRevealed = false;
 
-                // Create a small "?" marker above the tile
+                // Hidden exploration reward: textured quad (Ore Unrevealed) or yellow fallback
                 var marker = GameObject.CreatePrimitive(PrimitiveType.Quad);
                 marker.name = "ExplorationMarker";
                 marker.transform.SetParent(tile.View.transform, worldPositionStays: false);
-                marker.transform.localPosition = new Vector3(0, 0.02f, 0);
+                // Centered on hex face (small Y to clear z-fight with terrain)
+                marker.transform.localPosition = new Vector3(0, 0.035f, 0);
                 marker.transform.localRotation = Quaternion.Euler(90, 0, 0);
-                marker.transform.localScale = Vector3.one * HexRadius * 0.6f;
+                marker.transform.localScale = Vector3.one * HexRadius * 1.12f;
                 var mr = marker.GetComponent<Renderer>();
                 if (mr != null)
-                {
-                    mr.material = new Material(Shader.Find("Sprites/Default"));
-                    mr.material.color = new Color(1f, 1f, 0.4f, 0.9f);
-                }
+                    mr.sharedMaterial = _explorationUnrevealedSharedMat;
 
                 tile.ExplorationMarker = marker;
             }
