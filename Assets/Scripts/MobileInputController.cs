@@ -18,6 +18,8 @@ namespace NexusGame
             BoardTile _selectedTile;
             readonly System.Collections.Generic.Dictionary<UnitType, int> _moveSelection =
                 new System.Collections.Generic.Dictionary<UnitType, int>();
+            readonly System.Collections.Generic.HashSet<UnitType> _explicitMoveSelection =
+                new System.Collections.Generic.HashSet<UnitType>();
 
             // Drag-to-move support:
             // - If user presses on a movable unit, dragging selects all movable units of that unit type on the source hex.
@@ -159,15 +161,8 @@ namespace NexusGame
                     _dragType = unitOnTile.Definition.Type;
                     _dragStartUnit = unitOnTile;
                     _dragPrepared = true;
-                    // We already selected on pointer-down, so do not run tap logic on release.
-                    _pendingTap = false;
-
-                    // Auto-select all movable units of this type on the source hex.
-                    _moveSelection.Clear();
-                    SetSelectedTile(_dragSourceTile);
-                    _moveSelection.Clear();
-                    // Drag behavior: move the exact piece under the pointer.
-                    _moveSelection[_dragType] = 1;
+                    // Do not auto-select units on click. Selection happens only through +/- UI
+                    // or an actual drag move.
                     return;
                 }
             }
@@ -187,8 +182,10 @@ namespace NexusGame
                 !_dragStartUnit.HasMovedThisTurn &&
                 CanUnitMoveTo(_dragStartUnit, target))
             {
+                var from = _dragStartUnit.Tile;
                 _dragStartUnit.MoveTo(target);
                 target.Owner = _dragStartUnit.Owner;
+                Game.NotifyUnitMoved(_dragStartUnit.Owner, from, target);
 
                 // Reveal exploration only when a unit actually moves onto this hex.
                 if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
@@ -331,6 +328,7 @@ namespace NexusGame
             _selectedTile = tile;
             _popupTile = tile;
             _moveSelection.Clear();
+            _explicitMoveSelection.Clear();
 
             if (_selectedTile != null)
             {
@@ -518,6 +516,8 @@ namespace NexusGame
                 int toMove = kvp.Value;
                 if (toMove <= 0)
                     continue;
+                if (!_explicitMoveSelection.Contains(type))
+                    continue;
 
                 foreach (var unit in Object.FindObjectsOfType<UnitInstance>())
                 {
@@ -530,8 +530,10 @@ namespace NexusGame
                         !unit.HasMovedThisTurn &&
                         CanUnitMoveTo(unit, target))
                     {
+                        var from = unit.Tile;
                         unit.MoveTo(target);
                         target.Owner = unit.Owner;
+                        Game.NotifyUnitMoved(unit.Owner, from, target);
                         // Reveal exploration only when a unit actually moves onto this hex.
                         if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
                         {
@@ -578,6 +580,35 @@ namespace NexusGame
             int current = _moveSelection[type];
             current = Mathf.Clamp(current + delta, 0, available);
             _moveSelection[type] = current;
+            if (current > 0)
+                _explicitMoveSelection.Add(type);
+            else
+                _explicitMoveSelection.Remove(type);
+        }
+
+        public void SetMoveSelection(UnitType type, int amount)
+        {
+            if (_selectedTile == null)
+                return;
+
+            int available = 0;
+            foreach (var unit in Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (unit.Tile == _selectedTile &&
+                    unit.Owner == Game.CurrentPlayer &&
+                    unit.Definition.Type == type &&
+                    !unit.HasMovedThisTurn)
+                {
+                    available++;
+                }
+            }
+
+            int clamped = Mathf.Clamp(amount, 0, available);
+            _moveSelection[type] = clamped;
+            if (clamped > 0)
+                _explicitMoveSelection.Add(type);
+            else
+                _explicitMoveSelection.Remove(type);
         }
 
         public void ClearSelection()
@@ -735,8 +766,10 @@ namespace NexusGame
             if (!can)
                 return false;
 
+            var from = unit.Tile;
             unit.MoveTo(target);
             target.Owner = unit.Owner;
+            Game.NotifyUnitMoved(unit.Owner, from, target);
             if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
                 RevealExploration(target);
             return true;

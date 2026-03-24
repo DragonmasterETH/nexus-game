@@ -15,8 +15,8 @@ namespace NexusGame
         public int StartingRubium = 10;
 
         [Header("Battle")]
-        [Tooltip("Resolve battles at turn start (after draw + mining).")]
-        public bool RunBattlePhaseAtTurnStart = true;
+        [Tooltip("Resolve battles at turn start (after draw + mining). Disabled by default; battles run on End Turn.")]
+        public bool RunBattlePhaseAtTurnStart = false;
 
         [Header("Rules (movement)")]
         [Tooltip("If true, optional retreat constraints are enforced (see MovementRetreatRules).")]
@@ -28,6 +28,27 @@ namespace NexusGame
 
         [Tooltip("With VsAiMode: both seats are AI — for watch / stress testing.")]
         public bool WatchAiVsAiMode;
+
+        /// <summary>
+        /// Compatibility alias used by newer HUD/bootstrap paths.
+        /// Maps to <see cref="WatchAiVsAiMode"/>.
+        /// </summary>
+        public bool AiVsAiMode
+        {
+            get => WatchAiVsAiMode;
+            set => WatchAiVsAiMode = value;
+        }
+
+        [Header("AI test (compat)")]
+        [Min(1)]
+        public int AiTestVictoryTargetVp = 10;
+
+        [Min(1)]
+        public int AiTestMaxTotalDrawPhases = 500;
+
+        public bool AiTestMatchCompleted { get; private set; }
+
+        public PlayerState AiTestWinner { get; private set; }
 
         [Tooltip("Default: 1 = second player (red in 1v1).")]
         public int AiPlayerIndex = 1;
@@ -44,6 +65,9 @@ namespace NexusGame
         public float IncomeFlashSeconds = 2.5f;
 
         int _currentPlayerIndex;
+        BoardTile _activeRetreatSourceThisTurn;
+        bool _normalMovementOccurredThisTurn;
+        bool _anyMovementOccurredThisTurn;
         readonly Dictionary<PlayerState, List<UnitInstance>> _unitsByPlayer =
             new Dictionary<PlayerState, List<UnitInstance>>();
 
@@ -182,6 +206,7 @@ namespace NexusGame
                 {
                     t.Type = TileType.HomeBase;
                     t.Owner = owner;
+                    t.HomeBaseStartingOwnerIndex = owner.PlayerIndex;
                 }
 
                 // 2,3,2 mines per strip
@@ -393,6 +418,35 @@ namespace NexusGame
             if (IsGameOver)
                 return;
 
+            var endingPlayer = CurrentPlayer;
+            bool hasContested = Config != null && endingPlayer != null &&
+                                BattleResolver.FindContestedHexesForAttacker(endingPlayer).Count > 0;
+
+            if (hasContested)
+            {
+                BeginBattleArrangement(endingPlayer);
+                StartCoroutine(EndTurnAfterBattleThenDragon(endingPlayer));
+                return;
+            }
+
+            BeginDragonPhaseIfNeeded(() =>
+            {
+                if (IsGameOver)
+                    return;
+                if (Players != null && _currentPlayerIndex >= 0 && _currentPlayerIndex < Players.Count)
+                    Players[_currentPlayerIndex].DeploymentPurchaseDiscountRubium = 0;
+                AdvanceToNextPlayerTurn();
+            });
+        }
+
+        System.Collections.IEnumerator EndTurnAfterBattleThenDragon(PlayerState endingPlayer)
+        {
+            while (!IsGameOver && (PendingBattleArrangement || BattlePhaseBlockingPlay))
+                yield return null;
+
+            if (IsGameOver || endingPlayer == null || endingPlayer != CurrentPlayer)
+                yield break;
+
             BeginDragonPhaseIfNeeded(() =>
             {
                 if (IsGameOver)
@@ -405,22 +459,55 @@ namespace NexusGame
 
         public PlayerState CurrentPlayer => Players[_currentPlayerIndex];
 
+        internal BoardTile ActiveRetreatSourceThisTurn => _activeRetreatSourceThisTurn;
+        internal bool NormalMovementOccurredThisTurn => _normalMovementOccurredThisTurn;
+        public bool AnyMovementOccurredThisTurn => _anyMovementOccurredThisTurn;
+
         /// <summary>True if this player seat is run by the AI in VsAiMode.</summary>
         public bool IsAiControlled(PlayerState p) =>
             VsAiMode && p != null && (WatchAiVsAiMode || p.PlayerIndex == AiPlayerIndex);
 
-        /// <summary>Find any home-base tile owned by the player (for purchases / AI).</summary>
+        /// <summary>Find any legal starting home tile for deployment/purchase.</summary>
         public BoardTile FindHomeBaseForPlayer(PlayerState player)
         {
             if (player == null || Board == null)
                 return null;
             foreach (var t in Board.AllTiles)
             {
-                if (t != null && t.Type == TileType.HomeBase && t.Owner == player)
+                if (CanDeployToStartingHomeTile(player, t))
                     return t;
             }
 
             return null;
+        }
+
+        public bool IsTileContested(BoardTile tile)
+        {
+            if (tile == null)
+                return false;
+            PlayerState sole = null;
+            foreach (var u in FindObjectsOfType<UnitInstance>())
+            {
+                if (u == null || u.Tile != tile)
+                    continue;
+                if (sole == null)
+                    sole = u.Owner;
+                else if (sole != u.Owner)
+                    return true;
+            }
+
+            return false;
+        }
+
+        public bool CanDeployToStartingHomeTile(PlayerState player, BoardTile tile)
+        {
+            if (player == null || tile == null || tile.Type != TileType.HomeBase)
+                return false;
+            if (tile.HomeBaseStartingOwnerIndex != player.PlayerIndex)
+                return false;
+            if (IsTileContested(tile))
+                return false;
+            return true;
         }
 
         /// <summary>
@@ -447,6 +534,8 @@ namespace NexusGame
         public bool TryPurchaseUnit(PlayerState player, UnitType type, int baseCost)
         {
             if (IsGameOver || player != CurrentPlayer || BattlePhaseBlockingPlay || DragonPhase != null)
+                return false;
+            if (_anyMovementOccurredThisTurn)
                 return false;
 
             var homeTile = FindHomeBaseForPlayer(player);
@@ -518,6 +607,9 @@ namespace NexusGame
             LastBattlePhaseLog = "";
             PendingBattleArrangement = false;
             BattlePhaseBlockingPlay = false;
+            _activeRetreatSourceThisTurn = null;
+            _normalMovementOccurredThisTurn = false;
+            _anyMovementOccurredThisTurn = false;
 
             if (RunBattlePhaseAtTurnStart && Config != null)
             {
@@ -567,6 +659,41 @@ namespace NexusGame
 
             Destroy(unit.gameObject);
             UnitInstance.RelayoutTile(tile);
+        }
+
+        internal void NotifyUnitMoved(PlayerState owner, BoardTile from, BoardTile to)
+        {
+            if (owner == null || owner != CurrentPlayer || from == null || to == null)
+                return;
+            _anyMovementOccurredThisTurn = true;
+
+            bool fromContested = TileHasEnemyForOwner(from, owner);
+            bool toHasEnemy = TileHasEnemyForOwner(to, owner);
+            bool isRetreatMove = fromContested && !toHasEnemy;
+
+            if (isRetreatMove)
+            {
+                if (_activeRetreatSourceThisTurn == null)
+                    _activeRetreatSourceThisTurn = from;
+                else if (_activeRetreatSourceThisTurn != from)
+                    _normalMovementOccurredThisTurn = true;
+                return;
+            }
+
+            _normalMovementOccurredThisTurn = true;
+        }
+
+        bool TileHasEnemyForOwner(BoardTile tile, PlayerState owner)
+        {
+            if (tile == null || owner == null)
+                return false;
+            foreach (var u in FindObjectsOfType<UnitInstance>())
+            {
+                if (u != null && u.Tile == tile && u.Owner != owner)
+                    return true;
+            }
+
+            return false;
         }
     }
 }

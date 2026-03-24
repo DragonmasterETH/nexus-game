@@ -53,11 +53,13 @@ namespace NexusGame
                 if (Game == null || !Game.VsAiMode || Game.IsGameOver)
                     continue;
 
+                // AI may need to answer battle prompts even when it is not CurrentPlayer
+                // (e.g. human attacker vs AI defender during Energize/casualties).
+                yield return AiResolveBlockingUi(wait, tick);
+
                 var cur = Game.CurrentPlayer;
                 if (!Game.IsAiControlled(cur))
                     continue;
-
-                yield return AiResolveBlockingUi(wait, tick);
                 yield return AiDoMainTurn(wait, tick);
             }
         }
@@ -76,6 +78,9 @@ namespace NexusGame
             int battleSafety = 0;
             while (Game.BattlePhaseBlockingPlay && battleSafety++ < 20000)
             {
+                if (!HasAnyAiOwnedBlockingPrompt())
+                    break;
+
                 yield return wait;
 
                 if (Game.EnergizePromptPlayer != null && !Game.IsAiControlled(Game.EnergizePromptPlayer))
@@ -129,6 +134,24 @@ namespace NexusGame
                     break;
                 yield return tick;
             }
+        }
+
+        bool HasAnyAiOwnedBlockingPrompt()
+        {
+            if (Game == null)
+                return false;
+            if (Game.PendingBattleArrangement && Game.IsAiControlled(Game.CurrentPlayer))
+                return true;
+            if (Game.EnergizePromptPlayer != null && Game.IsAiControlled(Game.EnergizePromptPlayer))
+                return true;
+            if (Game.FocusFirePicker != null && Game.IsAiControlled(Game.FocusFirePicker))
+                return true;
+            if (Game.CasualtyPick != null && Game.IsAiControlled(Game.CasualtyPick.Owner))
+                return true;
+            if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting &&
+                Game.IsAiControlled(Game.SecretMissionOffer.Attacker))
+                return true;
+            return false;
         }
 
         void DoEnergizeDecision()

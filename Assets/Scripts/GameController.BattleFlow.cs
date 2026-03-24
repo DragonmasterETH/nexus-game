@@ -49,6 +49,13 @@ namespace NexusGame
         PlayerState _battleAttacker;
         PlayerState _battleDefender;
         BoardTile _battleHex;
+        public BoardTile ActiveBattleHex => _battleHex;
+        public PlayerState ActiveBattleAttacker => _battleAttacker;
+        public PlayerState ActiveBattleDefender => _battleDefender;
+        public bool HasActiveBattleStep { get; private set; }
+        public UnitType ActiveBattleStepUnitType { get; private set; }
+        public int ActiveBattleHitsOnAttacker { get; private set; }
+        public int ActiveBattleHitsOnDefender { get; private set; }
         BattleEnergizeModifiers _mods;
         System.Random _battleRng;
         List<string> _liveBattleLines;
@@ -100,6 +107,9 @@ namespace NexusGame
             BattlePlan.Clear();
             EnergizePromptPlayer = null;
             EnergizeBattleContext = null;
+            HasActiveBattleStep = false;
+            ActiveBattleHitsOnAttacker = 0;
+            ActiveBattleHitsOnDefender = 0;
             _energizeRoundActive = false;
             CasualtyPick = null;
             FocusFirePicker = null;
@@ -198,6 +208,8 @@ namespace NexusGame
         {
             if (IsGameOver || BattlePhaseBlockingPlay || DragonPhase != null)
                 return false;
+            if (AnyMovementOccurredThisTurn)
+                return false;
 
             var p = CurrentPlayer;
             if (p == null || !p.DeployEnergize.Contains(id))
@@ -215,8 +227,7 @@ namespace NexusGame
                     p.DeploymentPurchaseDiscountRubium += 2;
                     break;
                 case EnergizeDeploymentId.FreeHuman:
-                    if (selectedHomeHex == null || selectedHomeHex.Type != TileType.HomeBase ||
-                        selectedHomeHex.Owner != p)
+                    if (!CanDeployToStartingHomeTile(p, selectedHomeHex))
                         return false;
                     SpawnUnit(p, UnitType.Human, selectedHomeHex);
                     break;
@@ -273,6 +284,20 @@ namespace NexusGame
                 PendingBattleArrangement = false;
                 StartBattleCoroutine(attacker);
                 return;
+            }
+
+            // If there is only one battle and only one valid defender on that hex,
+            // skip arrangement UI and start immediately.
+            if (BattlePlan.Count == 1)
+            {
+                var only = BattlePlan[0];
+                var opps = BattleResolver.OpponentsOnHex(only.Hex, attacker);
+                if (opps.Count <= 1)
+                {
+                    PendingBattleArrangement = false;
+                    StartBattleCoroutine(attacker);
+                    return;
+                }
             }
 
             PendingBattleArrangement = true;
@@ -409,6 +434,10 @@ namespace NexusGame
             LastBattlePhaseLog = log.ToString().TrimEnd();
             BattlePlan.Clear();
             BattlePhaseBlockingPlay = false;
+            _battleHex = null;
+            HasActiveBattleStep = false;
+            ActiveBattleHitsOnAttacker = 0;
+            ActiveBattleHitsOnDefender = 0;
             _battleCoroutine = null;
         }
 
@@ -619,7 +648,12 @@ namespace NexusGame
             Action<int> onDefenderCasualty,
             Action onDefenderDragonKilled)
         {
-            void Log(string s) => logLine(attacker, defender, s);
+            void Log(string s)
+            {
+                string ts = DateTime.Now.ToString("HH:mm:ss");
+                string step = HasActiveBattleStep ? $"[{ActiveBattleStepUnitType}]" : "[Battle]";
+                logLine(attacker, defender, $"[{ts}] {step} {s}");
+            }
 
             Log($"Battle at ({hex.Q},{hex.R}): P{attacker.PlayerIndex + 1} vs P{defender.PlayerIndex + 1}");
 
@@ -631,20 +665,30 @@ namespace NexusGame
                 RefreshPoolsLocal(hex, attacker, defender, out var aliveAtt, out var aliveDef);
                 if (aliveDef.Count == 0)
                 {
+                    HasActiveBattleStep = false;
+                    ActiveBattleHitsOnAttacker = 0;
+                    ActiveBattleHitsOnDefender = 0;
                     Log("Defender eliminated.");
                     yield break;
                 }
 
                 if (aliveAtt.Count == 0)
                 {
+                    HasActiveBattleStep = false;
+                    ActiveBattleHitsOnAttacker = 0;
+                    ActiveBattleHitsOnDefender = 0;
                     Log("Attacker eliminated from hex.");
                     yield break;
                 }
 
                 var attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
                 var defOfType = aliveDef.FindAll(u => u.Definition.Type == unitType);
+                attOfType.RemoveAll(u => u == null || u.Tile != hex || u.Owner != attacker);
+                defOfType.RemoveAll(u => u == null || u.Tile != hex || u.Owner != defender);
                 if (attOfType.Count == 0 && defOfType.Count == 0)
                     continue;
+                HasActiveBattleStep = true;
+                ActiveBattleStepUnitType = unitType;
 
                 int hitsOnAttacker = 0;
                 foreach (var u in defOfType)
@@ -701,6 +745,7 @@ namespace NexusGame
                     aegisAtt = false;
                     Log("    Aegis: first hit vs attacker ignored.");
                 }
+                ActiveBattleHitsOnAttacker = capAtt;
 
                 if (capAtt > 0)
                 {
@@ -714,11 +759,21 @@ namespace NexusGame
                     }
                     else
                     {
+                        var validPool = new List<UnitInstance>();
+                        foreach (var u in aliveAtt)
+                        {
+                            if (u != null)
+                                validPool.Add(u);
+                        }
+                        int required = Mathf.Min(capAtt, validPool.Count);
+                        if (required <= 0)
+                            continue;
+
                         CasualtyPick = new CasualtyPickState
                         {
                             Owner = attacker,
-                            Pool = new List<UnitInstance>(aliveAtt),
-                            Required = capAtt,
+                            Pool = validPool,
+                            Required = required,
                             Selected = new List<UnitInstance>()
                         };
                         while (CasualtyPick != null)
@@ -734,6 +789,7 @@ namespace NexusGame
                     aegisDef = false;
                     Log("    Aegis: first hit vs defender ignored.");
                 }
+                ActiveBattleHitsOnDefender = capDef;
 
                 if (capDef > 0)
                 {
@@ -750,11 +806,21 @@ namespace NexusGame
                     }
                     else
                     {
+                        var validPool = new List<UnitInstance>();
+                        foreach (var u in aliveDef)
+                        {
+                            if (u != null)
+                                validPool.Add(u);
+                        }
+                        int required = Mathf.Min(capDef, validPool.Count);
+                        if (required <= 0)
+                            continue;
+
                         CasualtyPick = new CasualtyPickState
                         {
                             Owner = defender,
-                            Pool = new List<UnitInstance>(aliveDef),
-                            Required = capDef,
+                            Pool = validPool,
+                            Required = required,
                             Selected = new List<UnitInstance>(),
                             OnEachRemove = u =>
                             {
@@ -768,12 +834,24 @@ namespace NexusGame
                     }
                 }
             }
+
+            HasActiveBattleStep = false;
+            ActiveBattleHitsOnAttacker = 0;
+            ActiveBattleHitsOnDefender = 0;
         }
 
         public void SubmitCasualtyPick()
         {
             if (CasualtyPick == null)
                 return;
+            CasualtyPick.Pool.RemoveAll(u => u == null);
+            CasualtyPick.Selected.RemoveAll(u => u == null || !CasualtyPick.Pool.Contains(u));
+            CasualtyPick.Required = Mathf.Clamp(CasualtyPick.Required, 0, CasualtyPick.Pool.Count);
+            if (CasualtyPick.Required == 0)
+            {
+                CasualtyPick = null;
+                return;
+            }
             if (CasualtyPick.Selected.Count != CasualtyPick.Required)
                 return;
 
@@ -869,6 +947,9 @@ namespace NexusGame
                     continue;
                 foreach (var n in Board.GetNeighbors(u.Tile))
                 {
+                    if (IsTileContested(n))
+                        continue;
+
                     bool enemyHere = false;
                     foreach (var o in FindObjectsOfType<UnitInstance>())
                     {
@@ -918,6 +999,13 @@ namespace NexusGame
         {
             if (DragonPhase == null || opt == null || opt.Dragon == null)
                 return;
+            if (opt.TargetHex == null || IsTileContested(opt.TargetHex))
+            {
+                DragonPhase.Options.Remove(opt);
+                if (DragonPhase.Options.Count == 0)
+                    FinishDragonPhase();
+                return;
+            }
 
             var enemies = new List<UnitInstance>();
             foreach (var u in FindObjectsOfType<UnitInstance>())

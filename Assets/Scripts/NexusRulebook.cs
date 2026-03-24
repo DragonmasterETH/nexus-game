@@ -19,7 +19,8 @@ namespace NexusGame
 
             "END TURN — DRAGON\n" +
             "• After you press End Turn, each Rubium Dragon you control on a hex you control may take a ranged shot " +
-            "at an adjacent hex that contains enemies (1d6, hit on 4+). Then the next player's turn begins.\n\n" +
+            "at an adjacent hex that contains enemies (1d6, hit on 4+). On a hit, the striking player chooses one enemy unit " +
+            "on that target hex to remove. Then the next player's turn begins.\n\n" +
 
             "MOVEMENT\n" +
             "• Tap a hex to select it; use the tile panel to choose how many of each unit type to move, then tap the destination. " +

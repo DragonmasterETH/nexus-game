@@ -5,7 +5,8 @@ namespace NexusGame
     /// <summary>
     /// Optional retreat constraints for mobile rule testing:
     /// - Cannot move from a contested hex onto another hex that still has enemies (\"retreat into another fight\").
-    /// - If leaving a contested hex without enemies on the destination, that retreat must be the first friendly movement of the turn.
+    /// - Retreats may be split sequentially from the same contested source hex.
+    /// - Retreat must happen before normal movement for the turn.
     /// </summary>
     public static class MovementRetreatRules
     {
@@ -32,12 +33,24 @@ namespace NexusGame
                 };
             }
 
-            if (sourceContested && AnyFriendlyUnitHasMoved(unit.Owner))
+            if (!sourceContested)
+                return new Result { Allowed = true, Reason = "" };
+
+            if (game.NormalMovementOccurredThisTurn)
             {
                 return new Result
                 {
                     Allowed = false,
                     Reason = "Retreat blocked: leaving a contested hex must be the first movement of your turn."
+                };
+            }
+
+            if (game.ActiveRetreatSourceThisTurn != null && game.ActiveRetreatSourceThisTurn != unit.Tile)
+            {
+                return new Result
+                {
+                    Allowed = false,
+                    Reason = "Retreat blocked: continue retreating from the same contested hex before other movement."
                 };
             }
 
@@ -51,19 +64,6 @@ namespace NexusGame
             foreach (var u in Object.FindObjectsOfType<UnitInstance>())
             {
                 if (u != null && u.Tile == tile && u.Owner != owner)
-                    return true;
-            }
-
-            return false;
-        }
-
-        static bool AnyFriendlyUnitHasMoved(PlayerState owner)
-        {
-            if (owner == null)
-                return false;
-            foreach (var u in Object.FindObjectsOfType<UnitInstance>())
-            {
-                if (u != null && u.Owner == owner && u.HasMovedThisTurn)
                     return true;
             }
 

@@ -10,6 +10,7 @@ namespace NexusGame
         public TileType Type;
         public GameObject View;
         public PlayerState Owner;
+        public int HomeBaseStartingOwnerIndex = -1;
         public int ExtraMineYield;
         public ExplorationReward ExplorationReward;
         public bool ExplorationRevealed;
