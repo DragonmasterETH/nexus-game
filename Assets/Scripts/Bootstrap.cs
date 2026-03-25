@@ -249,6 +249,16 @@ namespace NexusGame
                 _aiVsAi = false;
                 _state = UiState.MapSelect;
             }
+
+            // Footer credit (bottom-right).
+            const float footerH = 22f;
+            float footerY = rect.yMax - footerH - 8f;
+            var creditStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleRight
+            };
+            GUI.Label(new Rect(rect.x + 8f, footerY, rect.width - 16f, footerH),
+                "Made by Clanker Games Inc", creditStyle);
         }
 
         void DrawMapSelect()
