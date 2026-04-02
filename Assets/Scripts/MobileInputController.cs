@@ -33,6 +33,8 @@ namespace NexusGame
             UnitType _dragType;
             UnitInstance _dragStartUnit;
 
+            BoardCameraPanZoom _boardCam;
+
             public BoardTile SelectedTile => _selectedTile;
             public System.Collections.Generic.IReadOnlyDictionary<UnitType, int> SelectedMoveCounts => _moveSelection;
 
@@ -42,6 +44,8 @@ namespace NexusGame
                 MainCamera = Camera.main;
             if (Game == null)
                 Game = FindObjectOfType<GameController>();
+            if (_boardCam == null)
+                _boardCam = FindObjectOfType<BoardCameraPanZoom>();
         }
 
         void Update()
@@ -51,8 +55,20 @@ namespace NexusGame
             if (Game != null && Game.IsAiControlled(Game.CurrentPlayer))
                 return;
 
-            // Touch input for mobile
-            if (Input.touchCount > 0)
+            // Touch: pinch zoom / single-finger pan (BoardCameraPanZoom) before board taps / unit drags
+            if (Input.touchCount >= 2)
+            {
+                if (_boardCam != null)
+                    _boardCam.ProcessTouchesBlockingGame(out _);
+                _pendingTap = false;
+                _dragging = false;
+                _dragPrepared = false;
+                _dragSourceTile = null;
+                _dragStartUnit = null;
+                return;
+            }
+
+            if (Input.touchCount == 1)
             {
                 var touch = Input.GetTouch(0);
                 if (touch.phase == TouchPhase.Began)
@@ -63,12 +79,30 @@ namespace NexusGame
                     _dragStartUnit = null;
                     _pointerDownPos = touch.position;
 
-                    if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                    if (EventSystem.current != null &&
+                        EventSystem.current.IsPointerOverGameObject(touch.fingerId))
                         _pendingTap = false;
 
                     PrepareDragFromPointer(touch.position);
+                    if (_boardCam != null)
+                        _boardCam.NotifyTouchBeganOnUnit(_dragPrepared);
                 }
-                else if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
+
+                if (_boardCam != null && _boardCam.ProcessTouchesBlockingGame(out _))
+                {
+                    if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                    {
+                        _pendingTap = false;
+                        _dragging = false;
+                        _dragPrepared = false;
+                        _dragSourceTile = null;
+                        _dragStartUnit = null;
+                    }
+
+                    return;
+                }
+
+                if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
                 {
                     if (_pendingTap && !_dragging && _dragPrepared)
                     {
@@ -78,7 +112,9 @@ namespace NexusGame
                 }
                 else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
                 {
-                    if (_dragPrepared && (_dragging || Vector2.Distance(touch.position, _pointerDownPos) >= _dragThresholdPixels))
+                    if (_dragPrepared &&
+                        (_dragging ||
+                         Vector2.Distance(touch.position, _pointerDownPos) >= _dragThresholdPixels))
                     {
                         TryDragMove(touch.position);
                     }
@@ -95,8 +131,8 @@ namespace NexusGame
                 }
             }
 
-            // Mouse input for PC / editor builds
-#if !UNITY_IOS && !UNITY_ANDROID
+            // Mouse: editor + desktop builds (mobile device builds omit this)
+#if UNITY_EDITOR || (!UNITY_IOS && !UNITY_ANDROID)
             if (Input.GetMouseButtonDown(0))
             {
                 _pendingTap = true;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 
@@ -271,6 +272,12 @@ namespace NexusGame
             if (BattlePlan.Count == 0)
                 return;
 
+            var planMsg = new StringBuilder();
+            planMsg.Append($"Contested hexes ({BattlePlan.Count}) for P{attacker.PlayerIndex + 1}: ");
+            planMsg.Append(string.Join(" | ",
+                BattlePlan.Select(e => $"({e.Hex.Q},{e.Hex.R}) vs P{e.DefenderPlayerIndex + 1}")));
+            Debug.Log("[Battle] " + planMsg);
+
             if (!UseFullBattleFlow)
             {
                 RunLegacyAutoBattle(attacker);
@@ -335,6 +342,7 @@ namespace NexusGame
             if (!PendingBattleArrangement)
                 return;
             PendingBattleArrangement = false;
+            Debug.Log("[Battle] Battle order confirmed — resolving");
             StartBattleCoroutine(CurrentPlayer);
         }
 
@@ -358,6 +366,9 @@ namespace NexusGame
                 yield break;
             }
 
+            Debug.Log(
+                $"[Battle] --- Phase start: P{attacker.PlayerIndex + 1} attacker, {BattlePlan.Count} battle(s) ---");
+
             foreach (var entry in BattlePlan)
             {
                 if (IsGameOver)
@@ -367,6 +378,9 @@ namespace NexusGame
                 var defender = Players.Find(p => p.PlayerIndex == entry.DefenderPlayerIndex);
                 if (defender == null || hex == null)
                     continue;
+
+                Debug.Log(
+                    $"[Battle] >>> Hex ({hex.Q},{hex.R}): P{attacker.PlayerIndex + 1} (attacker) vs P{defender.PlayerIndex + 1} (defender)");
 
                 _mods = new BattleEnergizeModifiers();
                 _battleAttacker = attacker;
@@ -384,7 +398,7 @@ namespace NexusGame
 
                 yield return StartCoroutine(RunBattleStepsCoroutine(
                     hex, attacker, defender, _battleRng,
-                    (a, d, line) => battleLines.Add(line),
+                    (a, d, line) => AppendBattleLog(line),
                     _ => { },
                     () => { defLostDragon = true; }));
 
@@ -439,6 +453,7 @@ namespace NexusGame
             ActiveBattleHitsOnAttacker = 0;
             ActiveBattleHitsOnDefender = 0;
             _battleCoroutine = null;
+            Debug.Log("[Battle] --- Phase complete ---");
         }
 
         SecretMissionOfferState BuildSecretOffer(PlayerState attacker, int casualtiesInflicted, int defStartCount, bool dragonKilled)
@@ -491,18 +506,24 @@ namespace NexusGame
             p.VictoryPoints += s.VictoryPoints;
             p.SecretMissions.RemoveAt(indexInHand);
             SecretMissionOffer.Waiting = false;
+            Debug.Log($"[Battle] Secret mission played: P{p.PlayerIndex + 1} +{s.VictoryPoints} VP (index {indexInHand})");
             CheckGameEndAfterVpChange();
         }
 
         public void SkipSecretMissionPlay()
         {
             if (SecretMissionOffer != null)
+            {
+                Debug.Log(
+                    $"[Battle] Secret mission: P{SecretMissionOffer.Attacker.PlayerIndex + 1} skipped optional play");
                 SecretMissionOffer.Waiting = false;
+            }
         }
 
         IEnumerator EnergizePassCoroutine(PlayerState attacker, PlayerState defender, BoardTile hex)
         {
             EnergizeBattleContext = $"Hex ({hex.Q},{hex.R}): P{attacker.PlayerIndex + 1} vs P{defender.PlayerIndex + 1}";
+            Debug.Log($"[Battle] Energize window: {EnergizeBattleContext}");
             bool played;
             do
             {
@@ -517,12 +538,16 @@ namespace NexusGame
                     if (_lastEnergizePlayed != EnergizeBattleId.None)
                     {
                         played = true;
-                        ApplyEnergizeCard(_lastEnergizePlayed, p, attacker, defender);
+                        var id = _lastEnergizePlayed;
+                        ApplyEnergizeCard(id, p, attacker, defender);
+                        Debug.Log(
+                            $"[Battle] Energize: P{p.PlayerIndex + 1} played {EnergizeBattleCatalog.GetName(id)}");
                         _lastEnergizePlayed = EnergizeBattleId.None;
                     }
                 }
             } while (played);
 
+            Debug.Log("[Battle] Energize: both sides done (pass chain complete)");
             EnergizePromptPlayer = null;
             EnergizeBattleContext = null;
         }
@@ -533,6 +558,7 @@ namespace NexusGame
         {
             if (EnergizePromptPlayer == null)
                 return;
+            Debug.Log($"[Battle] Energize: P{EnergizePromptPlayer.PlayerIndex + 1} pass");
             _lastEnergizePlayed = EnergizeBattleId.None;
             _energizeRoundActive = false;
         }
@@ -580,6 +606,8 @@ namespace NexusGame
                 _mods.DefenderFocusFireExtraDice = 2;
             }
 
+            Debug.Log(
+                $"[Battle] Focus Fire: P{FocusFirePicker.PlayerIndex + 1} → +2 dice on {type} ({(FocusFireForAttackerSide ? "attacker" : "defender")} side)");
             FocusFirePicker = null;
             _pendingFocusFireCard = false;
             _energizeRoundActive = false;
@@ -1027,10 +1055,14 @@ namespace NexusGame
             if (roll < 4)
             {
                 DragonPhase.LastLog = $"Dragon ranged: roll {roll} — miss.";
+                Debug.Log(
+                    $"[Battle] Dragon: P{DragonPhase.Player.PlayerIndex + 1} at ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} miss (need 4+)");
                 RemoveAllDragonOptions(opt.Dragon);
                 return;
             }
 
+            Debug.Log(
+                $"[Battle] Dragon: P{DragonPhase.Player.PlayerIndex + 1} at ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} hit — pick target");
             DragonPhase.PendingHit = opt;
             DragonPhase.PendingEnemies = enemies;
         }
@@ -1055,6 +1087,8 @@ namespace NexusGame
             RemoveUnit(victim);
             DragonPhase.LastLog =
                 $"Dragon ranged: roll {DragonPhase.PendingHit.LastRoll} — hit, removed {victim.Definition.Type}.";
+            Debug.Log(
+                $"[Battle] Dragon hit: removed {victim.Definition.Type} (P{victim.Owner.PlayerIndex + 1}), roll was {DragonPhase.PendingHit.LastRoll}");
 
             DragonPhase.PendingHit = null;
             DragonPhase.PendingEnemies = null;
@@ -1065,11 +1099,14 @@ namespace NexusGame
         {
             if (DragonPhase == null || opt?.Dragon == null)
                 return;
+            Debug.Log(
+                $"[Battle] Dragon: skipped strike from ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R})");
             RemoveAllDragonOptions(opt.Dragon);
         }
 
         public void SkipAllDragonStrikes()
         {
+            Debug.Log("[Battle] Dragon: skip all remaining strikes");
             FinishDragonPhase();
         }
 

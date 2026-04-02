@@ -41,6 +41,7 @@ namespace NexusGame
 
         bool _showBuyMenu;
         bool _showQuickRef;
+        bool _showSettingsMenu;
         int _quickRefTab; // 0 = rules, 1 = units
         Vector2 _scrollQuickRef;
         GUIStyle _quickRefBodyStyle;
@@ -52,6 +53,17 @@ namespace NexusGame
         BoardTile _moveAllTile;
         float _lastCardBarY;
 
+        /// <summary>Which hand pile modal is open (tap a pile in the compact bar).</summary>
+        enum HandPileViewerKind
+        {
+            None,
+            Battle,
+            Deploy,
+            Secret
+        }
+
+        HandPileViewerKind _handPileViewer;
+
         Vector2 _scrollBattle;
         Vector2 _scrollBattleMainLog;
         Vector2 _scrollBattleLogPanel;
@@ -60,6 +72,7 @@ namespace NexusGame
         Vector2 _scrollHandBattle;
         Vector2 _scrollHandDeploy;
         Vector2 _scrollHandSecret;
+        Vector2 _scrollTilePanel;
 
         GUIStyle _cardTitleStyle;
         GUIStyle _cardBodyStyle;
@@ -68,6 +81,7 @@ namespace NexusGame
 
         const float CardBarHeight = 152f;
         const float PhaseRibbonHeight = 26f;
+        /// <summary>Card tiles in pile modal (full detail).</summary>
         const float CardTileW = 112f;
         const float CardTileH = 104f;
 
@@ -90,6 +104,7 @@ namespace NexusGame
         readonly Dictionary<UnitType, NexusGuiImage> _unitIconCache = new Dictionary<UnitType, NexusGuiImage>();
         GUIStyle _battleWindowStyle;
         Texture2D _battleWindowBg;
+        GUIStyle _topIconButtonStyle;
 
         void Start()
         {
@@ -237,44 +252,70 @@ namespace NexusGame
             DrawFullBattleOverlays(player);
             DrawDragonPhaseOverlay();
 
-            float hudH = Game.AiVsAiMode ? 206f : 166f;
-            var hudRect = new Rect(10, 10, 380, hudH);
-            GUI.Box(hudRect, "");
+            const float topBarY = 6f;
+            const float topBarH = 52f;
+            EnsureTopIconButtonStyle();
 
             var rubGui = GetRubiumGui();
+            var vpGui = GetVPGui();
             var hudLabel = GUI.skin.label;
-            float lx = hudRect.x + 10f;
-            float ly = hudRect.y + 8f;
-            float lw = hudRect.width - 20f;
 
-            GUI.Label(new Rect(lx, ly, lw, 20f), "Nexus Ops", hudLabel);
-            ly += 18f;
-            GUI.Label(new Rect(lx, ly, lw, 16f), "--------------------", hudLabel);
-            ly += 16f;
+            // Top strip (Colonist-style): resources left, info + settings right
+            var topBarBg = new Color(0.06f, 0.07f, 0.12f, 0.88f);
+            Color prevGui = GUI.color;
+            GUI.color = topBarBg;
+            GUI.DrawTexture(new Rect(0f, topBarY, Screen.width, topBarH), Texture2D.whiteTexture);
+            GUI.color = prevGui;
+
+            float lx = 12f;
+            float ly = topBarY + (topBarH - MainHudIconHeight) * 0.5f - 2f;
+            float resLineH = Mathf.Max(22f, MainHudIconHeight + 2f);
+            float rxRes = lx;
+            if (!rubGui.IsEmpty)
+                rxRes += rubGui.Draw(rxRes, ly, MainHudIconHeight) + 6f;
+            var rubNumStyle = new GUIStyle(hudLabel)
+            {
+                fontSize = Mathf.Clamp(Screen.width / 32, 15, 20),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft
+            };
+            GUI.Label(new Rect(rxRes, ly - 2f, 120f, resLineH), player.Rubium.ToString(), rubNumStyle);
+            rxRes += Mathf.Max(28f, rubNumStyle.CalcSize(new GUIContent(player.Rubium.ToString())).x) + 12f;
+            if (!vpGui.IsEmpty)
+                rxRes += vpGui.Draw(rxRes, ly, MainHudIconHeight) + 6f;
+            GUI.Label(new Rect(rxRes, ly - 2f, 80f, resLineH), player.VictoryPoints.ToString(), rubNumStyle);
+
+            const float iconBtn = 44f;
+            float iconY = topBarY + (topBarH - iconBtn) * 0.5f;
+            float iconRight = Screen.width - 12f - iconBtn * 2f - 10f;
+            if (GUI.Button(new Rect(iconRight, iconY, iconBtn, iconBtn), "\u2139", _topIconButtonStyle))
+            {
+                _showSettingsMenu = false;
+                _showQuickRef = true;
+            }
+
+            if (GUI.Button(new Rect(iconRight + iconBtn + 10f, iconY, iconBtn, iconBtn), "\u2699", _topIconButtonStyle))
+            {
+                _showQuickRef = false;
+                _showSettingsMenu = true;
+            }
+
+            float metaY = topBarY + topBarH + 6f;
+            float metaW = Mathf.Min(400f, Screen.width - 20f);
+            lx = 18f;
+            ly = metaY + 6f;
+            float lw = metaW - 16f;
 
             string curPrefix =
-                $"Current: P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}";
-            GUI.Label(new Rect(lx, ly, lw, 20f), curPrefix, hudLabel);
+                $"Turn {Game.TurnNumber}  ·  P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}";
+            var metaLineStyle = new GUIStyle(hudLabel) { fontSize = 12, wordWrap = true };
+            GUI.Label(new Rect(lx, ly, lw, 36f), curPrefix, metaLineStyle);
             ly += 22f;
 
-            // Resources: icons only + amounts (no "Rubium" / "VP" text)
-            float resLineH = Mathf.Max(22f, MainHudIconHeight + 2f);
-            var vpGui = GetVPGui();
-            float rx = lx;
-            if (!rubGui.IsEmpty)
-                rx += rubGui.Draw(rx, ly + 1f, MainHudIconHeight) + 6f;
-            GUI.Label(new Rect(rx, ly, 80f, resLineH), player.Rubium.ToString(), hudLabel);
-            rx += Mathf.Max(36f, hudLabel.CalcSize(new GUIContent(player.Rubium.ToString())).x) + 14f;
-            if (!vpGui.IsEmpty)
-                rx += vpGui.Draw(rx, ly + 1f, MainHudIconHeight) + 6f;
-            GUI.Label(new Rect(rx, ly, 60f, resLineH), player.VictoryPoints.ToString(), hudLabel);
-            ly += resLineH + 6f;
-
-            // Card hand counts: symbol prefixes only (⚔ battle, ▲ deploy, ★ secrets)
             int b = player.BattleEnergize?.Count ?? 0;
             int d = player.DeployEnergize?.Count ?? 0;
             int s = player.SecretMissions?.Count ?? 0;
-            GUI.Label(new Rect(lx, ly, lw, 22f), $"⚔{b}     ▲{d}     ★{s}", hudLabel);
+            GUI.Label(new Rect(lx, ly, lw, 22f), $"⚔{b}   ▲{d}   ★{s}", hudLabel);
             ly += 24f;
 
             if (player.DeploymentPurchaseDiscountRubium > 0)
@@ -282,18 +323,13 @@ namespace NexusGame
                 float dx = lx;
                 if (!rubGui.IsEmpty)
                     dx += rubGui.Draw(dx, ly + 1f, DiscountLineIconHeight) + 6f;
-                GUI.Label(new Rect(dx, ly, 80f, 20f), player.DeploymentPurchaseDiscountRubium.ToString(), hudLabel);
+                GUI.Label(new Rect(dx, ly, 200f, 20f), player.DeploymentPurchaseDiscountRubium.ToString(), hudLabel);
                 ly += 22f;
             }
 
             var sb = new StringBuilder();
-            if (Game.BattlePhaseBlockingPlay)
-                sb.AppendLine("(Finish battle phase to move.)");
-
             if (Game.AiVsAiMode)
             {
-                if (sb.Length > 0)
-                    sb.AppendLine();
                 sb.AppendLine(
                     $"[AI test] Goal {Game.AiTestVictoryTargetVp} VP  |  draw cap {Game.AiTestMaxTotalDrawPhases} (T{Game.TurnNumber})");
                 if (Game.AiTestMatchCompleted && Game.AiTestWinner != null)
@@ -301,27 +337,28 @@ namespace NexusGame
                         $"MATCH OVER — P{Game.AiTestWinner.PlayerIndex + 1} wins ({Game.AiTestWinner.VictoryPoints} VP)");
             }
 
-            sb.AppendLine();
-            if (Game.AiVsAiMode)
-                sb.AppendLine("(AI vs AI — both seats automated.)");
-            else
+            if (sb.Length > 0)
             {
-                sb.AppendLine("- $ : buy units + Deployment Energize. Free Human: select home hex first.");
-                sb.AppendLine("- End Turn: Dragon shots, then next player.");
+                var bodyStyle = new GUIStyle(hudLabel) { wordWrap = true, fontSize = 11 };
+                float bodyH = bodyStyle.CalcHeight(new GUIContent(sb.ToString()), lw);
+                bodyH = Mathf.Clamp(bodyH + 6f, 24f, 220f);
+                GUI.Label(new Rect(lx, ly, lw, bodyH), sb.ToString(), bodyStyle);
+                ly += bodyH + 6f;
             }
 
-            float bodyH = Mathf.Max(24f, hudRect.yMax - ly - 8f);
-            var bodyStyle = new GUIStyle(hudLabel) { wordWrap = true };
-            GUI.Label(new Rect(lx, ly, lw, bodyH), sb.ToString(), bodyStyle);
             if (!string.IsNullOrEmpty(Game.LastDrawPhaseLog))
             {
-                GUI.Box(new Rect(360, 10, 600, 46), Game.LastDrawPhaseLog);
+                float logBarH = 40f;
+                GUI.Box(new Rect(10f, ly, Mathf.Min(600f, Screen.width - 20f), logBarH), "");
+                GUI.Label(new Rect(16f, ly + 10f, Screen.width - 32f, logBarH - 8f), Game.LastDrawPhaseLog,
+                    new GUIStyle(hudLabel) { fontSize = 10, wordWrap = true });
+                ly += logBarH + 6f;
             }
 
             string battleLog =
                 !string.IsNullOrEmpty(Game.LiveBattlePhaseLog) ? Game.LiveBattlePhaseLog : Game.LastBattlePhaseLog;
 
-            float hudBottom = hudRect.yMax;
+            float hudBottom = ly + 4f;
             const float battleLogPanelH = 140f;
             if (!string.IsNullOrEmpty(battleLog) && !Game.PendingBattleArrangement)
             {
@@ -343,7 +380,8 @@ namespace NexusGame
 
             if (ShowDebugToggle && InputController != null)
             {
-                bool newDebug = GUI.Toggle(new Rect(10, 285, 150, 20), InputController.DebugClicks, "Debug clicks");
+                float dbgY = Mathf.Min(hudBottom + 6f, Screen.height - 120f);
+                bool newDebug = GUI.Toggle(new Rect(10, dbgY, 180, 22), InputController.DebugClicks, "Debug clicks");
                 InputController.DebugClicks = newDebug;
             }
 
@@ -422,17 +460,75 @@ namespace NexusGame
             DrawBottomCardHand(player);
             DrawPhaseRibbon(player);
 
-            DrawTilePopup(player);
+            DrawHandPileViewerOverlay(player);
             DrawBattleFocusOverlay();
             DrawEnergizeHelpWindow();
 
+            if (_showSettingsMenu)
+                DrawSettingsOverlay();
+
             if (_showQuickRef)
                 DrawQuickReferenceOverlay();
-            else if (GUI.Button(new Rect(Screen.width - 108, 12, 98, 26), "Quick ref"))
-                _showQuickRef = true;
+        }
 
-            if (GUI.Button(new Rect(Screen.width - 108, 42, 98, 26), "Main menu"))
-                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        void EnsureTopIconButtonStyle()
+        {
+            if (_topIconButtonStyle != null)
+                return;
+            _topIconButtonStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 22,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+        }
+
+        void DrawSettingsOverlay()
+        {
+            var dim = new Color(0.02f, 0.02f, 0.06f, 0.78f);
+            var prev = GUI.color;
+            GUI.color = dim;
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            GUI.color = prev;
+
+            float w = Mathf.Min(340f, Screen.width - 32f);
+            float h = 220f;
+            var panel = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
+            GUI.Box(panel, "");
+
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 18,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            GUI.Label(new Rect(panel.x, panel.y + 12f, panel.width, 28f), "Settings", titleStyle);
+
+            var btnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 16,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+
+            float by = panel.y + 56f;
+            float bw = panel.width - 32f;
+            float bx = panel.x + 16f;
+            float bh = 48f;
+
+            if (GUI.Button(new Rect(bx, by, bw, bh), "LEAVE GAME", btnStyle))
+            {
+                _showSettingsMenu = false;
+                var bootstrap = FindObjectOfType<Bootstrap>();
+                if (bootstrap != null)
+                    bootstrap.ReturnToMainMenu();
+                else
+                    SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            }
+
+            by += bh + 14f;
+            if (GUI.Button(new Rect(bx, by, bw, 42f), "Close", GUI.skin.button))
+                _showSettingsMenu = false;
         }
 
         void EnsureQuickRefBodyStyle()
@@ -575,89 +671,235 @@ namespace NexusGame
             float barW = Screen.width - 16f;
             GUI.Box(new Rect(barX, barY, barW, CardBarHeight), "");
 
-            string deckLine = $"P{player.PlayerIndex + 1} hand  |  Secret deck: {Game.SecretDeckCount}  Energize deck: {Game.EnergizeDeckCount}";
-            GUI.Label(new Rect(barX + 8, barY + 4, barW - 16, 18), deckLine, _cardColumnLabelStyle);
+            const float pad = 8f;
+            const float headerH = 18f;
+            string deckLine =
+                $"P{player.PlayerIndex + 1}  ·  Secret deck {Game.SecretDeckCount}  ·  Energize {Game.EnergizeDeckCount}  ·  tap a pile";
+            var deckStyle = new GUIStyle(_cardColumnLabelStyle) { fontSize = 10 };
+            GUI.Label(new Rect(barX + pad, barY + 2, barW - pad * 2f, 16f), deckLine, deckStyle);
 
-            float colGap = 8f;
-            float colY = barY + 24f;
-            float colH = CardBarHeight - 32f;
-            float colW = (barW - 16f - colGap * 2f) / 3f;
+            float innerX = barX + pad;
+            float innerW = barW - pad * 2f;
+            float contentY = barY + headerH;
+            float contentH = CardBarHeight - headerH - 4f;
 
-            var battleGroups = player.BattleEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
-            float battleContentW = battleGroups.Count == 0
-                ? CardTileW + 8f
-                : battleGroups.Count * (CardTileW + 8f);
-            DrawCardColumn(new Rect(barX + 8f, colY, colW, colH), "Battle Energize", ref _scrollHandBattle,
-                battleContentW, () =>
-                {
-                    if (battleGroups.Count == 0)
-                        DrawPlaceholderCard(new Rect(0, 0, CardTileW, CardTileH), "No cards");
-                    else
-                    {
-                        float x = 0f;
-                        foreach (var g in battleGroups)
-                        {
-                            string full = EnergizeBattleCatalog.GetName(g.Key);
-                            DrawPlayingCard(new Rect(x, 0, CardTileW, CardTileH), new Color(0.15f, 0.28f, 0.55f),
-                                CardShortTitle(full), CardDetailFromName(full), g.Count());
-                            x += CardTileW + 8f;
-                        }
-                    }
-                });
+            const float splitGap = 8f;
+            const float minTilePanelW = 120f;
+            float maxLeft = Mathf.Max(160f, innerW - minTilePanelW - splitGap);
+            float leftW = Mathf.Min(maxLeft, Mathf.Max(200f, innerW * 0.42f));
+            float rightW = innerW - leftW - splitGap;
+            float rightX = innerX + leftW + splitGap;
 
-            var deployGroups = player.DeployEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
-            float deployContentW = deployGroups.Count == 0
-                ? CardTileW + 8f
-                : deployGroups.Count * (CardTileW + 8f);
-            DrawCardColumn(new Rect(barX + 8f + colW + colGap, colY, colW, colH), "Deployment",
-                ref _scrollHandDeploy, deployContentW, () =>
-                {
-                    if (deployGroups.Count == 0)
-                        DrawPlaceholderCard(new Rect(0, 0, CardTileW, CardTileH), "No cards");
-                    else
-                    {
-                        float x = 0f;
-                        foreach (var g in deployGroups)
-                        {
-                            string full = EnergizeDeploymentCatalog.GetName(g.Key);
-                            DrawPlayingCard(new Rect(x, 0, CardTileW, CardTileH), new Color(0.15f, 0.45f, 0.25f),
-                                CardShortTitle(full), CardDetailFromName(full), g.Count());
-                            x += CardTileW + 8f;
-                        }
-                    }
-                });
+            float colGap = 6f;
+            float colW = (leftW - colGap * 2f) / 3f;
 
-            DrawSecretMissionsColumn(new Rect(barX + 8f + (colW + colGap) * 2f, colY, colW, colH), player);
+            int bCount = player.BattleEnergize?.Count ?? 0;
+            int dCount = player.DeployEnergize?.Count ?? 0;
+            int sCount = player.SecretMissions?.Count ?? 0;
+
+            var pileBtnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                wordWrap = true,
+                alignment = TextAnchor.MiddleCenter
+            };
+
+            if (GUI.Button(new Rect(innerX, contentY, colW, contentH),
+                    $"Battle\n⚔ {bCount}", pileBtnStyle))
+            {
+                _handPileViewer = _handPileViewer == HandPileViewerKind.Battle
+                    ? HandPileViewerKind.None
+                    : HandPileViewerKind.Battle;
+            }
+
+            if (GUI.Button(new Rect(innerX + colW + colGap, contentY, colW, contentH),
+                    $"Deploy\n▲ {dCount}", pileBtnStyle))
+            {
+                _handPileViewer = _handPileViewer == HandPileViewerKind.Deploy
+                    ? HandPileViewerKind.None
+                    : HandPileViewerKind.Deploy;
+            }
+
+            if (GUI.Button(new Rect(innerX + (colW + colGap) * 2f, contentY, colW, contentH),
+                    $"Secrets\n★ {sCount}", pileBtnStyle))
+            {
+                _handPileViewer = _handPileViewer == HandPileViewerKind.Secret
+                    ? HandPileViewerKind.None
+                    : HandPileViewerKind.Secret;
+            }
+
+            if (_handPileViewer != HandPileViewerKind.None)
+            {
+                var hi = new Rect(innerX, contentY, colW, contentH);
+                if (_handPileViewer == HandPileViewerKind.Battle)
+                    DrawOutlineRect(hi, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
+                hi.x = innerX + colW + colGap;
+                if (_handPileViewer == HandPileViewerKind.Deploy)
+                    DrawOutlineRect(hi, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
+                hi.x = innerX + (colW + colGap) * 2f;
+                if (_handPileViewer == HandPileViewerKind.Secret)
+                    DrawOutlineRect(hi, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
+            }
+
+            DrawBottomTilePanel(rightX, contentY, rightW, contentH, player);
         }
 
-        void DrawSecretMissionsColumn(Rect area, PlayerState player)
+        void DrawBottomTilePanel(float x, float y, float w, float h, PlayerState player)
         {
-            GUI.Label(new Rect(area.x, area.y - 2f, area.width, 16f), "Secret missions", _cardColumnLabelStyle);
-            Rect view = new Rect(area.x, area.y + 14f, area.width, area.height - 14f);
-            GUI.Box(view, "");
+            var panel = new Rect(x, y, w, h);
+            GUI.Box(panel, "");
 
-            if (player == null || player.SecretMissions == null || player.SecretMissions.Count == 0)
+            var popupTile = InputController != null ? InputController.SelectedTile : null;
+            var titleStyle = new GUIStyle(_cardColumnLabelStyle)
             {
-                DrawPlaceholderCard(new Rect(view.x + 6f, view.y + 4f, CardTileW, CardTileH), "No missions");
+                fontSize = 11,
+                alignment = TextAnchor.MiddleLeft
+            };
+            string title = popupTile != null ? "Tile " + popupTile.Type : "Selected tile";
+            GUI.Label(new Rect(panel.x + 6f, panel.y + 4f, panel.width - 12f, 16f), title, titleStyle);
+
+            const float tileScrollContentH = 360f;
+            var scrollView = new Rect(panel.x + 4f, panel.y + 22f, panel.width - 8f, panel.height - 26f);
+            float innerW = Mathf.Max(80f, scrollView.width - 18f);
+
+            if (popupTile == null)
+            {
+                var hint = new GUIStyle(GUI.skin.label)
+                {
+                    wordWrap = true,
+                    alignment = TextAnchor.MiddleCenter,
+                    fontSize = 11,
+                    normal = { textColor = new Color(0.75f, 0.75f, 0.8f) }
+                };
+                GUI.Label(scrollView, "Tap the board to select a tile.", hint);
                 return;
             }
 
-            float x = view.x + 6f;
-            float y = view.y + 4f;
-            int maxCards = Mathf.Max(1, Mathf.FloorToInt((view.width - 8f) / (CardTileW + 8f)));
-            int drawCount = Mathf.Min(maxCards, player.SecretMissions.Count);
-            for (int i = 0; i < drawCount; i++)
+            _scrollTilePanel = GUI.BeginScrollView(scrollView, _scrollTilePanel,
+                new Rect(0f, 0f, innerW, tileScrollContentH));
+            GUILayout.BeginArea(new Rect(0f, 0f, innerW, tileScrollContentH));
+            DrawSelectedTilePanelBody(player, popupTile, innerW);
+            GUILayout.EndArea();
+            GUI.EndScrollView();
+        }
+
+        void DrawHandPileViewerOverlay(PlayerState player)
+        {
+            if (_handPileViewer == HandPileViewerKind.None || player == null)
+                return;
+
+            var dim = new Color(0.02f, 0.02f, 0.06f, 0.55f);
+            Color prev = GUI.color;
+            GUI.color = dim;
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            GUI.color = prev;
+
+            float w = Mathf.Min(Screen.width - 24f, 720f);
+            float h = Mathf.Min(Screen.height - 80f, 420f);
+            var win = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
+
+            string title = _handPileViewer switch
+            {
+                HandPileViewerKind.Battle => "Battle Energize",
+                HandPileViewerKind.Deploy => "Deployment Energize",
+                HandPileViewerKind.Secret => "Secret missions",
+                _ => "Hand"
+            };
+
+            GUI.Box(win, "");
+            DrawOutlineRect(win, new Color(0.95f, 0.82f, 0.2f, 0.95f), 2f);
+            GUI.Label(new Rect(win.x + 12f, win.y + 8f, win.width - 100f, 22f), title, _cardColumnLabelStyle);
+            if (GUI.Button(new Rect(win.xMax - 88f, win.y + 6f, 76f, 26f), "Close"))
+                _handPileViewer = HandPileViewerKind.None;
+
+            var content = new Rect(win.x + 10f, win.y + 38f, win.width - 20f, win.height - 48f);
+            if (_handPileViewer == HandPileViewerKind.Battle)
+                DrawHandPileModalBattle(content, player);
+            else if (_handPileViewer == HandPileViewerKind.Deploy)
+                DrawHandPileModalDeploy(content, player);
+            else if (_handPileViewer == HandPileViewerKind.Secret)
+                DrawHandPileModalSecret(content, player);
+        }
+
+        void DrawHandPileModalBattle(Rect content, PlayerState player)
+        {
+            var battleGroups = player.BattleEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
+            float cw = battleGroups.Count == 0
+                ? CardTileW + 8f
+                : battleGroups.Count * (CardTileW + 8f);
+            cw = Mathf.Max(cw, content.width);
+            _scrollHandBattle = GUI.BeginScrollView(content, _scrollHandBattle,
+                new Rect(0, 0, cw, CardTileH + 8f));
+            if (battleGroups.Count == 0)
+                DrawPlaceholderCard(new Rect(4f, 4f, CardTileW, CardTileH), "No cards");
+            else
+            {
+                float x = 4f;
+                foreach (var g in battleGroups)
+                {
+                    string full = EnergizeBattleCatalog.GetName(g.Key);
+                    DrawPlayingCard(new Rect(x, 4f, CardTileW, CardTileH), new Color(0.15f, 0.28f, 0.55f),
+                        CardShortTitle(full), CardDetailFromName(full), g.Count());
+                    x += CardTileW + 8f;
+                }
+            }
+
+            GUI.EndScrollView();
+        }
+
+        void DrawHandPileModalDeploy(Rect content, PlayerState player)
+        {
+            var deployGroups = player.DeployEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
+            float cw = deployGroups.Count == 0
+                ? CardTileW + 8f
+                : deployGroups.Count * (CardTileW + 8f);
+            cw = Mathf.Max(cw, content.width);
+            _scrollHandDeploy = GUI.BeginScrollView(content, _scrollHandDeploy,
+                new Rect(0, 0, cw, CardTileH + 8f));
+            if (deployGroups.Count == 0)
+                DrawPlaceholderCard(new Rect(4f, 4f, CardTileW, CardTileH), "No cards");
+            else
+            {
+                float x = 4f;
+                foreach (var g in deployGroups)
+                {
+                    string full = EnergizeDeploymentCatalog.GetName(g.Key);
+                    DrawPlayingCard(new Rect(x, 4f, CardTileW, CardTileH), new Color(0.15f, 0.45f, 0.25f),
+                        CardShortTitle(full), CardDetailFromName(full), g.Count());
+                    x += CardTileW + 8f;
+                }
+            }
+
+            GUI.EndScrollView();
+        }
+
+        void DrawHandPileModalSecret(Rect content, PlayerState player)
+        {
+            if (player.SecretMissions == null || player.SecretMissions.Count == 0)
+            {
+                _scrollHandSecret = GUI.BeginScrollView(content, _scrollHandSecret,
+                    new Rect(0, 0, content.width, CardTileH + 8f));
+                DrawPlaceholderCard(new Rect(4f, 4f, CardTileW, CardTileH), "No missions");
+                GUI.EndScrollView();
+                return;
+            }
+
+            float cw = player.SecretMissions.Count * (CardTileW + 8f);
+            cw = Mathf.Max(cw, content.width);
+            float ch = CardTileH + 16f;
+            _scrollHandSecret = GUI.BeginScrollView(content, _scrollHandSecret, new Rect(0, 0, cw, ch));
+            float x = 4f;
+            for (int i = 0; i < player.SecretMissions.Count; i++)
             {
                 var s = player.SecretMissions[i];
                 string full = SecretMissionLabel(s) + " (+" + s.VictoryPoints + " VP)";
-                DrawPlayingCard(new Rect(x, y, CardTileW, CardTileH), new Color(0.42f, 0.15f, 0.5f),
+                DrawPlayingCard(new Rect(x, 4f, CardTileW, CardTileH), new Color(0.42f, 0.15f, 0.5f),
                     "#" + i + " " + CardShortTitle(full), CardDetailFromName(full), 1);
                 x += CardTileW + 8f;
             }
 
-            int hidden = player.SecretMissions.Count - drawCount;
-            if (hidden > 0)
-                GUI.Label(new Rect(view.x + 8f, view.yMax - 18f, view.width - 16f, 16f), $"+{hidden} more missions");
+            GUI.EndScrollView();
         }
 
         void DrawPhaseRibbon(PlayerState player)
@@ -698,18 +940,6 @@ namespace NexusGame
             if (player != null && !Game.IsAiControlled(player))
                 return "Movement";
             return "Draw";
-        }
-
-        void DrawCardColumn(Rect area, string columnTitle, ref Vector2 scroll, float contentWidth,
-            System.Action drawInsideScroll)
-        {
-            GUI.Label(new Rect(area.x, area.y - 2f, area.width, 16f), columnTitle, _cardColumnLabelStyle);
-
-            Rect view = new Rect(area.x, area.y + 14f, area.width, area.height - 14f);
-            float cw = Mathf.Max(contentWidth, view.width);
-            scroll = GUI.BeginScrollView(view, scroll, new Rect(0, 0, cw, CardTileH));
-            drawInsideScroll();
-            GUI.EndScrollView();
         }
 
         void DrawPlaceholderCard(Rect r, string text)
@@ -1309,15 +1539,13 @@ namespace NexusGame
             GUI.enabled = true;
         }
 
-        void DrawTilePopup(PlayerState player)
+        void DrawSelectedTilePanelBody(PlayerState player, BoardTile popupTile, float contentWidth)
         {
-            var popupTile = InputController != null ? InputController.SelectedTile : null;
             if (popupTile == null)
                 return;
 
-            var rect = new Rect(Screen.width - 260, 10, 250, 320);
-            GUI.Box(rect, "Tile " + popupTile.Type);
-            GUILayout.BeginArea(new Rect(rect.x + 10, rect.y + 25, rect.width - 20, rect.height - 55));
+            float moveLabelW = Mathf.Max(72f, contentWidth - 52f);
+            float unitLineW = Mathf.Max(80f, contentWidth - 12f);
 
             bool hasAnyUnit = false;
             bool hasOtherOwner = false;
@@ -1398,7 +1626,7 @@ namespace NexusGame
                 {
                     selectedCounts.TryGetValue(kvp.Key, out int chosen);
                     GUILayout.BeginHorizontal();
-                    GUILayout.Label(kvp.Key + ": " + kvp.Value + " sel:" + chosen, GUILayout.Width(150));
+                    GUILayout.Label(kvp.Key + ": " + kvp.Value + " sel:" + chosen, GUILayout.Width(moveLabelW));
                     if (GUILayout.Button("-", GUILayout.Width(20)))
                     {
                         InputController.AdjustMoveSelection(kvp.Key, -1);
@@ -1436,13 +1664,12 @@ namespace NexusGame
                     DrawUnitMiniIcon(iconRect, parsedType);
                 else
                     DrawUnitMiniIcon(iconRect, UnitType.Human);
-                GUILayout.Label(unitText + " x" + kvp.Value + " (" + ownerText + ")", GUILayout.Width(200f));
+                GUILayout.Label(unitText + " x" + kvp.Value + " (" + ownerText + ")", GUILayout.Width(unitLineW));
                 GUILayout.EndHorizontal();
             }
 
             if (GUILayout.Button("Close") && InputController != null)
                 InputController.ClearSelection();
-            GUILayout.EndArea();
         }
 
         void DrawUnitMiniIcon(Rect r, UnitType type)

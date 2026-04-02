@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace NexusGame
 {
@@ -24,10 +25,42 @@ namespace NexusGame
         GUIStyle _rulebookBodyStyle;
         int _rulebookTab; // 0 = rules, 1 = units
 
+        GUIStyle _menuButtonStyle;
+
         void Awake()
         {
+            ApplyPortraitForMobile();
             EnsureCamera();
             EnsureLight();
+        }
+
+        /// <summary>Lock handheld builds to portrait (Project Settings also default to portrait).</summary>
+        static void ApplyPortraitForMobile()
+        {
+#if UNITY_ANDROID || UNITY_IOS
+            Screen.autorotateToPortrait = true;
+            Screen.autorotateToPortraitUpsideDown = false;
+            Screen.autorotateToLandscapeLeft = false;
+            Screen.autorotateToLandscapeRight = false;
+            Screen.orientation = ScreenOrientation.Portrait;
+#endif
+        }
+
+        GUIStyle MenuButtonStyle()
+        {
+            if (_menuButtonStyle == null)
+            {
+                int fs = Mathf.Clamp(Screen.width / 26, 17, 24);
+                _menuButtonStyle = new GUIStyle(GUI.skin.button)
+                {
+                    fontSize = fs,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleCenter,
+                    wordWrap = true
+                };
+            }
+
+            return _menuButtonStyle;
         }
 
         void EnsureCamera()
@@ -44,6 +77,15 @@ namespace NexusGame
             mainCam.transform.LookAt(Vector3.zero);
             mainCam.clearFlags = CameraClearFlags.SolidColor;
             mainCam.backgroundColor = new Color(0.02f, 0.02f, 0.05f);
+
+            if (mainCam.GetComponent<BoardCameraPanZoom>() == null)
+                mainCam.gameObject.AddComponent<BoardCameraPanZoom>();
+        }
+
+        /// <summary>Reloads the scene so the main menu shows (same as a fresh launch).</summary>
+        public void ReturnToMainMenu()
+        {
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
         void EnsureLight()
@@ -185,77 +227,93 @@ namespace NexusGame
 
         void DrawMainMenu()
         {
-            const int w = 260;
-            const int h = 280;
-            var rect = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
-            GUI.Box(rect, "Nexus Ops");
+            var btnStyle = MenuButtonStyle();
+            float padX = 22f;
+            float bw = Mathf.Min(440f, Screen.width - padX * 2f);
+            const float titleH = 46f;
+            const float btnH = 58f;
+            const float btnGap = 12f;
+            const float footerH = 28f;
+            const int nBtn = 7;
+            float h = titleH + nBtn * (btnH + btnGap) + footerH + 20f;
+            h = Mathf.Min(h, Screen.height - 24f);
+            var rect = new Rect((Screen.width - bw) / 2f, Mathf.Max(12f, (Screen.height - h) / 2f), bw, h);
+            GUI.Box(rect, "");
 
-            float y = rect.y + 30f;
-            float x = rect.x + 20f;
-            float bw = w - 40f;
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Clamp(Screen.width / 22, 20, 28),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            GUI.Label(new Rect(rect.x, rect.y + 8f, rect.width, titleH), "Nexus Ops", titleStyle);
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Play"))
+            float y = rect.y + titleH + 10f;
+            float x = rect.x + padX;
+            float innerW = bw - padX * 2f;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "Play", btnStyle))
             {
                 _debugMode = false;
                 _vsAi = false;
                 _aiVsAi = false;
                 _state = UiState.MapSelect;
             }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Play vs AI"))
+            y += btnH + btnGap;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "Play vs AI", btnStyle))
             {
                 _debugMode = false;
                 _vsAi = true;
                 _aiVsAi = false;
                 _state = UiState.MapSelect;
             }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "AI vs AI (test)"))
+            y += btnH + btnGap;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "AI vs AI (test)", btnStyle))
             {
                 _debugMode = false;
                 _vsAi = false;
                 _aiVsAi = true;
                 _state = UiState.MapSelect;
             }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Multiplayer"))
-            {
+            y += btnH + btnGap;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "Multiplayer", btnStyle))
                 Debug.Log("Multiplayer: placeholder option.");
-            }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Settings"))
-            {
+            y += btnH + btnGap;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "Settings", btnStyle))
                 Debug.Log("Settings: placeholder option.");
-            }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "How to Play"))
+            y += btnH + btnGap;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "How to Play", btnStyle))
             {
                 _rulebookScroll = Vector2.zero;
                 _rulebookTab = 0;
                 _state = UiState.Rulebook;
             }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Debug"))
+            y += btnH + btnGap;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "Debug", btnStyle))
             {
-                // Enter map selection with click-debugging enabled.
                 _debugMode = true;
                 _vsAi = false;
                 _aiVsAi = false;
                 _state = UiState.MapSelect;
             }
 
-            // Footer credit (bottom-right).
-            const float footerH = 22f;
-            float footerY = rect.yMax - footerH - 8f;
+            float footerY = rect.yMax - footerH - 10f;
             var creditStyle = new GUIStyle(GUI.skin.label)
             {
-                alignment = TextAnchor.MiddleRight
+                fontSize = 12,
+                alignment = TextAnchor.MiddleCenter
             };
             GUI.Label(new Rect(rect.x + 8f, footerY, rect.width - 16f, footerH),
                 "Made by Clanker Games Inc", creditStyle);
@@ -263,58 +321,74 @@ namespace NexusGame
 
         void DrawMapSelect()
         {
-            const int w = 320;
-            const int h = 260;
-            var rect = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
-            GUI.Box(rect, "Select Map");
+            var btnStyle = MenuButtonStyle();
+            float padX = 18f;
+            float w = Mathf.Min(460f, Screen.width - 20f);
+            float x0 = (Screen.width - w) / 2f;
+            float y = 18f;
+            const float btnH = 54f;
+            const float gap = 12f;
+            float x = x0 + padX;
+            float bw = w - padX * 2f;
 
-            float y = rect.y + 30f;
-            float x = rect.x + 20f;
-            float bw = w - 40f;
+            var hdr = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Clamp(Screen.width / 24, 18, 26),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            GUI.Label(new Rect(x0, y, w, 40f), "Select Map", hdr);
+            y += 44f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "1v1 Map (Current Board)"))
+            if (GUI.Button(new Rect(x, y, bw, btnH), "1v1 Map (Current Board)", btnStyle))
             {
                 _selectedLayout = BoardLayoutMode.OneVOne;
                 EnsureGameSystems();
                 _state = UiState.InGame;
             }
-            y += 40f;
 
-            GUI.Label(new Rect(x, y, bw, 20f), "2–4 Player Maps:");
-            y += 25f;
+            y += btnH + gap;
 
+            var subHdr = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Clamp(Screen.width / 32, 15, 20),
+                fontStyle = FontStyle.Bold
+            };
+            GUI.Label(new Rect(x, y, bw, 28f), "2–4 Player Maps:", subHdr);
+            y += 30f;
+
+            float previewCap = Mathf.Clamp(Screen.height * 0.28f, 100f, 200f);
             if (TwoToFourPlayerMapPreview != null)
             {
-                float previewHeight = 140f;
-                GUI.DrawTexture(new Rect(x, y, bw, previewHeight), TwoToFourPlayerMapPreview, ScaleMode.ScaleToFit);
-                y += previewHeight + 10f;
+                GUI.DrawTexture(new Rect(x, y, bw, previewCap), TwoToFourPlayerMapPreview, ScaleMode.ScaleToFit);
+                y += previewCap + gap;
             }
             else
             {
-                GUI.Label(new Rect(x, y, bw, 20f), "(Assign 2–4 map preview texture)");
-                y += 30f;
+                GUI.Label(new Rect(x, y, bw, 44f), "(Assign 2–4 map preview texture)");
+                y += 48f;
             }
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Use 2–4 Player Map A (radius-3)"))
+            if (GUI.Button(new Rect(x, y, bw, btnH), "2–4 Map A (radius-3)", btnStyle))
             {
                 _selectedLayout = BoardLayoutMode.TwoToFour;
                 EnsureGameSystems();
                 _state = UiState.InGame;
             }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Use 2–4 Player Map B (12-6-1)"))
+            y += btnH + gap;
+
+            if (GUI.Button(new Rect(x, y, bw, btnH), "2–4 Map B (12-6-1)", btnStyle))
             {
                 _selectedLayout = BoardLayoutMode.TwoToFourSmall;
                 EnsureGameSystems();
                 _state = UiState.InGame;
             }
-            y += 40f;
 
-            if (GUI.Button(new Rect(x, y, bw, 30f), "Back"))
-            {
+            y += btnH + gap + 6f;
+
+            if (GUI.Button(new Rect(x, y, bw, btnH), "Back", btnStyle))
                 _state = UiState.MainMenu;
-            }
         }
 
         void EnsureRulebookStyles()
@@ -346,16 +420,18 @@ namespace NexusGame
             string header = _rulebookTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
             GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 28f), header, titleStyle);
 
-            const float tabH = 28f;
+            var tabStyle = MenuButtonStyle();
+            float tabH = 48f;
+            float tabW = (panel.width - 40f) * 0.5f;
             float tabY = panel.y + 36f;
-            if (GUI.Button(new Rect(panel.x + 14f, tabY, 100f, tabH), "Rules"))
+            if (GUI.Button(new Rect(panel.x + 14f, tabY, tabW - 6f, tabH), "Rules", tabStyle))
             {
                 if (_rulebookTab != 0)
                     _rulebookScroll = Vector2.zero;
                 _rulebookTab = 0;
             }
 
-            if (GUI.Button(new Rect(panel.x + 122f, tabY, 100f, tabH), "Units"))
+            if (GUI.Button(new Rect(panel.x + 14f + tabW + 6f, tabY, tabW - 6f, tabH), "Units", tabStyle))
             {
                 if (_rulebookTab != 1)
                     _rulebookScroll = Vector2.zero;
@@ -366,7 +442,7 @@ namespace NexusGame
                 ? NexusRulebook.Body
                 : NexusUnitQuickReference.Build(null);
 
-            const float backH = 38f;
+            const float backH = 54f;
             var scrollRect = new Rect(panel.x + 12f, panel.y + 36f + tabH + 8f, panel.width - 24f,
                 panel.height - 36f - tabH - 8f - backH - 20f);
             float innerW = scrollRect.width - 22f;
@@ -377,7 +453,10 @@ namespace NexusGame
             GUI.Label(new Rect(8f, 8f, innerW - 16f, contentH), body, _rulebookBodyStyle);
             GUI.EndScrollView();
 
-            if (GUI.Button(new Rect(panel.x + 20f, panel.yMax - backH - 12f, 180f, backH), "Back to menu"))
+            float backW = Mathf.Min(panel.width - 40f, 420f);
+            if (GUI.Button(
+                    new Rect(panel.x + (panel.width - backW) * 0.5f, panel.yMax - backH - 12f, backW, backH),
+                    "Back to menu", MenuButtonStyle()))
                 _state = UiState.MainMenu;
         }
     }
