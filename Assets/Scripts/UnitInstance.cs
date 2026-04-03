@@ -83,8 +83,10 @@ namespace NexusGame
 
             int slots = 6 * ring;
             float angleDeg = (360f * remaining / slots) + (ring * 10f);
-            // Push units farther apart so stacks are clearly visible.
-            float radius = Mathf.Min(0.52f, 0.18f * ring);
+            // Ring radius: stay inside ~hex face (BoardGenerator HexRadius ~0.7); spread stacks clearly.
+            const float maxFormationRadius = 0.62f;
+            const float radiusPerRing = 0.30f;
+            float radius = Mathf.Min(maxFormationRadius, radiusPerRing * ring);
             float angle = angleDeg * Mathf.Deg2Rad;
             return new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
         }

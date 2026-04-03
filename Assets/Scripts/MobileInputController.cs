@@ -7,6 +7,8 @@ namespace NexusGame
         {
         public Camera MainCamera;
         public GameController Game;
+        [Tooltip("Used to ignore board taps while the IMGUI buy menu is open.")]
+        public DemoHUD Hud;
 
         [Header("Debug")]
         public bool DebugClicks;
@@ -46,6 +48,8 @@ namespace NexusGame
                 Game = FindObjectOfType<GameController>();
             if (_boardCam == null)
                 _boardCam = FindObjectOfType<BoardCameraPanZoom>();
+            if (Hud == null)
+                Hud = FindObjectOfType<DemoHUD>();
         }
 
         void Update()
@@ -81,6 +85,8 @@ namespace NexusGame
 
                     if (EventSystem.current != null &&
                         EventSystem.current.IsPointerOverGameObject(touch.fingerId))
+                        _pendingTap = false;
+                    else if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(touch.position))
                         _pendingTap = false;
 
                     PrepareDragFromPointer(touch.position);
@@ -143,6 +149,8 @@ namespace NexusGame
 
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
                     _pendingTap = false;
+                else if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(Input.mousePosition))
+                    _pendingTap = false;
 
                 PrepareDragFromPointer(Input.mousePosition);
             }
@@ -182,6 +190,8 @@ namespace NexusGame
                 return;
             if (MainCamera == null)
                 return;
+            if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
+                return;
 
             // Only prepare drag if pointer is on a movable unit belonging to current player.
             var ray = MainCamera.ScreenPointToRay(screenPos);
@@ -206,6 +216,8 @@ namespace NexusGame
 
         void TryDragMove(Vector2 screenPos)
         {
+            if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
+                return;
             var target = ResolveTileFromPointer(screenPos);
             if (target == null || _dragSourceTile == null)
                 return;
@@ -274,6 +286,8 @@ namespace NexusGame
         void HandleTap(Vector2 screenPos)
         {
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                return;
+            if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
                 return;
 
             var ray = MainCamera.ScreenPointToRay(screenPos);

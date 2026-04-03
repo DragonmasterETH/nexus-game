@@ -4,6 +4,19 @@ using UnityEngine;
 
 namespace NexusGame
 {
+    /// <summary>World start + yield for HUD rubium fly animation (one entry per contributing mine hex).</summary>
+    public readonly struct MiningIncomeFlightInfo
+    {
+        public readonly Vector3 WorldStart;
+        public readonly int Amount;
+
+        public MiningIncomeFlightInfo(Vector3 worldStart, int amount)
+        {
+            WorldStart = worldStart;
+            Amount = amount;
+        }
+    }
+
     public partial class GameController : MonoBehaviour
     {
         [Header("Scene References")]
@@ -70,6 +83,8 @@ namespace NexusGame
         bool _anyMovementOccurredThisTurn;
         readonly Dictionary<PlayerState, List<UnitInstance>> _unitsByPlayer =
             new Dictionary<PlayerState, List<UnitInstance>>();
+
+        List<MiningIncomeFlightInfo> _miningIncomeFlightsForHud;
 
         /// <summary>Set before AddComponent when Bootstrap will call <see cref="ResetAndStartNewMatch"/>.</summary>
         public static bool SkipStartInitOnce;
@@ -574,6 +589,7 @@ namespace NexusGame
 
             // Mining: collect from mines they occupy (uncontested).
             int income = 0;
+            _miningIncomeFlightsForHud = null;
             foreach (var tile in Board.AllTiles)
             {
                 if (tile.ExtraMineYield <= 0)
@@ -596,6 +612,15 @@ namespace NexusGame
                 if (hasPlayerUnit && !hasOtherUnit)
                 {
                     income += tile.ExtraMineYield;
+                    if (!IsAiControlled(player))
+                    {
+                        if (_miningIncomeFlightsForHud == null)
+                            _miningIncomeFlightsForHud = new List<MiningIncomeFlightInfo>();
+                        Vector3 w = tile.View != null
+                            ? tile.View.transform.position + Vector3.up * 0.4f
+                            : Board.AxialToWorld(tile.Q, tile.R) + Vector3.up * 0.4f;
+                        _miningIncomeFlightsForHud.Add(new MiningIncomeFlightInfo(w, tile.ExtraMineYield));
+                    }
                 }
             }
 
@@ -618,6 +643,14 @@ namespace NexusGame
                     BeginBattleArrangement(player);
             }
 
+        }
+
+        /// <summary>HUD: take pending mine→bank rubium flights (cleared after call). Only populated for human turns with income hexes.</summary>
+        public bool TryConsumeMiningIncomeFlights(out List<MiningIncomeFlightInfo> flights)
+        {
+            flights = _miningIncomeFlightsForHud;
+            _miningIncomeFlightsForHud = null;
+            return flights != null && flights.Count > 0;
         }
 
         /// <summary>Legacy auto-resolve (no UI). Builds plan from board state.</summary>

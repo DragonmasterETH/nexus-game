@@ -41,6 +41,19 @@ namespace NexusGame
         /// <summary>Shared material for unrevealed exploration markers (<c>Ore Unrevealed.png</c> in Resources).</summary>
         Material _explorationUnrevealedSharedMat;
 
+        static Material _selectionLineSharedMaterial;
+
+        static Material SelectionLineMaterial()
+        {
+            if (_selectionLineSharedMaterial != null)
+                return _selectionLineSharedMaterial;
+            var sh = Shader.Find("Nexus/SelectionLine");
+            if (sh == null)
+                sh = Shader.Find("Sprites/Default");
+            _selectionLineSharedMaterial = new Material(sh);
+            return _selectionLineSharedMaterial;
+        }
+
         public Dictionary<(int q, int r), BoardTile> Tiles { get; private set; } =
             new Dictionary<(int q, int r), BoardTile>();
 
@@ -453,19 +466,33 @@ namespace NexusGame
                 lr.SetPosition(i, new Vector3(x, 0f, z));
             }
 
-            // Selection highlight (initially hidden)
-            var highlight = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            highlight.name = "Highlight";
+            // Selection highlight: white hex border (initially hidden; above black tile outline).
+            // Uses Nexus/SelectionLine (ZTest Always) so neighbor hexes don't depth-occlude shared edges.
+            var highlight = new GameObject("Highlight");
             highlight.transform.SetParent(go.transform, worldPositionStays: false);
-            highlight.transform.localPosition = new Vector3(0, 0.03f, 0);
-            highlight.transform.localRotation = Quaternion.Euler(90, 0, 0);
-            highlight.transform.localScale = Vector3.one * HexRadius * 1.6f;
-            var hr = highlight.GetComponent<Renderer>();
-            if (hr != null)
+            highlight.transform.localPosition = new Vector3(0f, 0.06f, 0f);
+            highlight.transform.localRotation = Quaternion.identity;
+            highlight.transform.localScale = Vector3.one;
+
+            var hlr = highlight.AddComponent<LineRenderer>();
+            hlr.useWorldSpace = false;
+            hlr.positionCount = 7;
+            hlr.loop = true;
+            hlr.widthMultiplier = 0.08f;
+            hlr.sharedMaterial = SelectionLineMaterial();
+            hlr.startColor = hlr.endColor = Color.white;
+            hlr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            hlr.receiveShadows = false;
+
+            float hiRadius = HexRadius * 1.02f;
+            for (int i = 0; i < 7; i++)
             {
-                hr.material = new Material(Shader.Find("Sprites/Default"));
-                hr.material.color = new Color(0f, 1f, 1f, 0.35f);
+                float angle = Mathf.Deg2Rad * (60f * i + 30f);
+                float x = Mathf.Cos(angle) * hiRadius;
+                float z = Mathf.Sin(angle) * hiRadius;
+                hlr.SetPosition(i, new Vector3(x, 0f, z));
             }
+
             highlight.SetActive(false);
 
             return go;

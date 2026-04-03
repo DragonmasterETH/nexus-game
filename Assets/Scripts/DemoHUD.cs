@@ -40,6 +40,17 @@ namespace NexusGame
         public Sprite OreChip3Sprite;
 
         bool _showBuyMenu;
+        Rect _buyMenuGuiRect;
+        bool _buyMenuGuiRectValid;
+
+        /// <summary>IMGUI buy panel (screen space, top-left origin) for blocking board taps.</summary>
+        public bool ScreenPointOverlapsBuyMenu(Vector2 screenPosition)
+        {
+            if (!_buyMenuGuiRectValid)
+                return false;
+            var gui = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
+            return _buyMenuGuiRect.Contains(gui);
+        }
         bool _showQuickRef;
         bool _showSettingsMenu;
         int _quickRefTab; // 0 = rules, 1 = units
@@ -79,7 +90,7 @@ namespace NexusGame
         GUIStyle _cardBadgeStyle;
         GUIStyle _cardColumnLabelStyle;
 
-        const float CardBarHeight = 152f;
+        const float CardBarHeight = 136f;
         const float PhaseRibbonHeight = 26f;
         /// <summary>Card tiles in pile modal (full detail).</summary>
         const float CardTileW = 112f;
@@ -105,6 +116,18 @@ namespace NexusGame
         GUIStyle _battleWindowStyle;
         Texture2D _battleWindowBg;
         GUIStyle _topIconButtonStyle;
+        GUIStyle _flyRubiumAmountStyle;
+
+        struct FlyingRubiumChip
+        {
+            public Vector2 StartGui;
+            public Vector2 EndGui;
+            public float StartTime;
+            public float Duration;
+            public int Amount;
+        }
+
+        readonly List<FlyingRubiumChip> _flyingRubium = new List<FlyingRubiumChip>();
 
         void Start()
         {
@@ -112,6 +135,100 @@ namespace NexusGame
                 Game = FindObjectOfType<GameController>();
             if (InputController == null)
                 InputController = FindObjectOfType<MobileInputController>();
+        }
+
+        void Update()
+        {
+            if (Game == null)
+                return;
+
+            if (Game.TryConsumeMiningIncomeFlights(out var list))
+            {
+                var cam = Camera.main;
+                if (cam != null)
+                {
+                    float stagger = 0f;
+                    const float staggerStep = 0.12f;
+                    foreach (var info in list)
+                    {
+                        var sp = cam.WorldToScreenPoint(info.WorldStart);
+                        if (sp.z <= 0f)
+                        {
+                            stagger += staggerStep;
+                            continue;
+                        }
+
+                        var startGui = new Vector2(sp.x, Screen.height - sp.y);
+                        var endGui = GetRubiumBankIconCenterGui();
+                        _flyingRubium.Add(new FlyingRubiumChip
+                        {
+                            StartGui = startGui,
+                            EndGui = endGui,
+                            StartTime = Time.time + stagger,
+                            Duration = 0.72f,
+                            Amount = info.Amount
+                        });
+                        stagger += staggerStep;
+                    }
+                }
+            }
+
+            for (int i = _flyingRubium.Count - 1; i >= 0; i--)
+            {
+                if (Time.time > _flyingRubium[i].StartTime + _flyingRubium[i].Duration)
+                    _flyingRubium.RemoveAt(i);
+            }
+        }
+
+        Vector2 GetRubiumBankIconCenterGui()
+        {
+            const float topBarY = 6f;
+            const float topBarH = 52f;
+            float ly = topBarY + (topBarH - MainHudIconHeight) * 0.5f - 2f;
+            var rub = GetRubiumGui();
+            float w = rub.IsEmpty ? MainHudIconHeight : MainHudIconHeight * rub.AspectRatio;
+            float cx = 12f + w * 0.5f;
+            float cy = ly + MainHudIconHeight * 0.5f;
+            return new Vector2(cx, cy);
+        }
+
+        void DrawFlyingRubiumIncome()
+        {
+            var rub = GetRubiumGui();
+            if (rub.IsEmpty || _flyingRubium.Count == 0)
+                return;
+
+            if (_flyRubiumAmountStyle == null)
+            {
+                _flyRubiumAmountStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 12,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft,
+                    normal = { textColor = new Color(1f, 0.95f, 0.4f, 0.95f) }
+                };
+            }
+
+            float now = Time.time;
+            Color prev = GUI.color;
+            foreach (var f in _flyingRubium)
+            {
+                float u = Mathf.InverseLerp(f.StartTime, f.StartTime + f.Duration, now);
+                if (u < 0f || u > 1f)
+                    continue;
+                float t = u * u * (3f - 2f * u);
+                var p = Vector2.Lerp(f.StartGui, f.EndGui, t);
+                float h = Mathf.Lerp(MainHudIconHeight * 0.82f, MainHudIconHeight, t);
+                float half = h * 0.5f;
+                var r = new Rect(p.x - half, p.y - half, h * rub.AspectRatio, h);
+                float a = u < 0.08f ? u / 0.08f : 1f;
+                GUI.color = new Color(1f, 1f, 1f, a);
+                rub.Draw(r);
+                if (f.Amount > 1)
+                    GUI.Label(new Rect(r.xMax + 2f, r.y, 36f, h), "+" + f.Amount, _flyRubiumAmountStyle);
+            }
+
+            GUI.color = prev;
         }
 
         NexusGuiImage GetRubiumGui()
@@ -248,6 +365,7 @@ namespace NexusGame
             }
 
             var player = Game.CurrentPlayer;
+            _buyMenuGuiRectValid = false;
 
             DrawFullBattleOverlays(player);
             DrawDragonPhaseOverlay();
@@ -424,16 +542,15 @@ namespace NexusGame
             if (_showBuyMenu && canBuyHere)
             {
                 int y = (int)topY + 35;
-                GUILayout.BeginArea(new Rect(10, y, 360, 520));
-                GUILayout.Label("- Units -", GUI.skin.box);
-                DrawBuyButtonGui("Human (1)", UnitType.Human, 1);
-                DrawBuyButtonGui("Fungoid (2)", UnitType.Fungoid, 2);
-                DrawBuyButtonGui("Crystalline (2)", UnitType.Crystalline, 2);
-                DrawBuyButtonGui("Rock Strider (3)", UnitType.RockStrider, 3);
-                DrawBuyButtonGui("Lava Leaper (4)", UnitType.LavaLeaper, 4);
-                DrawBuyButtonGui("Rubium Dragon (8)", UnitType.RubiumDragon, 8);
-                GUILayout.Space(6);
-                GUILayout.Label("- Deployment Energize -", GUI.skin.box);
+                _buyMenuGuiRect = new Rect(10f, y, 380f, 520f);
+                _buyMenuGuiRectValid = true;
+                GUILayout.BeginArea(_buyMenuGuiRect);
+                var buyHdr = new GUIStyle(GUI.skin.box) { fontSize = 12, fontStyle = FontStyle.Bold };
+                GUILayout.Label("Buy units", buyHdr);
+                const float gridStartY = 30f;
+                DrawBuyUnitGrid(8f, gridStartY, _buyMenuGuiRect.width - 16f);
+                GUILayout.Space(228f);
+                GUILayout.Label("Deployment Energize", GUI.skin.box);
                 var sel = InputController != null ? InputController.SelectedTile : null;
                 if (Game.AnyMovementOccurredThisTurn)
                     GUILayout.Label("(Deployment locked after any movement this turn)");
@@ -469,6 +586,38 @@ namespace NexusGame
 
             if (_showQuickRef)
                 DrawQuickReferenceOverlay();
+
+            DrawFlyingRubiumIncome();
+
+            if (Game.BattleClashIntroActive)
+                DrawBattleClashIntroOverlay();
+        }
+
+        void DrawBattleClashIntroOverlay()
+        {
+            var dim = new Color(0f, 0f, 0f, 0.65f);
+            Color prev = GUI.color;
+            GUI.color = dim;
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            GUI.color = prev;
+
+            var pulse = 0.85f + 0.15f * Mathf.Sin(Time.realtimeSinceStartup * 8f);
+            var title = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Clamp(Screen.width / 14, 28, 56),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(1f, 0.92f, 0.35f, pulse) }
+            };
+            GUI.Label(new Rect(0f, Screen.height * 0.38f, Screen.width, 120f), "⚔  ⚔  ⚔", title);
+            var sub = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.9f, 0.9f, 0.95f, 0.85f) }
+            };
+            GUI.Label(new Rect(0f, Screen.height * 0.38f + 72f, Screen.width, 28f),
+                "(Sword clash animation — art TBD)", sub);
         }
 
         void EnsureTopIconButtonStyle()
@@ -674,7 +823,7 @@ namespace NexusGame
             const float pad = 8f;
             const float headerH = 18f;
             string deckLine =
-                $"P{player.PlayerIndex + 1}  ·  Secret deck {Game.SecretDeckCount}  ·  Energize {Game.EnergizeDeckCount}  ·  tap a pile";
+                $"P{player.PlayerIndex + 1}  ·  Secret deck {Game.SecretDeckCount}  ·  Energize {Game.EnergizeDeckCount}";
             var deckStyle = new GUIStyle(_cardColumnLabelStyle) { fontSize = 10 };
             GUI.Label(new Rect(barX + pad, barY + 2, barW - pad * 2f, 16f), deckLine, deckStyle);
 
@@ -685,44 +834,64 @@ namespace NexusGame
 
             const float splitGap = 8f;
             const float minTilePanelW = 120f;
-            float maxLeft = Mathf.Max(160f, innerW - minTilePanelW - splitGap);
-            float leftW = Mathf.Min(maxLeft, Mathf.Max(200f, innerW * 0.42f));
-            float rightW = innerW - leftW - splitGap;
-            float rightX = innerX + leftW + splitGap;
-
-            float colGap = 6f;
-            float colW = (leftW - colGap * 2f) / 3f;
+            const float cardsLabelW = 44f;
+            const float stackBtnW = 46f;
+            const float stackBtnH = 26f;
+            const float stackGap = 3f;
+            const float cardsHdrH = 12f;
+            const float cardsColGap = 6f;
 
             int bCount = player.BattleEnergize?.Count ?? 0;
             int dCount = player.DeployEnergize?.Count ?? 0;
             int sCount = player.SecretMissions?.Count ?? 0;
 
+            float stackColW = cardsLabelW + cardsColGap + stackBtnW;
+            float maxLeft = Mathf.Max(80f, innerW - minTilePanelW - splitGap);
+            float leftW = Mathf.Min(stackColW, maxLeft);
+
+            float rightW = innerW - leftW - splitGap;
+            float rightX = innerX + leftW + splitGap;
+
             var pileBtnStyle = new GUIStyle(GUI.skin.button)
             {
                 fontSize = 11,
                 fontStyle = FontStyle.Bold,
-                wordWrap = true,
+                wordWrap = false,
                 alignment = TextAnchor.MiddleCenter
             };
 
-            if (GUI.Button(new Rect(innerX, contentY, colW, contentH),
-                    $"Battle\n⚔ {bCount}", pileBtnStyle))
+            var cardsHeadingStyle = new GUIStyle(_cardColumnLabelStyle)
+            {
+                fontSize = 9,
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = false
+            };
+
+            float stackBlockH = cardsHdrH + 4f + stackBtnH * 3f + stackGap * 2f;
+            float stackTop = contentY + Mathf.Max(0f, (contentH - stackBlockH) * 0.5f);
+            GUI.Label(new Rect(innerX, stackTop, cardsLabelW, cardsHdrH + 2f), "CARDS", cardsHeadingStyle);
+
+            float bx = innerX + cardsLabelW + cardsColGap;
+            float by = stackTop + cardsHdrH + 4f;
+            var rBattle = new Rect(bx, by, stackBtnW, stackBtnH);
+            var rDeploy = new Rect(bx, by + stackBtnH + stackGap, stackBtnW, stackBtnH);
+            var rSecret = new Rect(bx, by + (stackBtnH + stackGap) * 2f, stackBtnW, stackBtnH);
+
+            if (GUI.Button(rBattle, $"⚔ {bCount}", pileBtnStyle))
             {
                 _handPileViewer = _handPileViewer == HandPileViewerKind.Battle
                     ? HandPileViewerKind.None
                     : HandPileViewerKind.Battle;
             }
 
-            if (GUI.Button(new Rect(innerX + colW + colGap, contentY, colW, contentH),
-                    $"Deploy\n▲ {dCount}", pileBtnStyle))
+            if (GUI.Button(rDeploy, $"▲ {dCount}", pileBtnStyle))
             {
                 _handPileViewer = _handPileViewer == HandPileViewerKind.Deploy
                     ? HandPileViewerKind.None
                     : HandPileViewerKind.Deploy;
             }
 
-            if (GUI.Button(new Rect(innerX + (colW + colGap) * 2f, contentY, colW, contentH),
-                    $"Secrets\n★ {sCount}", pileBtnStyle))
+            if (GUI.Button(rSecret, $"★ {sCount}", pileBtnStyle))
             {
                 _handPileViewer = _handPileViewer == HandPileViewerKind.Secret
                     ? HandPileViewerKind.None
@@ -731,15 +900,12 @@ namespace NexusGame
 
             if (_handPileViewer != HandPileViewerKind.None)
             {
-                var hi = new Rect(innerX, contentY, colW, contentH);
                 if (_handPileViewer == HandPileViewerKind.Battle)
-                    DrawOutlineRect(hi, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
-                hi.x = innerX + colW + colGap;
+                    DrawOutlineRect(rBattle, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
                 if (_handPileViewer == HandPileViewerKind.Deploy)
-                    DrawOutlineRect(hi, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
-                hi.x = innerX + (colW + colGap) * 2f;
+                    DrawOutlineRect(rDeploy, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
                 if (_handPileViewer == HandPileViewerKind.Secret)
-                    DrawOutlineRect(hi, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
+                    DrawOutlineRect(rSecret, new Color(0.95f, 0.78f, 0.2f, 0.95f), 2f);
             }
 
             DrawBottomTilePanel(rightX, contentY, rightW, contentH, player);
@@ -751,16 +917,9 @@ namespace NexusGame
             GUI.Box(panel, "");
 
             var popupTile = InputController != null ? InputController.SelectedTile : null;
-            var titleStyle = new GUIStyle(_cardColumnLabelStyle)
-            {
-                fontSize = 11,
-                alignment = TextAnchor.MiddleLeft
-            };
-            string title = popupTile != null ? "Tile " + popupTile.Type : "Selected tile";
-            GUI.Label(new Rect(panel.x + 6f, panel.y + 4f, panel.width - 12f, 16f), title, titleStyle);
 
-            const float tileScrollContentH = 360f;
-            var scrollView = new Rect(panel.x + 4f, panel.y + 22f, panel.width - 8f, panel.height - 26f);
+            const float tileScrollContentH = 260f;
+            var scrollView = new Rect(panel.x + 4f, panel.y + 4f, panel.width - 8f, panel.height - 8f);
             float innerW = Mathf.Max(80f, scrollView.width - 18f);
 
             if (popupTile == null)
@@ -1039,12 +1198,22 @@ namespace NexusGame
             var hex = Game.ActiveBattleHex;
 
             GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label(UiSafeText(Game.EnergizeBattleContext ?? (hex != null ? "Battle in progress" : "Battle preparation")));
-            GUILayout.Box(BattleNextActionText());
+            DrawBattleContextBar(hex, left, right);
+            GUILayout.Label(BattleNextActionShort(), new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold });
             if (Game.HasActiveBattleStep)
-                GUILayout.Box(BattleStepLabel(Game.ActiveBattleStepUnitType));
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Step", GUILayout.Width(36));
+                var stepIcon = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(30f), GUILayout.Height(26f));
+                DrawUnitMiniIcon(stepIcon, Game.ActiveBattleStepUnitType);
+                GUILayout.Label(UnitUiName(Game.ActiveBattleStepUnitType),
+                    new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold });
+                GUILayout.EndHorizontal();
+            }
+
+            DrawBattleDiceRollBanner();
             DrawBattleHitSummaryRow();
-            DrawBattleOrderRibbon();
+            DrawBattleOrderRibbonIcons();
             GUILayout.EndVertical();
 
             GUILayout.BeginVertical(GUI.skin.box);
@@ -1070,12 +1239,12 @@ namespace NexusGame
 
             string lockedReason = BattleLockedReasonText();
             if (!string.IsNullOrEmpty(lockedReason))
-                GUILayout.Label("Unavailable now: " + lockedReason);
+                GUILayout.Label("🔒 " + lockedReason, new GUIStyle(GUI.skin.label) { fontSize = 10, wordWrap = true });
             GUILayout.EndVertical();
 
             GUILayout.Space(6f);
             GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label("Battle log", GUI.skin.box);
+            GUILayout.Label("📜 Log", GUI.skin.box);
             string battleLog = !string.IsNullOrEmpty(Game.LiveBattlePhaseLog) ? Game.LiveBattlePhaseLog : Game.LastBattlePhaseLog;
             string safe = UiSafeText(battleLog);
             if (safe.Length != _lastBattleLogLen)
@@ -1085,28 +1254,82 @@ namespace NexusGame
             }
             float logH = Mathf.Max(90f, windowHeight * 0.23f);
             _scrollBattleMainLog = GUILayout.BeginScrollView(_scrollBattleMainLog, GUILayout.Height(logH));
-            GUILayout.Label(string.IsNullOrEmpty(safe) ? "(No battle log yet)" : safe);
+            var logBody = new GUIStyle(GUI.skin.label) { fontSize = 10, wordWrap = true };
+            GUILayout.Label(string.IsNullOrEmpty(safe) ? "(No battle log yet)" : safe, logBody);
             GUILayout.EndScrollView();
             GUILayout.EndVertical();
         }
 
+        void DrawBattleContextBar(BoardTile hex, PlayerState left, PlayerState right)
+        {
+            string ctx;
+            if (!string.IsNullOrEmpty(Game.EnergizeBattleContext))
+                ctx = Game.EnergizeBattleContext;
+            else if (hex != null && left != null && right != null)
+                ctx = $"⬡({hex.Q},{hex.R})  P{left.PlayerIndex + 1}⚔P{right.PlayerIndex + 1}";
+            else
+                ctx = hex != null ? $"⬡({hex.Q},{hex.R})" : "Battle";
+            GUILayout.Label(ctx, new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold });
+        }
+
+        void DrawBattleDiceRollBanner()
+        {
+            var dOpt = Game.LastBattleUiDiceRoll;
+            if (!dOpt.HasValue)
+                return;
+            var d = dOpt.Value;
+            GUILayout.BeginHorizontal(GUI.skin.box);
+            string side = d.AttackerRolling ? "ATK" : "DEF";
+            var sideC = d.AttackerRolling ? new Color(0.35f, 0.55f, 1f) : new Color(1f, 0.45f, 0.35f);
+            var prev = GUI.color;
+            GUI.color = sideC;
+            GUILayout.Label(side, GUILayout.Width(30));
+            GUI.color = prev;
+            var ir = GUILayoutUtility.GetRect(22f, 22f, GUILayout.Width(26f), GUILayout.Height(24f));
+            DrawUnitMiniIcon(ir, d.UnitType);
+            if (d.Rolls != null && d.Rolls.Length > 0)
+            {
+                foreach (var v in d.Rolls)
+                {
+                    var dr = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(28f), GUILayout.Height(28f));
+                    GUI.Box(dr, v.ToString(), new GUIStyle(GUI.skin.box)
+                    {
+                        fontSize = 14,
+                        fontStyle = FontStyle.Bold,
+                        alignment = TextAnchor.MiddleCenter
+                    });
+                }
+            }
+            else if (d.Dice <= 0)
+            {
+                GUILayout.Label("0🎲", GUILayout.Width(36));
+            }
+
+            if (d.Impossible && d.Dice > 0)
+                GUILayout.Label($"need ≥{d.Need} (—)", GUILayout.ExpandWidth(false));
+            else if (d.Dice > 0)
+                GUILayout.Label($"need ≥{d.Need}  →  {d.Hits}★", GUILayout.ExpandWidth(false));
+            GUILayout.EndHorizontal();
+        }
+
         void DrawBattleSideColumn(PlayerState player, BoardTile hex, bool isLeft, PlayerState expectedSide)
         {
-            string title = player == null ? (isLeft ? "Your side" : "Opponent") : $"P{player.PlayerIndex + 1}";
+            string title = player == null ? (isLeft ? "You" : "Opp") : $"P{player.PlayerIndex + 1}";
             string sideTag = expectedSide != null && player == expectedSide
-                ? (player == Game.ActiveBattleAttacker ? "ATTACKER" : "DEFENDER")
+                ? (player == Game.ActiveBattleAttacker ? "⚔" : "🛡")
                 : "";
             var prev = GUI.color;
             if (player == Game.ActiveBattleAttacker)
                 GUI.color = new Color(0.2f, 0.38f, 0.8f, 0.95f);
             else if (player == Game.ActiveBattleDefender)
                 GUI.color = new Color(0.78f, 0.26f, 0.2f, 0.95f);
-            GUILayout.BeginVertical(GUI.skin.box, GUILayout.Width((Screen.width - 150f) * 0.45f), GUILayout.MinHeight(86f));
+            GUILayout.BeginVertical(GUI.skin.box, GUILayout.Width(220f), GUILayout.MinHeight(100f));
             GUI.color = prev;
-            GUILayout.Label(string.IsNullOrEmpty(sideTag) ? title : $"{title} ({sideTag})");
+            GUILayout.Label(string.IsNullOrEmpty(sideTag) ? title : $"{title} {sideTag}",
+                new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 12 });
             if (player == null || hex == null)
             {
-                GUILayout.Label("(waiting)");
+                GUILayout.Label("(—)");
                 GUILayout.EndVertical();
                 return;
             }
@@ -1125,14 +1348,36 @@ namespace NexusGame
                 GUILayout.Label("(none)");
             else
             {
+                int i = 0;
+                GUILayout.BeginHorizontal();
                 foreach (var kvp in counts.OrderBy(k => Array.IndexOf(BattleResolver.BattleOrder, k.Key)))
                 {
-                    GUILayout.BeginHorizontal();
-                    var ir = GUILayoutUtility.GetRect(16f, 16f, GUILayout.Width(18f), GUILayout.Height(16f));
-                    DrawUnitMiniIcon(ir, kvp.Key);
-                    GUILayout.Label(UnitUiName(kvp.Key) + " x" + kvp.Value);
-                    GUILayout.EndHorizontal();
+                    if (i > 0 && i % 2 == 0)
+                    {
+                        GUILayout.EndHorizontal();
+                        GUILayout.BeginHorizontal();
+                    }
+
+                    i++;
+                    GUILayout.BeginVertical(GUILayout.Width(102f));
+                    var box = GUILayoutUtility.GetRect(88f, 52f, GUILayout.Width(96f), GUILayout.Height(56f));
+                    GUI.Box(box, "");
+                    var iconR = new Rect(box.x + 6f, box.y + 4f, 36f, 36f);
+                    DrawUnitMiniIcon(iconR, kvp.Key);
+                    var nameStyle = new GUIStyle(GUI.skin.label)
+                    {
+                        fontSize = 9,
+                        fontStyle = FontStyle.Bold,
+                        alignment = TextAnchor.LowerRight,
+                        wordWrap = false
+                    };
+                    GUI.Label(new Rect(box.x + 2f, box.yMax - 16f, box.width - 4f, 14f), "×" + kvp.Value, nameStyle);
+                    GUI.Label(new Rect(box.x + 44f, box.y + 6f, 48f, 40f), UnitTypeAbbrev(kvp.Key),
+                        new GUIStyle(GUI.skin.label) { fontSize = 9, wordWrap = true });
+                    GUILayout.EndVertical();
                 }
+
+                GUILayout.EndHorizontal();
             }
 
             GUILayout.EndVertical();
@@ -1143,10 +1388,12 @@ namespace NexusGame
             if (Game.ActiveBattleAttacker == null || Game.ActiveBattleDefender == null)
                 return;
             GUILayout.BeginHorizontal();
-            DrawBattleChip($"Hits on P{Game.ActiveBattleAttacker.PlayerIndex + 1}: {Game.ActiveBattleHitsOnAttacker}",
+            DrawBattleChip(
+                $"P{Game.ActiveBattleAttacker.PlayerIndex + 1} ☠{Game.ActiveBattleHitsOnAttacker}",
                 new Color(0.25f, 0.4f, 0.95f, 0.9f));
             GUILayout.Space(10f);
-            DrawBattleChip($"Hits on P{Game.ActiveBattleDefender.PlayerIndex + 1}: {Game.ActiveBattleHitsOnDefender}",
+            DrawBattleChip(
+                $"P{Game.ActiveBattleDefender.PlayerIndex + 1} ☠{Game.ActiveBattleHitsOnDefender}",
                 new Color(0.92f, 0.3f, 0.24f, 0.9f));
             GUILayout.EndHorizontal();
         }
@@ -1159,7 +1406,7 @@ namespace NexusGame
             GUI.color = prev;
         }
 
-        void DrawBattleOrderRibbon()
+        void DrawBattleOrderRibbonIcons()
         {
             GUILayout.BeginHorizontal(GUI.skin.box);
             foreach (var t in BattleResolver.BattleOrder)
@@ -1167,27 +1414,34 @@ namespace NexusGame
                 bool active = Game.HasActiveBattleStep && Game.ActiveBattleStepUnitType == t;
                 var prev = GUI.color;
                 GUI.color = active ? new Color(1f, 0.85f, 0.2f, 1f) : new Color(0.35f, 0.35f, 0.35f, 0.9f);
-                GUILayout.Box(UnitUiName(t), GUILayout.Height(20f));
+                GUILayout.BeginVertical(GUILayout.Width(34f));
+                var ir = GUILayoutUtility.GetRect(28f, 28f, GUILayout.Width(32f), GUILayout.Height(30f));
+                DrawUnitMiniIcon(ir, t);
+                GUILayout.Label(UnitTypeAbbrev(t),
+                    new GUIStyle(GUI.skin.label) { fontSize = 7, alignment = TextAnchor.MiddleCenter });
+                GUILayout.EndVertical();
                 GUI.color = prev;
             }
+
             GUILayout.EndHorizontal();
         }
 
-        string BattleNextActionText()
+        string BattleNextActionShort()
         {
             if (Game.PendingBattleArrangement)
-                return "Next action: arrange/confirm active battles.";
+                return "📋 Order fights → Confirm";
             if (Game.FocusFirePicker != null)
-                return $"Next action: P{Game.FocusFirePicker.PlayerIndex + 1} picks Focus Fire unit type.";
+                return "🎯 Focus Fire: choose unit type (+2 dice)";
             if (Game.EnergizePromptPlayer != null)
-                return $"Next action: P{Game.EnergizePromptPlayer.PlayerIndex + 1} plays Battle Energize or passes.";
+                return "⚡ Battle Energize or Pass (P" + (Game.EnergizePromptPlayer.PlayerIndex + 1) + ")";
             if (Game.CasualtyPick != null)
-                return $"Next action: P{Game.CasualtyPick.Owner.PlayerIndex + 1} selects casualties.";
+                return "☠ Pick " + Game.CasualtyPick.Required + " casualty(s) (P" +
+                       (Game.CasualtyPick.Owner.PlayerIndex + 1) + ")";
             if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
-                return $"Next action: P{Game.SecretMissionOffer.Attacker.PlayerIndex + 1} can play one secret mission.";
+                return "★ Optional secret mission (P" + (Game.SecretMissionOffer.Attacker.PlayerIndex + 1) + ")";
             if (Game.HasActiveBattleStep)
-                return $"Resolving: {BattleStepLabel(Game.ActiveBattleStepUnitType)}.";
-            return "Battle phase active.";
+                return "🎲 Resolve step — casualties next if any";
+            return "Battle";
         }
 
         string BattleLockedReasonText()
@@ -1349,13 +1603,17 @@ namespace NexusGame
                     types.Add(u.Definition.Type);
             }
 
-            GUILayout.Label("Unit type for +2 dice:");
+            GUILayout.Label("+2🎲 on type:", new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold });
             foreach (var t in BattleResolver.BattleOrder)
             {
                 if (!types.Contains(t))
                     continue;
-                if (GUILayout.Button(t.ToString(), GUILayout.Height(28)))
+                GUILayout.BeginHorizontal();
+                var ir = GUILayoutUtility.GetRect(28f, 28f, GUILayout.Width(32f), GUILayout.Height(28f));
+                DrawUnitMiniIcon(ir, t);
+                if (GUILayout.Button(UnitUiName(t), GUILayout.Height(30f)))
                     Game.SubmitFocusFireUnitType(t);
+                GUILayout.EndHorizontal();
             }
 
             if (types.Count == 0 && GUILayout.Button("Cancel (refund Focus Fire)"))
@@ -1382,14 +1640,20 @@ namespace NexusGame
             GUILayout.Box($"Now selecting casualties: P{cp.Owner.PlayerIndex + 1} ({side})");
             GUI.color = prev;
 
-            GUILayout.Label($"P{cp.Owner.PlayerIndex + 1} pick {cp.Required} unit(s). Selected: {cp.Selected.Count}");
+            GUILayout.Label(
+                $"P{cp.Owner.PlayerIndex + 1} pick {cp.Required}  ·  {cp.Selected.Count}/{cp.Required}",
+                new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold });
             foreach (var u in cp.Pool)
             {
                 if (u == null)
                     continue;
                 bool on = cp.Selected.Contains(u);
-                if (GUILayout.Toggle(on, " " + u.Definition.Type + " (" + u.GetInstanceID() + ")") != on)
+                GUILayout.BeginHorizontal();
+                var ir = GUILayoutUtility.GetRect(28f, 28f, GUILayout.Width(32f), GUILayout.Height(28f));
+                DrawUnitMiniIcon(ir, u.Definition.Type);
+                if (GUILayout.Toggle(on, " " + UnitUiName(u.Definition.Type), GUILayout.Height(28f)) != on)
                     Game.ToggleCasualtyUnit(u);
+                GUILayout.EndHorizontal();
             }
 
             GUI.enabled = cp.Selected.Count == cp.Required;
@@ -1505,38 +1769,104 @@ namespace NexusGame
             GUI.color = prev;
         }
 
-        void DrawBuyButtonGui(string label, UnitType type, int baseCost)
+        void DrawBuyUnitGrid(float x0, float y0, float width)
+        {
+            const float colGap = 8f;
+            const float nameBoxH = 72f;
+            const float costGap = 4f;
+            const float iconRowH = 22f;
+            const float rowGap = 12f;
+            float cellW = (width - colGap * 2f) / 3f;
+            float rowStride = nameBoxH + costGap + iconRowH + rowGap;
+
+            var items = new[]
+            {
+                ("Human", UnitType.Human, 1),
+                ("Fungoid", UnitType.Fungoid, 2),
+                ("Crystalline", UnitType.Crystalline, 2),
+                ("Rock Strider", UnitType.RockStrider, 3),
+                ("Lava Leaper", UnitType.LavaLeaper, 4),
+                ("Rubium Dragon", UnitType.RubiumDragon, 8),
+            };
+
+            for (int i = 0; i < items.Length; i++)
+            {
+                int col = i % 3;
+                int row = i / 3;
+                float cx = x0 + col * (cellW + colGap);
+                float cy = y0 + row * rowStride;
+                var nameRect = new Rect(cx, cy, cellW, nameBoxH);
+                DrawBuyUnitCell(nameRect, items[i].Item2, items[i].Item3, items[i].Item1, costGap, iconRowH);
+            }
+        }
+
+        void DrawBuyUnitCell(Rect nameRect, UnitType type, int baseCost, string displayName, float costGap,
+            float iconRowH)
         {
             var player = Game.CurrentPlayer;
             int maxOff = Mathf.Max(0, baseCost - 1);
             int use = Mathf.Min(maxOff, player.DeploymentPurchaseDiscountRubium);
             int pay = baseCost - use;
-            string line = use > 0 ? label + " pay " + pay : label;
             bool canAfford = player.Rubium >= pay;
-            if (!canAfford)
-                GUI.enabled = false;
-            // Text-only: GUIContent(image) makes Unity draw a huge icon on each unit row (looked like Rubium troops).
-            if (GUILayout.Button(line) && canAfford)
-            {
-                BoardTile homeTile = null;
-                if (InputController != null && InputController.SelectedTile != null)
-                {
-                    var sel = InputController.SelectedTile;
-                    if (Game.CanDeployToStartingHomeTile(player, sel))
-                        homeTile = sel;
-                }
 
-                if (homeTile == null)
-                    homeTile = FindHomeBaseTileForPlayer(player);
-                if (homeTile != null)
-                {
-                    player.DeploymentPurchaseDiscountRubium -= use;
-                    player.Rubium -= pay;
-                    Game.SpawnUnit(player, type, homeTile);
-                }
+            var nameStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                fontSize = 10,
+                fontStyle = FontStyle.Bold,
+                clipping = TextClipping.Clip
+            };
+
+            Color prev = GUI.color;
+            if (!canAfford)
+                GUI.color = new Color(0.55f, 0.55f, 0.58f);
+
+            GUI.Box(nameRect, "");
+            GUI.Label(nameRect, displayName, nameStyle);
+            if (GUI.Button(nameRect, GUIContent.none) && canAfford)
+                TryBuyUnit(type, player, use, pay);
+
+            GUI.color = prev;
+
+            float costY = nameRect.yMax + costGap;
+            var rub = GetRubiumGui();
+            float iconH = 18f;
+            float iconW = rub.IsEmpty ? 0f : iconH * rub.AspectRatio;
+            float textW = 36f;
+            float rowW = iconW + 6f + textW;
+            float startX = nameRect.x + (nameRect.width - rowW) * 0.5f;
+            if (!rub.IsEmpty)
+                rub.Draw(startX, costY + 1f, iconH);
+            var costStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft
+            };
+            if (!canAfford)
+                GUI.color = new Color(0.55f, 0.55f, 0.58f);
+            GUI.Label(new Rect(startX + iconW + 6f, costY, textW, iconRowH), pay.ToString(), costStyle);
+            GUI.color = prev;
+        }
+
+        void TryBuyUnit(UnitType type, PlayerState player, int discountUse, int pay)
+        {
+            BoardTile homeTile = null;
+            if (InputController != null && InputController.SelectedTile != null)
+            {
+                var sel = InputController.SelectedTile;
+                if (Game.CanDeployToStartingHomeTile(player, sel))
+                    homeTile = sel;
             }
 
-            GUI.enabled = true;
+            if (homeTile == null)
+                homeTile = FindHomeBaseTileForPlayer(player);
+            if (homeTile == null)
+                return;
+            player.DeploymentPurchaseDiscountRubium -= discountUse;
+            player.Rubium -= pay;
+            Game.SpawnUnit(player, type, homeTile);
         }
 
         void DrawSelectedTilePanelBody(PlayerState player, BoardTile popupTile, float contentWidth)
@@ -1544,8 +1874,13 @@ namespace NexusGame
             if (popupTile == null)
                 return;
 
-            float moveLabelW = Mathf.Max(72f, contentWidth - 52f);
-            float unitLineW = Mathf.Max(80f, contentWidth - 12f);
+            var rowTitle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                wordWrap = false
+            };
+            var tiny = new GUIStyle(GUI.skin.label) { fontSize = 9, wordWrap = false };
 
             bool hasAnyUnit = false;
             bool hasOtherOwner = false;
@@ -1561,31 +1896,39 @@ namespace NexusGame
                     hasOtherOwner = true;
             }
 
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(popupTile.Type.ToString(), rowTitle, GUILayout.ExpandWidth(false));
+            GUILayout.FlexibleSpace();
             if (hasAnyUnit && hasOtherOwner)
             {
                 var prev = GUI.color;
                 GUI.color = Color.red;
-                GUILayout.Label("CONTESTED");
+                GUILayout.Label("CONTESTED", rowTitle);
                 GUI.color = prev;
             }
             else
-                GUILayout.Label("Owner: " + (popupTile.Owner != null ? (popupTile.Owner.PlayerIndex + 1).ToString() : "None"));
+            {
+                string ow = popupTile.Owner != null ? "P" + (popupTile.Owner.PlayerIndex + 1) : "None";
+                GUILayout.Label("· " + ow, rowTitle);
+            }
+
+            GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
+            GUILayout.Label("Mine", tiny, GUILayout.Width(30f));
             int my = popupTile.ExtraMineYield;
             var chipGui = GetOreChipGui(my);
             if (chipGui.IsEmpty && my > 0)
                 chipGui = GetRubiumGui();
             if (!chipGui.IsEmpty)
             {
-                var ir = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(30f), GUILayout.Height(26f));
+                var ir = GUILayoutUtility.GetRect(20f, 20f, GUILayout.Width(22f), GUILayout.Height(22f));
                 chipGui.Draw(ir);
             }
 
-            GUILayout.Label(my > 0 ? my.ToString() : "—", GUILayout.Width(48));
+            GUILayout.Label(my > 0 ? my.ToString() : "—", tiny, GUILayout.Width(28f));
             GUILayout.EndHorizontal();
-            GUILayout.Space(5);
-            GUILayout.Label("Move selection:");
+
             var counts = new Dictionary<UnitType, int>();
             foreach (var unit in FindObjectsOfType<UnitInstance>())
             {
@@ -1597,51 +1940,6 @@ namespace NexusGame
                 }
             }
 
-            if (InputController != null)
-            {
-                var selectedCounts = InputController.SelectedMoveCounts;
-                bool isMovementPhase = !Game.IsGameOver &&
-                                       !Game.BattlePhaseBlockingPlay &&
-                                       Game.DragonPhase == null &&
-                                       !Game.IsAiControlled(player);
-
-                if (_moveAllTile != popupTile)
-                {
-                    _moveAllTile = popupTile;
-                    _moveAllChecked = false;
-                }
-
-                if (isMovementPhase && counts.Count > 0)
-                {
-                    bool nextMoveAll = GUILayout.Toggle(_moveAllChecked, "Move all");
-                    if (nextMoveAll != _moveAllChecked)
-                    {
-                        _moveAllChecked = nextMoveAll;
-                        foreach (var kvp in counts)
-                            InputController.SetMoveSelection(kvp.Key, _moveAllChecked ? kvp.Value : 0);
-                    }
-                }
-
-                foreach (var kvp in counts)
-                {
-                    selectedCounts.TryGetValue(kvp.Key, out int chosen);
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label(kvp.Key + ": " + kvp.Value + " sel:" + chosen, GUILayout.Width(moveLabelW));
-                    if (GUILayout.Button("-", GUILayout.Width(20)))
-                    {
-                        InputController.AdjustMoveSelection(kvp.Key, -1);
-                        _moveAllChecked = false;
-                    }
-                    if (GUILayout.Button("+", GUILayout.Width(20)))
-                    {
-                        InputController.AdjustMoveSelection(kvp.Key, +1);
-                        _moveAllChecked = false;
-                    }
-                    GUILayout.EndHorizontal();
-                }
-            }
-
-            GUILayout.Label("Units on tile:");
             var stacks = new Dictionary<string, int>();
             foreach (var unit in FindObjectsOfType<UnitInstance>())
             {
@@ -1653,23 +1951,151 @@ namespace NexusGame
                 stacks[key]++;
             }
 
-            foreach (var kvp in stacks.OrderBy(k => k.Key))
+            bool isMovementPhase = !Game.IsGameOver &&
+                                   !Game.BattlePhaseBlockingPlay &&
+                                   Game.DragonPhase == null &&
+                                   !Game.IsAiControlled(player);
+
+            if (_moveAllTile != popupTile)
             {
-                var split = kvp.Key.Split('|');
-                string ownerText = split[0];
-                string unitText = split.Length > 1 ? split[1] : "Unit";
+                _moveAllTile = popupTile;
+                _moveAllChecked = false;
+            }
+
+            if (InputController != null && counts.Count > 0 && isMovementPhase)
+            {
                 GUILayout.BeginHorizontal();
-                var iconRect = GUILayoutUtility.GetRect(14f, 14f, GUILayout.Width(16f), GUILayout.Height(14f));
-                if (System.Enum.TryParse<UnitType>(unitText, out var parsedType))
-                    DrawUnitMiniIcon(iconRect, parsedType);
-                else
-                    DrawUnitMiniIcon(iconRect, UnitType.Human);
-                GUILayout.Label(unitText + " x" + kvp.Value + " (" + ownerText + ")", GUILayout.Width(unitLineW));
+                bool nextMoveAll = GUILayout.Toggle(_moveAllChecked, "Move all", GUILayout.Width(88f));
+                if (nextMoveAll != _moveAllChecked)
+                {
+                    _moveAllChecked = nextMoveAll;
+                    foreach (var kvp in counts)
+                        InputController.SetMoveSelection(kvp.Key, _moveAllChecked ? kvp.Value : 0);
+                }
+
                 GUILayout.EndHorizontal();
             }
 
-            if (GUILayout.Button("Close") && InputController != null)
+            const float boxSz = 40f;
+            var selectedCounts = InputController != null ? InputController.SelectedMoveCounts : null;
+
+            if (InputController != null && counts.Count > 0)
+            {
+                foreach (var kvp in counts.OrderBy(x => x.Key.ToString()))
+                {
+                    selectedCounts.TryGetValue(kvp.Key, out int chosen);
+                    GUILayout.BeginHorizontal();
+                    if (GUILayout.Button("-", GUILayout.Width(22f), GUILayout.Height(boxSz + 4f)) &&
+                        isMovementPhase)
+                    {
+                        InputController.AdjustMoveSelection(kvp.Key, -1);
+                        _moveAllChecked = false;
+                    }
+
+                    Rect boxR = GUILayoutUtility.GetRect(boxSz, boxSz, GUILayout.ExpandWidth(false));
+                    DrawTileUnitQuantityBox(boxR, kvp.Key, chosen, kvp.Value);
+
+                    if (GUILayout.Button("+", GUILayout.Width(22f), GUILayout.Height(boxSz + 4f)) &&
+                        isMovementPhase)
+                    {
+                        InputController.AdjustMoveSelection(kvp.Key, +1);
+                        _moveAllChecked = false;
+                    }
+
+                    GUILayout.EndHorizontal();
+                }
+            }
+
+            bool anyReadonly = false;
+            foreach (var kvp in stacks.OrderBy(k => k.Key))
+            {
+                var split = kvp.Key.Split('|');
+                if (split.Length < 2 || !System.Enum.TryParse<UnitType>(split[1], out var ut))
+                    continue;
+                if (!int.TryParse(split[0].TrimStart('P'), out int pn))
+                    continue;
+                int idx = pn - 1;
+                bool mine = idx == player.PlayerIndex;
+                if (mine && counts.ContainsKey(ut))
+                    continue;
+                anyReadonly = true;
+                break;
+            }
+
+            if (anyReadonly)
+            {
+                GUILayout.Space(4f);
+                GUILayout.Label("On tile", tiny);
+                GUILayout.BeginHorizontal();
+                foreach (var kvp in stacks.OrderBy(k => k.Key))
+                {
+                    var split = kvp.Key.Split('|');
+                    if (split.Length < 2 || !System.Enum.TryParse<UnitType>(split[1], out var ut))
+                        continue;
+                    if (!int.TryParse(split[0].TrimStart('P'), out int pn))
+                        continue;
+                    int idx = pn - 1;
+                    bool mine = idx == player.PlayerIndex;
+                    if (mine && counts.ContainsKey(ut))
+                        continue;
+
+                    Rect chipR = GUILayoutUtility.GetRect(52f, 36f, GUILayout.ExpandWidth(false));
+                    DrawTileUnitReadonlyChip(chipR, "P" + pn, ut, kvp.Value);
+                }
+
+                GUILayout.EndHorizontal();
+            }
+
+            GUILayout.Space(6f);
+            if (GUILayout.Button("Close", GUILayout.Height(22f)) && InputController != null)
                 InputController.ClearSelection();
+        }
+
+        static string UnitTypeAbbrev(UnitType type)
+        {
+            string n = UnitUiName(type);
+            return n.Length <= 2 ? n : n.Substring(0, 2);
+        }
+
+        void DrawTileUnitQuantityBox(Rect r, UnitType type, int selected, int available)
+        {
+            GUI.Box(r, "");
+            var s1 = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 9,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = false
+            };
+            var s2 = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 10,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = false
+            };
+            GUI.Label(new Rect(r.x + 1f, r.y + 3f, r.width - 2f, 14f), UnitTypeAbbrev(type), s1);
+            GUI.Label(new Rect(r.x + 1f, r.y + 18f, r.width - 2f, 18f), selected + "/" + available, s2);
+        }
+
+        void DrawTileUnitReadonlyChip(Rect r, string ownerPrefix, UnitType type, int count)
+        {
+            DrawTintedRect(new Rect(r.x, r.y, r.width, r.height), new Color(0.22f, 0.22f, 0.28f));
+            GUI.Box(r, "");
+            var s0 = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 8,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = false
+            };
+            var s1 = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 9,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = false
+            };
+            GUI.Label(new Rect(r.x + 1f, r.y + 2f, r.width - 2f, 11f), ownerPrefix, s0);
+            GUI.Label(new Rect(r.x + 1f, r.y + 14f, r.width - 2f, 18f), UnitTypeAbbrev(type) + "×" + count, s1);
         }
 
         void DrawUnitMiniIcon(Rect r, UnitType type)
@@ -1709,20 +2135,6 @@ namespace NexusGame
                 UnitType.LavaLeaper => "Lava Leaper",
                 UnitType.RubiumDragon => "Rubium Dragon",
                 _ => type.ToString()
-            };
-        }
-
-        static string BattleStepLabel(UnitType type)
-        {
-            return type switch
-            {
-                UnitType.RubiumDragon => "Dragons fighting",
-                UnitType.LavaLeaper => "Lava Leapers fighting",
-                UnitType.RockStrider => "Rock Striders fighting",
-                UnitType.Crystalline => "Crystalline fighting",
-                UnitType.Fungoid => "Fungoids fighting",
-                UnitType.Human => "Humans fighting",
-                _ => UnitUiName(type) + " fighting"
             };
         }
 

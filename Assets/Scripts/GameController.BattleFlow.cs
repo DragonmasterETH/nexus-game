@@ -7,6 +7,30 @@ using UnityEngine;
 
 namespace NexusGame
 {
+    /// <summary>Last d6 roll shown in battle HUD (one step at a time).</summary>
+    public readonly struct BattleUiDiceRoll
+    {
+        public readonly UnitType UnitType;
+        public readonly bool AttackerRolling;
+        public readonly int Dice;
+        public readonly int Need;
+        public readonly bool Impossible;
+        public readonly int Hits;
+        public readonly int[] Rolls;
+
+        public BattleUiDiceRoll(UnitType unitType, bool attackerRolling, int dice, int need, bool impossible, int hits,
+            int[] rolls)
+        {
+            UnitType = unitType;
+            AttackerRolling = attackerRolling;
+            Dice = dice;
+            Need = need;
+            Impossible = impossible;
+            Hits = hits;
+            Rolls = rolls ?? Array.Empty<int>();
+        }
+    }
+
     public partial class GameController
     {
         [Header("Cards & full battle")]
@@ -60,6 +84,26 @@ namespace NexusGame
         BattleEnergizeModifiers _mods;
         System.Random _battleRng;
         List<string> _liveBattleLines;
+
+        BattleUiDiceRoll? _lastBattleUiDiceRoll;
+        bool _battleClashIntroActive;
+
+        /// <summary>Shown between battle confirmation and Energize (placeholder until sword art exists).</summary>
+        public bool BattleClashIntroActive => _battleClashIntroActive;
+
+        public BattleUiDiceRoll? LastBattleUiDiceRoll => _lastBattleUiDiceRoll;
+
+        const float BattleDiceUiPauseSeconds = 0.38f;
+        const float BattleClashIntroSeconds = 0.55f;
+
+        void SetBattleUiDiceRoll(BattleResolver.DiceRollResult roll, UnitType unitType, bool attackerRolling)
+        {
+            int[] copy = roll.Rolls != null && roll.Rolls.Count > 0
+                ? roll.Rolls.ToArray()
+                : Array.Empty<int>();
+            _lastBattleUiDiceRoll = new BattleUiDiceRoll(unitType, attackerRolling, roll.Dice, roll.Need,
+                roll.ImpossibleToHit, roll.Hits, copy);
+        }
 
         public string LiveBattlePhaseLog
         {
@@ -119,10 +163,13 @@ namespace NexusGame
             _liveBattleLines = null;
             _lastEnergizePlayed = EnergizeBattleId.None;
             _pendingFocusFireCard = false;
+            _lastBattleUiDiceRoll = null;
+            _battleClashIntroActive = false;
             _turnNumber = 1;
             _nextSecretInstanceId = 1;
             LastDrawPhaseLog = "";
             LastBattlePhaseLog = "";
+            _miningIncomeFlightsForHud = null;
         }
 
         void RunDrawPhase(PlayerState player)
@@ -386,6 +433,14 @@ namespace NexusGame
                 _battleAttacker = attacker;
                 _battleDefender = defender;
                 _battleHex = hex;
+                _lastBattleUiDiceRoll = null;
+
+                if (!AutoResolveBattlesQuick)
+                {
+                    _battleClashIntroActive = true;
+                    yield return new WaitForSeconds(BattleClashIntroSeconds);
+                    _battleClashIntroActive = false;
+                }
 
                 if (!AutoResolveBattlesQuick)
                     yield return StartCoroutine(EnergizePassCoroutine(attacker, defender, hex));
@@ -522,7 +577,7 @@ namespace NexusGame
 
         IEnumerator EnergizePassCoroutine(PlayerState attacker, PlayerState defender, BoardTile hex)
         {
-            EnergizeBattleContext = $"Hex ({hex.Q},{hex.R}): P{attacker.PlayerIndex + 1} vs P{defender.PlayerIndex + 1}";
+            EnergizeBattleContext = $"⬡({hex.Q},{hex.R})  P{attacker.PlayerIndex + 1}⚔P{defender.PlayerIndex + 1}";
             Debug.Log($"[Battle] Energize window: {EnergizeBattleContext}");
             bool played;
             do
@@ -727,6 +782,9 @@ namespace NexusGame
                     int shift = _mods.HitThresholdBonusWhenAttackingAttacker - _mods.DefenderHitThresholdReduction;
                     var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
                     hitsOnAttacker += roll.Hits;
+                    SetBattleUiDiceRoll(roll, unitType, false);
+                    if (!AutoResolveBattlesQuick)
+                        yield return new WaitForSeconds(BattleDiceUiPauseSeconds);
                     if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
                     {
                         Log($"  {unitType} (def): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
@@ -750,6 +808,9 @@ namespace NexusGame
                     int shift = _mods.HitThresholdBonusWhenAttackingDefender - _mods.AttackerHitThresholdReduction;
                     var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
                     hitsOnDefender += roll.Hits;
+                    SetBattleUiDiceRoll(roll, unitType, true);
+                    if (!AutoResolveBattlesQuick)
+                        yield return new WaitForSeconds(BattleDiceUiPauseSeconds);
                     if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
                     {
                         Log($"  {unitType} (atk): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
@@ -866,6 +927,7 @@ namespace NexusGame
             HasActiveBattleStep = false;
             ActiveBattleHitsOnAttacker = 0;
             ActiveBattleHitsOnDefender = 0;
+            _lastBattleUiDiceRoll = null;
         }
 
         public void SubmitCasualtyPick()
