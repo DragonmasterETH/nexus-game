@@ -367,12 +367,17 @@ namespace NexusGame
             }
         }
 
+        [Tooltip("How much the hex fill darkens while selected (0 = none, 1 = black).")]
+        [Range(0f, 0.6f)]
+        public float SelectedHexDimTowardBlack = 0.22f;
+
         void SetSelectedTile(BoardTile tile)
         {
-            // Clear previous highlight
-            if (_selectedTile != null && _selectedTile.Highlight != null)
+            if (_selectedTile != null)
             {
-                _selectedTile.Highlight.SetActive(false);
+                ApplyHexFillSelectionDim(_selectedTile, false);
+                if (_selectedTile.Highlight != null)
+                    _selectedTile.Highlight.SetActive(false);
             }
 
             _selectedTile = tile;
@@ -382,6 +387,7 @@ namespace NexusGame
 
             if (_selectedTile != null)
             {
+                ApplyHexFillSelectionDim(_selectedTile, true);
                 if (_selectedTile.Highlight != null)
                     _selectedTile.Highlight.SetActive(true);
 
@@ -395,6 +401,54 @@ namespace NexusGame
                     }
                 }
             }
+        }
+
+        /// <summary>Terrain fill only — not outlines, ore chips, or exploration quads.</summary>
+        static Renderer PrimaryHexFillRenderer(GameObject view)
+        {
+            if (view == null)
+                return null;
+            foreach (var r in view.GetComponentsInChildren<Renderer>(true))
+            {
+                if (r is LineRenderer)
+                    continue;
+                if (!IsHexTerrainFillRenderer(r.transform))
+                    continue;
+                return r;
+            }
+
+            return null;
+        }
+
+        static bool IsHexTerrainFillRenderer(Transform t)
+        {
+            for (; t != null; t = t.parent)
+            {
+                if (t.name == "MineLabel" || t.name == "ExplorationMarker")
+                    return false;
+            }
+
+            return true;
+        }
+
+        void ApplyHexFillSelectionDim(BoardTile tile, bool selected)
+        {
+            if (tile == null)
+                return;
+            var rend = PrimaryHexFillRenderer(tile.View);
+            if (rend == null)
+                return;
+
+            if (!tile.HexFillBaseColorCaptured)
+            {
+                tile.HexFillBaseColor = rend.material.color;
+                tile.HexFillBaseColorCaptured = true;
+            }
+
+            float dim = Mathf.Clamp01(SelectedHexDimTowardBlack);
+            rend.material.color = selected
+                ? Color.Lerp(tile.HexFillBaseColor, Color.black, dim)
+                : tile.HexFillBaseColor;
         }
 
         // Slight lift above hex mesh to avoid z-fighting; centered on the hex (not floating over units).

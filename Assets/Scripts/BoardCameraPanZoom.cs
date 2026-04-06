@@ -5,7 +5,7 @@ namespace NexusGame
 {
     /// <summary>
     /// Mobile: one-finger pan on empty board / non-unit drag; two-finger pinch zoom.
-    /// Keeps a look target on the ground plane and dollies the camera toward/away for zoom.
+    /// Orthographic-style top-down view (fixed pitch) so flat sprites stay undistorted; zoom adjusts height only.
     /// </summary>
     [DisallowMultipleComponent]
     public class BoardCameraPanZoom : MonoBehaviour
@@ -24,6 +24,9 @@ namespace NexusGame
         Camera _cam;
         Vector3 _lookTarget = Vector3.zero;
 
+        /// <summary>Vertical distance from ground plane to camera (strict top-down).</summary>
+        float _heightAboveGround = 12f;
+
         float _lastPinchSeparation;
 
         Vector2 _singleStart;
@@ -32,6 +35,30 @@ namespace NexusGame
         bool _panning;
         bool _gestureEndedAsPan;
         bool _singleTouchTracked;
+
+        void Start()
+        {
+            if (_cam == null)
+                _cam = GetComponent<Camera>();
+            SyncStateFromTransform();
+            ApplyTopDownPose();
+        }
+
+        void SyncStateFromTransform()
+        {
+            var p = transform.position;
+            _lookTarget = new Vector3(p.x, GroundPlaneY, p.z);
+            _heightAboveGround = Mathf.Max(0.5f, p.y - GroundPlaneY);
+            _heightAboveGround = Mathf.Clamp(_heightAboveGround, MinDistanceFromTarget, MaxDistanceFromTarget);
+        }
+
+        void ApplyTopDownPose()
+        {
+            _heightAboveGround = Mathf.Clamp(_heightAboveGround, MinDistanceFromTarget, MaxDistanceFromTarget);
+            transform.SetPositionAndRotation(
+                new Vector3(_lookTarget.x, GroundPlaneY + _heightAboveGround, _lookTarget.z),
+                Quaternion.Euler(90f, 0f, 0f));
+        }
 
         /// <summary>Call from input code on touch Began after you know if the gesture started on a movable unit.</summary>
         public void NotifyTouchBeganOnUnit(bool startedOnMovableUnit)
@@ -73,7 +100,7 @@ namespace NexusGame
                 }
 
                 _lastPinchSeparation = sep;
-                transform.LookAt(_lookTarget);
+                ApplyTopDownPose();
                 return true;
             }
 
@@ -110,7 +137,6 @@ namespace NexusGame
                         ApplyPanScreenDelta(_singleLastScreen, touch.position);
                         _singleLastScreen = touch.position;
                         _gestureEndedAsPan = true;
-                        transform.LookAt(_lookTarget);
                         return true;
                     }
                     break;
@@ -147,7 +173,6 @@ namespace NexusGame
             {
                 float factor = scroll > 0 ? 0.92f : 1.08f;
                 ApplyPinchZoom(factor);
-                transform.LookAt(_lookTarget);
             }
 
             if (Input.GetMouseButtonDown(1))
@@ -156,7 +181,6 @@ namespace NexusGame
             {
                 var cur = (Vector2)Input.mousePosition;
                 ApplyPanScreenDelta(_singleLastScreen, cur);
-                transform.LookAt(_lookTarget);
                 _singleLastScreen = cur;
             }
         }
@@ -164,12 +188,10 @@ namespace NexusGame
 
         void ApplyPinchZoom(float separationRatioThisFrame)
         {
-            Vector3 offset = transform.position - _lookTarget;
-            float dist = offset.magnitude;
-            if (dist < 0.01f)
+            if (separationRatioThisFrame < 1e-5f)
                 return;
-            dist = Mathf.Clamp(dist / separationRatioThisFrame, MinDistanceFromTarget, MaxDistanceFromTarget);
-            transform.position = _lookTarget + offset.normalized * dist;
+            _heightAboveGround /= separationRatioThisFrame;
+            ApplyTopDownPose();
         }
 
         void ApplyPanScreenDelta(Vector2 prevScreen, Vector2 currScreen)
@@ -179,8 +201,8 @@ namespace NexusGame
 
             Vector3 delta = p0 - p1;
             delta.y = 0f;
-            transform.position += delta;
             _lookTarget += delta;
+            ApplyTopDownPose();
         }
 
         bool TryRayGround(Vector2 screen, out Vector3 hit)

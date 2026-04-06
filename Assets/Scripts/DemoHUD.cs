@@ -113,10 +113,14 @@ namespace NexusGame
         bool _oreResourcesTried;
         static Texture2D _dimTex;
         readonly Dictionary<UnitType, NexusGuiImage> _unitIconCache = new Dictionary<UnitType, NexusGuiImage>();
+        readonly Dictionary<int, NexusGuiImage> _dragonIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
+        readonly Dictionary<int, NexusGuiImage> _striderIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         GUIStyle _battleWindowStyle;
         Texture2D _battleWindowBg;
         GUIStyle _topIconButtonStyle;
         GUIStyle _flyRubiumAmountStyle;
+        GUIStyle _flyVpAmountStyle;
+        GUIStyle _flyVpFallbackStyle;
 
         struct FlyingRubiumChip
         {
@@ -128,6 +132,18 @@ namespace NexusGame
         }
 
         readonly List<FlyingRubiumChip> _flyingRubium = new List<FlyingRubiumChip>();
+
+        struct FlyingVpChip
+        {
+            public Vector2 CenterGui;
+            public Vector2 EndGui;
+            public float StartTime;
+            public float PopDuration;
+            public float FlyDuration;
+            public int Amount;
+        }
+
+        readonly List<FlyingVpChip> _flyingVp = new List<FlyingVpChip>();
 
         void Start()
         {
@@ -178,6 +194,34 @@ namespace NexusGame
                 if (Time.time > _flyingRubium[i].StartTime + _flyingRubium[i].Duration)
                     _flyingRubium.RemoveAt(i);
             }
+
+            if (Game.TryConsumeVictoryPointFlights(out var vpList))
+            {
+                float vpStagger = 0f;
+                const float vpStaggerStep = 0.14f;
+                var centerGui = new Vector2(Screen.width * 0.5f, Screen.height * 0.42f);
+                var endGui = GetVpBankIconCenterGui();
+                foreach (var info in vpList)
+                {
+                    _flyingVp.Add(new FlyingVpChip
+                    {
+                        CenterGui = centerGui,
+                        EndGui = endGui,
+                        StartTime = Time.time + vpStagger,
+                        PopDuration = 0.22f,
+                        FlyDuration = 0.7f,
+                        Amount = info.Amount
+                    });
+                    vpStagger += vpStaggerStep;
+                }
+            }
+
+            for (int i = _flyingVp.Count - 1; i >= 0; i--)
+            {
+                var fv = _flyingVp[i];
+                if (Time.time > fv.StartTime + fv.PopDuration + fv.FlyDuration)
+                    _flyingVp.RemoveAt(i);
+            }
         }
 
         Vector2 GetRubiumBankIconCenterGui()
@@ -189,6 +233,35 @@ namespace NexusGame
             float w = rub.IsEmpty ? MainHudIconHeight : MainHudIconHeight * rub.AspectRatio;
             float cx = 12f + w * 0.5f;
             float cy = ly + MainHudIconHeight * 0.5f;
+            return new Vector2(cx, cy);
+        }
+
+        Vector2 GetVpBankIconCenterGui()
+        {
+            if (Game == null || Game.Players.Count == 0)
+                return new Vector2(Screen.width * 0.5f, 24f);
+
+            const float topBarY = 6f;
+            const float topBarH = 52f;
+            float ly = topBarY + (topBarH - MainHudIconHeight) * 0.5f - 2f;
+            float cy = ly + MainHudIconHeight * 0.5f;
+            var player = Game.CurrentPlayer;
+            var rub = GetRubiumGui();
+            var vp = GetVPGui();
+            float rxRes = 12f;
+            if (!rub.IsEmpty)
+                rxRes += MainHudIconHeight * rub.AspectRatio + 6f;
+
+            var rubNumStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Clamp(Screen.width / 32, 15, 20),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft
+            };
+            float tw = rubNumStyle.CalcSize(new GUIContent(player.Rubium.ToString())).x;
+            rxRes += Mathf.Max(28f, tw) + 12f;
+            float vpW = vp.IsEmpty ? MainHudIconHeight : MainHudIconHeight * vp.AspectRatio;
+            float cx = rxRes + vpW * 0.5f;
             return new Vector2(cx, cy);
         }
 
@@ -226,6 +299,81 @@ namespace NexusGame
                 rub.Draw(r);
                 if (f.Amount > 1)
                     GUI.Label(new Rect(r.xMax + 2f, r.y, 36f, h), "+" + f.Amount, _flyRubiumAmountStyle);
+            }
+
+            GUI.color = prev;
+        }
+
+        void DrawFlyingVictoryPoints()
+        {
+            if (_flyingVp.Count == 0)
+                return;
+
+            if (_flyVpAmountStyle == null)
+            {
+                _flyVpAmountStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 26,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft,
+                    normal = { textColor = new Color(1f, 0.92f, 0.35f, 1f) }
+                };
+                _flyVpFallbackStyle = new GUIStyle(_flyVpAmountStyle)
+                {
+                    fontSize = 34,
+                    alignment = TextAnchor.MiddleCenter
+                };
+            }
+
+            var vpGui = GetVPGui();
+            float now = Time.time;
+            Color prev = GUI.color;
+
+            foreach (var f in _flyingVp)
+            {
+                float elapsed = now - f.StartTime;
+                if (elapsed < 0f)
+                    continue;
+                float total = f.PopDuration + f.FlyDuration;
+                if (elapsed > total)
+                    continue;
+
+                Vector2 p;
+                float iconH;
+                float alpha;
+
+                if (elapsed < f.PopDuration)
+                {
+                    p = f.CenterGui;
+                    float pu = elapsed / f.PopDuration;
+                    iconH = MainHudIconHeight * Mathf.SmoothStep(0.4f, 1.08f, pu);
+                    alpha = Mathf.SmoothStep(0f, 1f, Mathf.Min(1f, pu * 1.4f));
+                }
+                else
+                {
+                    float fu = (elapsed - f.PopDuration) / f.FlyDuration;
+                    float t = fu * fu * (3f - 2f * fu);
+                    p = Vector2.Lerp(f.CenterGui, f.EndGui, t);
+                    iconH = Mathf.Lerp(MainHudIconHeight * 1.08f, MainHudIconHeight, Mathf.SmoothStep(0f, 1f, fu));
+                    alpha = 1f;
+                }
+
+                string bonus = "+" + f.Amount;
+                float vpW = vpGui.IsEmpty ? iconH : iconH * vpGui.AspectRatio;
+                float textW = _flyVpAmountStyle.CalcSize(new GUIContent(bonus)).x;
+                float groupW = vpW + 4f + textW;
+                float leftX = p.x - groupW * 0.5f;
+
+                GUI.color = new Color(1f, 1f, 1f, alpha);
+                if (!vpGui.IsEmpty)
+                {
+                    var iconRect = new Rect(leftX, p.y - iconH * 0.5f, vpW, iconH);
+                    vpGui.Draw(iconRect);
+                    GUI.Label(new Rect(iconRect.xMax + 4f, p.y - iconH * 0.5f, textW + 4f, iconH), bonus,
+                        _flyVpAmountStyle);
+                }
+                else
+                    GUI.Label(new Rect(p.x - 80f, p.y - 28f, 160f, 56f), "VP " + bonus, _flyVpFallbackStyle);
             }
 
             GUI.color = prev;
@@ -588,6 +736,7 @@ namespace NexusGame
                 DrawQuickReferenceOverlay();
 
             DrawFlyingRubiumIncome();
+            DrawFlyingVictoryPoints();
 
             if (Game.BattleClashIntroActive)
                 DrawBattleClashIntroOverlay();
@@ -1205,7 +1354,7 @@ namespace NexusGame
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("Step", GUILayout.Width(36));
                 var stepIcon = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(30f), GUILayout.Height(26f));
-                DrawUnitMiniIcon(stepIcon, Game.ActiveBattleStepUnitType);
+                DrawUnitMiniIcon(stepIcon, Game.ActiveBattleStepUnitType, BattleStepTintedUnitIconOwner());
                 GUILayout.Label(UnitUiName(Game.ActiveBattleStepUnitType),
                     new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold });
                 GUILayout.EndHorizontal();
@@ -1286,7 +1435,9 @@ namespace NexusGame
             GUILayout.Label(side, GUILayout.Width(30));
             GUI.color = prev;
             var ir = GUILayoutUtility.GetRect(22f, 22f, GUILayout.Width(26f), GUILayout.Height(24f));
-            DrawUnitMiniIcon(ir, d.UnitType);
+            DrawUnitMiniIcon(ir, d.UnitType,
+                TintedIconOwnerForBattleSide(d.UnitType,
+                    d.AttackerRolling ? Game.ActiveBattleAttacker : Game.ActiveBattleDefender));
             if (d.Rolls != null && d.Rolls.Length > 0)
             {
                 foreach (var v in d.Rolls)
@@ -1363,7 +1514,7 @@ namespace NexusGame
                     var box = GUILayoutUtility.GetRect(88f, 52f, GUILayout.Width(96f), GUILayout.Height(56f));
                     GUI.Box(box, "");
                     var iconR = new Rect(box.x + 6f, box.y + 4f, 36f, 36f);
-                    DrawUnitMiniIcon(iconR, kvp.Key);
+                    DrawUnitMiniIcon(iconR, kvp.Key, TintedIconOwnerForUnitOnSide(kvp.Key, player));
                     var nameStyle = new GUIStyle(GUI.skin.label)
                     {
                         fontSize = 9,
@@ -1610,7 +1761,7 @@ namespace NexusGame
                     continue;
                 GUILayout.BeginHorizontal();
                 var ir = GUILayoutUtility.GetRect(28f, 28f, GUILayout.Width(32f), GUILayout.Height(28f));
-                DrawUnitMiniIcon(ir, t);
+                DrawUnitMiniIcon(ir, t, TintedIconOwnerForUnitOnSide(t, Game.FocusFirePicker));
                 if (GUILayout.Button(UnitUiName(t), GUILayout.Height(30f)))
                     Game.SubmitFocusFireUnitType(t);
                 GUILayout.EndHorizontal();
@@ -1650,7 +1801,7 @@ namespace NexusGame
                 bool on = cp.Selected.Contains(u);
                 GUILayout.BeginHorizontal();
                 var ir = GUILayoutUtility.GetRect(28f, 28f, GUILayout.Width(32f), GUILayout.Height(28f));
-                DrawUnitMiniIcon(ir, u.Definition.Type);
+                DrawUnitMiniIcon(ir, u.Definition.Type, TintedIconOwnerForUnitOnSide(u.Definition.Type, u.Owner));
                 if (GUILayout.Toggle(on, " " + UnitUiName(u.Definition.Type), GUILayout.Height(28f)) != on)
                     Game.ToggleCasualtyUnit(u);
                 GUILayout.EndHorizontal();
@@ -1823,8 +1974,18 @@ namespace NexusGame
                 GUI.color = new Color(0.55f, 0.55f, 0.58f);
 
             GUI.Box(nameRect, "");
-            GUI.Label(nameRect, displayName, nameStyle);
-            if (GUI.Button(nameRect, GUIContent.none) && canAfford)
+            const float shopIcon = 34f;
+            var shopIconRect = new Rect(
+                nameRect.x + (nameRect.width - shopIcon) * 0.5f,
+                nameRect.y + 2f,
+                shopIcon,
+                shopIcon);
+            DrawUnitMiniIcon(shopIconRect, type, TintedIconOwnerForUnitOnSide(type, player));
+            var nameLabelRect = new Rect(nameRect.x, nameRect.y + shopIcon + 4f, nameRect.width,
+                Mathf.Max(18f, nameRect.height - shopIcon - 6f));
+            GUI.Label(nameLabelRect, displayName, nameStyle);
+            // Invisible hit target so unit art isn’t covered by default button chrome.
+            if (GUI.Button(nameRect, GUIContent.none, GUIStyle.none) && canAfford)
                 TryBuyUnit(type, player, use, pay);
 
             GUI.color = prev;
@@ -1993,7 +2154,7 @@ namespace NexusGame
                     }
 
                     Rect boxR = GUILayoutUtility.GetRect(boxSz, boxSz, GUILayout.ExpandWidth(false));
-                    DrawTileUnitQuantityBox(boxR, kvp.Key, chosen, kvp.Value);
+                    DrawTileUnitQuantityBox(boxR, kvp.Key, chosen, kvp.Value, player);
 
                     if (GUILayout.Button("+", GUILayout.Width(22f), GUILayout.Height(boxSz + 4f)) &&
                         isMovementPhase)
@@ -2039,8 +2200,10 @@ namespace NexusGame
                     if (mine && counts.ContainsKey(ut))
                         continue;
 
-                    Rect chipR = GUILayoutUtility.GetRect(52f, 36f, GUILayout.ExpandWidth(false));
-                    DrawTileUnitReadonlyChip(chipR, "P" + pn, ut, kvp.Value);
+                    Rect chipR = GUILayoutUtility.GetRect(64f, 36f, GUILayout.ExpandWidth(false));
+                    PlayerState stackOwner =
+                        Game != null && idx >= 0 && idx < Game.Players.Count ? Game.Players[idx] : null;
+                    DrawTileUnitReadonlyChip(chipR, "P" + pn, ut, kvp.Value, stackOwner);
                 }
 
                 GUILayout.EndHorizontal();
@@ -2057,9 +2220,13 @@ namespace NexusGame
             return n.Length <= 2 ? n : n.Substring(0, 2);
         }
 
-        void DrawTileUnitQuantityBox(Rect r, UnitType type, int selected, int available)
+        void DrawTileUnitQuantityBox(Rect r, UnitType type, int selected, int available, PlayerState stackOwner)
         {
             GUI.Box(r, "");
+            var iconR = new Rect(r.x + 2f, r.y + 9f, 22f, 22f);
+            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, stackOwner));
+            float tx = r.x + 26f;
+            float tw = r.width - 27f;
             var s1 = new GUIStyle(GUI.skin.label)
             {
                 fontSize = 9,
@@ -2073,14 +2240,18 @@ namespace NexusGame
                 alignment = TextAnchor.MiddleCenter,
                 wordWrap = false
             };
-            GUI.Label(new Rect(r.x + 1f, r.y + 3f, r.width - 2f, 14f), UnitTypeAbbrev(type), s1);
-            GUI.Label(new Rect(r.x + 1f, r.y + 18f, r.width - 2f, 18f), selected + "/" + available, s2);
+            GUI.Label(new Rect(tx, r.y + 3f, tw, 14f), UnitTypeAbbrev(type), s1);
+            GUI.Label(new Rect(tx, r.y + 18f, tw, 18f), selected + "/" + available, s2);
         }
 
-        void DrawTileUnitReadonlyChip(Rect r, string ownerPrefix, UnitType type, int count)
+        void DrawTileUnitReadonlyChip(Rect r, string ownerPrefix, UnitType type, int count, PlayerState stackOwner)
         {
             DrawTintedRect(new Rect(r.x, r.y, r.width, r.height), new Color(0.22f, 0.22f, 0.28f));
             GUI.Box(r, "");
+            var iconR = new Rect(r.x + 2f, r.y + 5f, 22f, r.height - 10f);
+            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, stackOwner));
+            float tx = r.x + 26f;
+            float tw = Mathf.Max(22f, r.width - 28f);
             var s0 = new GUIStyle(GUI.skin.label)
             {
                 fontSize = 8,
@@ -2094,13 +2265,38 @@ namespace NexusGame
                 alignment = TextAnchor.MiddleCenter,
                 wordWrap = false
             };
-            GUI.Label(new Rect(r.x + 1f, r.y + 2f, r.width - 2f, 11f), ownerPrefix, s0);
-            GUI.Label(new Rect(r.x + 1f, r.y + 14f, r.width - 2f, 18f), UnitTypeAbbrev(type) + "×" + count, s1);
+            GUI.Label(new Rect(tx, r.y + 2f, tw, 11f), ownerPrefix, s0);
+            GUI.Label(new Rect(tx, r.y + 14f, tw, 18f), UnitTypeAbbrev(type) + "×" + count, s1);
         }
 
-        void DrawUnitMiniIcon(Rect r, UnitType type)
+        PlayerState BattleStepTintedUnitIconOwner()
         {
-            var icon = GetUnitIcon(type);
+            if (Game == null || !UsesPerPlayerTint(Game.ActiveBattleStepUnitType))
+                return null;
+            var d = Game.LastBattleUiDiceRoll;
+            if (d.HasValue && d.Value.UnitType == Game.ActiveBattleStepUnitType)
+                return d.Value.AttackerRolling ? Game.ActiveBattleAttacker : Game.ActiveBattleDefender;
+            return Game.ActiveBattleAttacker;
+        }
+
+        static bool UsesPerPlayerTint(UnitType t) =>
+            t == UnitType.RubiumDragon || t == UnitType.RockStrider;
+
+        static PlayerState TintedIconOwnerForUnitOnSide(UnitType t, PlayerState sidePlayer) =>
+            UsesPerPlayerTint(t) ? sidePlayer : null;
+
+        static PlayerState TintedIconOwnerForBattleSide(UnitType t, PlayerState rollingPlayer) =>
+            UsesPerPlayerTint(t) ? rollingPlayer : null;
+
+        void DrawUnitMiniIcon(Rect r, UnitType type, PlayerState ownerForTint = null)
+        {
+            NexusGuiImage icon;
+            if (type == UnitType.RubiumDragon && ownerForTint != null)
+                icon = GetDragonUnitIcon(ownerForTint);
+            else if (type == UnitType.RockStrider && ownerForTint != null)
+                icon = GetRockStriderUnitIcon(ownerForTint);
+            else
+                icon = GetUnitIcon(type);
             if (!icon.IsEmpty)
             {
                 icon.Draw(r);
@@ -2112,18 +2308,99 @@ namespace NexusGame
             GUI.Box(r, UnitUiName(type).Substring(0, 1));
         }
 
-        NexusGuiImage GetUnitIcon(UnitType type)
+        NexusGuiImage GetDragonUnitIcon(PlayerState owner)
         {
-            if (_unitIconCache.TryGetValue(type, out var cached))
+            if (owner == null)
+                return GetUnitIcon(UnitType.RubiumDragon);
+
+            if (_dragonIconByPlayerIndex.TryGetValue(owner.PlayerIndex, out var cached))
                 return cached;
 
+            var img = NexusGuiArt.LoadRubiumDragonForPlayer(owner);
+            if (img.IsEmpty)
+                img = GetUnitIcon(UnitType.RubiumDragon);
+            _dragonIconByPlayerIndex[owner.PlayerIndex] = img;
+            return img;
+        }
+
+        NexusGuiImage GetRockStriderUnitIcon(PlayerState owner)
+        {
+            if (owner == null)
+                return GetUnitIcon(UnitType.RockStrider);
+
+            if (_striderIconByPlayerIndex.TryGetValue(owner.PlayerIndex, out var cached))
+                return cached;
+
+            var img = NexusGuiArt.LoadRockStriderForPlayer(owner);
+            if (img.IsEmpty)
+                img = GetUnitIcon(UnitType.RockStrider);
+            _striderIconByPlayerIndex[owner.PlayerIndex] = img;
+            return img;
+        }
+
+        static void CollectUnitIconResourcePaths(UnitType type, List<string> paths)
+        {
             string key = type.ToString();
-            var loaded = NexusGuiArt.Load(
-                "Sprites/" + key,
-                "Sprites/Units/" + key,
-                "Sprites/" + UnitUiName(type).Replace(" ", ""),
-                "Sprites/" + UnitUiName(type).Replace(" ", "_"));
-            _unitIconCache[type] = loaded;
+            string ui = UnitUiName(type);
+            string compact = ui.Replace(" ", "");
+            string under = ui.Replace(" ", "_");
+
+            void Add(string p)
+            {
+                if (string.IsNullOrEmpty(p) || paths.Contains(p))
+                    return;
+                paths.Add(p);
+            }
+
+            // Prefer typed art under Sprites/Units (common import location).
+            Add("Sprites/Units/" + key);
+            Add("Sprites/Units/" + compact);
+            Add("Sprites/Units/" + under);
+            Add("Sprites/units/" + key);
+            Add("Sprites/units/" + compact);
+            Add("Sprites/" + key);
+            Add("Sprites/" + compact);
+            Add("Sprites/" + under);
+
+            switch (type)
+            {
+                case UnitType.RockStrider:
+                    Add("Sprites/Units/Strider");
+                    Add("Sprites/units/Strider");
+                    Add("Sprites/Units/RockStrider");
+                    break;
+                case UnitType.LavaLeaper:
+                    Add("Sprites/Units/LavaLeaper");
+                    Add("Sprites/Units/Lava_Leaper");
+                    break;
+                case UnitType.Crystalline:
+                    Add("Sprites/Units/Crystal");
+                    break;
+                case UnitType.Fungoid:
+                    Add("Sprites/Units/Fungus");
+                    break;
+                case UnitType.Human:
+                    Add("Sprites/Units/Colonist");
+                    break;
+            }
+        }
+
+        NexusGuiImage GetUnitIcon(UnitType type)
+        {
+            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider &&
+                _unitIconCache.TryGetValue(type, out var cached))
+                return cached;
+
+            var pathList = new List<string>();
+            CollectUnitIconResourcePaths(type, pathList);
+            var loaded = NexusGuiArt.Load(pathList.ToArray());
+            if (type == UnitType.RubiumDragon && loaded.IsEmpty)
+                loaded = NexusGuiArt.LoadRubiumDragonLegendIcon();
+            if (type == UnitType.RockStrider && loaded.IsEmpty)
+                loaded = NexusGuiArt.LoadRockStriderLegendIcon();
+
+            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider)
+                _unitIconCache[type] = loaded;
             return loaded;
         }
 

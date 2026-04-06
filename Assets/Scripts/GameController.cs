@@ -17,6 +17,17 @@ namespace NexusGame
         }
     }
 
+    /// <summary>VP gain for HUD fly animation (center → VP icon).</summary>
+    public readonly struct VictoryPointFlightInfo
+    {
+        public readonly int Amount;
+
+        public VictoryPointFlightInfo(int amount)
+        {
+            Amount = amount;
+        }
+    }
+
     public partial class GameController : MonoBehaviour
     {
         [Header("Scene References")]
@@ -85,6 +96,7 @@ namespace NexusGame
             new Dictionary<PlayerState, List<UnitInstance>>();
 
         List<MiningIncomeFlightInfo> _miningIncomeFlightsForHud;
+        List<VictoryPointFlightInfo> _victoryPointFlightsForHud;
 
         /// <summary>Set before AddComponent when Bootstrap will call <see cref="ResetAndStartNewMatch"/>.</summary>
         public static bool SkipStartInitOnce;
@@ -294,6 +306,70 @@ namespace NexusGame
             {
                 Debug.LogError($"Missing unit definition for {type}");
                 return null;
+            }
+
+            if (type == UnitType.RubiumDragon)
+            {
+                var dragonArt = NexusGuiArt.LoadRubiumDragonForPlayer(owner);
+                if (!dragonArt.IsEmpty)
+                {
+                    float hoverY = 0.12f * (Board != null ? Board.HexRadius / 0.7f : 1f);
+                    var dragonRootGo = new GameObject(type + "_Unit");
+                    dragonRootGo.transform.position = tile.View.transform.position + Vector3.up * hoverY;
+
+                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "DragonArt";
+                    quad.transform.SetParent(dragonRootGo.transform, false);
+                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    float hexScale = Board != null ? Board.HexRadius / 0.7f : 1f;
+                    float baseSize = 0.62f * hexScale;
+                    float a = Mathf.Max(0.2f, dragonArt.AspectRatio);
+                    quad.transform.localScale = new Vector3(baseSize * Mathf.Min(1f, a), baseSize / Mathf.Max(1f, a),
+                        1f);
+                    Object.Destroy(quad.GetComponent<Collider>());
+
+                    var qrend = quad.GetComponent<Renderer>();
+                    var mat = new Material(Shader.Find("Sprites/Default"));
+                    NexusGuiArt.ApplyImageToMaterial(mat, dragonArt, Color.magenta);
+                    qrend.material = mat;
+
+                    var dragonInstance = dragonRootGo.AddComponent<UnitInstance>();
+                    dragonInstance.Initialize(owner, def, tile, hasAlreadyMovedThisTurn);
+                    _unitsByPlayer[owner].Add(dragonInstance);
+                    return dragonInstance;
+                }
+            }
+
+            if (type == UnitType.RockStrider)
+            {
+                var striderArt = NexusGuiArt.LoadRockStriderForPlayer(owner);
+                if (!striderArt.IsEmpty)
+                {
+                    float hoverY = 0.12f * (Board != null ? Board.HexRadius / 0.7f : 1f);
+                    var striderRootGo = new GameObject(type + "_Unit");
+                    striderRootGo.transform.position = tile.View.transform.position + Vector3.up * hoverY;
+
+                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "StriderArt";
+                    quad.transform.SetParent(striderRootGo.transform, false);
+                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    float hexScale = Board != null ? Board.HexRadius / 0.7f : 1f;
+                    float baseSize = 0.52f * hexScale;
+                    float a = Mathf.Max(0.2f, striderArt.AspectRatio);
+                    quad.transform.localScale = new Vector3(baseSize * Mathf.Min(1f, a), baseSize / Mathf.Max(1f, a),
+                        1f);
+                    Object.Destroy(quad.GetComponent<Collider>());
+
+                    var qrend = quad.GetComponent<Renderer>();
+                    var mat = new Material(Shader.Find("Sprites/Default"));
+                    NexusGuiArt.ApplyImageToMaterial(mat, striderArt, Color.magenta);
+                    qrend.material = mat;
+
+                    var striderInstance = striderRootGo.AddComponent<UnitInstance>();
+                    striderInstance.Initialize(owner, def, tile, hasAlreadyMovedThisTurn);
+                    _unitsByPlayer[owner].Add(striderInstance);
+                    return striderInstance;
+                }
             }
 
             // Distinct piece shapes per UnitType (so all units are visually unique).
@@ -650,6 +726,26 @@ namespace NexusGame
         {
             flights = _miningIncomeFlightsForHud;
             _miningIncomeFlightsForHud = null;
+            return flights != null && flights.Count > 0;
+        }
+
+        /// <summary>Queue a HUD animation when a human (non-AI) who matches <see cref="CurrentPlayer"/> gains VP.</summary>
+        void QueueVictoryPointHudFlight(PlayerState recipient, int amount)
+        {
+            if (recipient == null || amount <= 0)
+                return;
+            if (IsAiControlled(recipient) || recipient != CurrentPlayer)
+                return;
+            if (_victoryPointFlightsForHud == null)
+                _victoryPointFlightsForHud = new List<VictoryPointFlightInfo>();
+            _victoryPointFlightsForHud.Add(new VictoryPointFlightInfo(amount));
+        }
+
+        /// <summary>HUD: pending VP flights from center screen to VP icon (cleared after call).</summary>
+        public bool TryConsumeVictoryPointFlights(out List<VictoryPointFlightInfo> flights)
+        {
+            flights = _victoryPointFlightsForHud;
+            _victoryPointFlightsForHud = null;
             return flights != null && flights.Count > 0;
         }
 

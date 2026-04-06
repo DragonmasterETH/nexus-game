@@ -17,6 +17,11 @@ namespace NexusGame
         public GameObject ExplorationMarker;
         public GameObject Highlight;
         public GameObject MineLabel;
+
+        /// <summary>Original hex fill color before selection dim; used by <see cref="MobileInputController"/>.</summary>
+        public Color HexFillBaseColor;
+
+        public bool HexFillBaseColorCaptured;
     }
 
     public enum BoardLayoutMode

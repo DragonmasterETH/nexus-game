@@ -170,6 +170,7 @@ namespace NexusGame
             LastDrawPhaseLog = "";
             LastBattlePhaseLog = "";
             _miningIncomeFlightsForHud = null;
+            _victoryPointFlightsForHud = null;
         }
 
         void RunDrawPhase(PlayerState player)
@@ -470,6 +471,7 @@ namespace NexusGame
                 if (attackerWin)
                 {
                     attacker.VictoryPoints += 1;
+                    QueueVictoryPointHudFlight(attacker, 1);
                     log.AppendLine($"P{attacker.PlayerIndex + 1} wins battle (+1 VP).");
                     if (MetaProgression.Instance != null)
                         MetaProgression.Instance.OnBattleWinReward();
@@ -559,6 +561,7 @@ namespace NexusGame
             var p = SecretMissionOffer.Attacker;
             var s = p.SecretMissions[indexInHand];
             p.VictoryPoints += s.VictoryPoints;
+            QueueVictoryPointHudFlight(p, s.VictoryPoints);
             p.SecretMissions.RemoveAt(indexInHand);
             SecretMissionOffer.Waiting = false;
             Debug.Log($"[Battle] Secret mission played: P{p.PlayerIndex + 1} +{s.VictoryPoints} VP (index {indexInHand})");
@@ -1192,6 +1195,7 @@ namespace NexusGame
                 if (result.AttackerEliminatedDefender)
                 {
                     attacker.VictoryPoints += result.VictoryPointsAwarded;
+                    QueueVictoryPointHudFlight(attacker, result.VictoryPointsAwarded);
                     if (MetaProgression.Instance != null)
                         MetaProgression.Instance.OnBattleWinReward();
                     DrawEnergizeCards(defender, 1);

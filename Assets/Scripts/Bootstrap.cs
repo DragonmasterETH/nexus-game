@@ -73,8 +73,10 @@ namespace NexusGame
                 camGo.tag = "MainCamera";
             }
 
-            mainCam.transform.position = new Vector3(0f, 8f, -8f);
-            mainCam.transform.LookAt(Vector3.zero);
+            // True top-down so board sprites/quads read without perspective skew.
+            const float initialHeight = 12f;
+            mainCam.transform.position = new Vector3(0f, initialHeight, 0f);
+            mainCam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             mainCam.clearFlags = CameraClearFlags.SolidColor;
             mainCam.backgroundColor = new Color(0.02f, 0.02f, 0.05f);
 

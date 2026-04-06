@@ -114,6 +114,83 @@ namespace NexusGame
             return default;
         }
 
+        /// <summary>Rubium Dragon art per player color (Resources e.g. Sprites/Units/Dragon_Blue).</summary>
+        public static NexusGuiImage LoadRubiumDragonForPlayer(PlayerState owner)
+        {
+            string c = DragonColorSuffix(owner);
+            return Load(
+                $"Sprites/Units/Dragon_{c}",
+                $"Sprites/units/Dragon_{c}",
+                $"Sprites/Units/Dragon {c}",
+                $"Sprites/units/Dragon {c}",
+                $"Sprites/Units/RubiumDragon_{c}",
+                $"Sprites/Units/RubiumDragon {c}",
+                $"Sprites/Units/{c}Dragon",
+                $"Sprites/Units/Dragon{c}");
+        }
+
+        /// <summary>Shared battle-ribbon / generic HUD dragon when no owner context (defaults to P1-style blue index 0).</summary>
+        public static NexusGuiImage LoadRubiumDragonLegendIcon()
+        {
+            return Load(
+                "Sprites/Units/Dragon_Blue",
+                "Sprites/units/Dragon_Blue",
+                "Sprites/Units/Dragon Blue",
+                "Sprites/Units/RubiumDragon",
+                "Sprites/Units/RubiumDragon_Blue");
+        }
+
+        /// <summary>Rock Strider art per seat (e.g. Sprites/Units/Strider Blue).</summary>
+        public static NexusGuiImage LoadRockStriderForPlayer(PlayerState owner)
+        {
+            string c = DragonColorSuffix(owner);
+            return Load(
+                $"Sprites/Units/Strider {c}",
+                $"Sprites/units/Strider {c}",
+                $"Sprites/Units/Strider_{c}",
+                $"Sprites/units/Strider_{c}",
+                $"Sprites/Units/Strider{c}",
+                $"Sprites/Units/RockStrider_{c}",
+                $"Sprites/Units/RockStrider {c}");
+        }
+
+        /// <summary>Ribbon / fallback when no owner (blue seat).</summary>
+        public static NexusGuiImage LoadRockStriderLegendIcon()
+        {
+            return Load(
+                "Sprites/Units/Strider Blue",
+                "Sprites/units/Strider Blue",
+                "Sprites/Units/Strider_Blue",
+                "Sprites/Units/StriderBlue",
+                "Sprites/Units/RockStrider");
+        }
+
+        static string DragonColorSuffix(PlayerState owner)
+        {
+            if (owner == null)
+                return "Blue";
+            var col = owner.Color;
+            if (ChannelNear(col.r, 1f) && col.g < 0.35f && col.b < 0.35f)
+                return "Red";
+            if (col.r < 0.35f && col.g < 0.35f && ChannelNear(col.b, 1f))
+                return "Blue";
+            if (col.r < 0.35f && ChannelNear(col.g, 1f) && col.b < 0.35f)
+                return "Green";
+            if (col.r > 0.85f && col.g > 0.85f && col.b < 0.35f)
+                return "Yellow";
+
+            return owner.PlayerIndex switch
+            {
+                0 => "Blue",
+                1 => "Red",
+                2 => "Green",
+                3 => "Yellow",
+                _ => "Blue"
+            };
+        }
+
+        static bool ChannelNear(float v, float target, float tol = 0.08f) => Mathf.Abs(v - target) < tol;
+
         /// <summary>
         /// Apply loaded art to a world-space material (e.g. exploration quad). Uses <see cref="Sprite.textureRect"/> UVs when needed.
         /// </summary>
