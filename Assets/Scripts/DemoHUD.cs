@@ -115,6 +115,7 @@ namespace NexusGame
         readonly Dictionary<UnitType, NexusGuiImage> _unitIconCache = new Dictionary<UnitType, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _dragonIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _striderIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
+        readonly Dictionary<int, NexusGuiImage> _fungoidIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         GUIStyle _battleWindowStyle;
         Texture2D _battleWindowBg;
         GUIStyle _topIconButtonStyle;
@@ -2280,7 +2281,7 @@ namespace NexusGame
         }
 
         static bool UsesPerPlayerTint(UnitType t) =>
-            t == UnitType.RubiumDragon || t == UnitType.RockStrider;
+            t == UnitType.RubiumDragon || t == UnitType.RockStrider || t == UnitType.Fungoid;
 
         static PlayerState TintedIconOwnerForUnitOnSide(UnitType t, PlayerState sidePlayer) =>
             UsesPerPlayerTint(t) ? sidePlayer : null;
@@ -2295,6 +2296,8 @@ namespace NexusGame
                 icon = GetDragonUnitIcon(ownerForTint);
             else if (type == UnitType.RockStrider && ownerForTint != null)
                 icon = GetRockStriderUnitIcon(ownerForTint);
+            else if (type == UnitType.Fungoid && ownerForTint != null)
+                icon = GetFungoidUnitIcon(ownerForTint);
             else
                 icon = GetUnitIcon(type);
             if (!icon.IsEmpty)
@@ -2335,6 +2338,21 @@ namespace NexusGame
             if (img.IsEmpty)
                 img = GetUnitIcon(UnitType.RockStrider);
             _striderIconByPlayerIndex[owner.PlayerIndex] = img;
+            return img;
+        }
+
+        NexusGuiImage GetFungoidUnitIcon(PlayerState owner)
+        {
+            if (owner == null)
+                return GetUnitIcon(UnitType.Fungoid);
+
+            if (_fungoidIconByPlayerIndex.TryGetValue(owner.PlayerIndex, out var cached))
+                return cached;
+
+            var img = NexusGuiArt.LoadFungoidForPlayer(owner);
+            if (img.IsEmpty)
+                img = GetUnitIcon(UnitType.Fungoid);
+            _fungoidIconByPlayerIndex[owner.PlayerIndex] = img;
             return img;
         }
 
@@ -2387,7 +2405,7 @@ namespace NexusGame
 
         NexusGuiImage GetUnitIcon(UnitType type)
         {
-            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider &&
+            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider && type != UnitType.Fungoid &&
                 _unitIconCache.TryGetValue(type, out var cached))
                 return cached;
 
@@ -2398,8 +2416,10 @@ namespace NexusGame
                 loaded = NexusGuiArt.LoadRubiumDragonLegendIcon();
             if (type == UnitType.RockStrider && loaded.IsEmpty)
                 loaded = NexusGuiArt.LoadRockStriderLegendIcon();
+            if (type == UnitType.Fungoid && loaded.IsEmpty)
+                loaded = NexusGuiArt.LoadFungoidLegendIcon();
 
-            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider)
+            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider && type != UnitType.Fungoid)
                 _unitIconCache[type] = loaded;
             return loaded;
         }

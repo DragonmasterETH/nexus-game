@@ -165,6 +165,31 @@ namespace NexusGame
                 "Sprites/Units/RockStrider");
         }
 
+        /// <summary>Fungoid art per seat (e.g. Sprites/Units/Fungus Red).</summary>
+        public static NexusGuiImage LoadFungoidForPlayer(PlayerState owner)
+        {
+            string c = DragonColorSuffix(owner);
+            return Load(
+                $"Sprites/Units/Fungus {c}",
+                $"Sprites/units/Fungus {c}",
+                $"Sprites/Units/Fungus_{c}",
+                $"Sprites/units/Fungus_{c}",
+                $"Sprites/Units/Fungus{c}",
+                $"Sprites/Units/Fungoid_{c}",
+                $"Sprites/Units/Fungoid {c}");
+        }
+
+        /// <summary>Ribbon / fallback when no owner.</summary>
+        public static NexusGuiImage LoadFungoidLegendIcon()
+        {
+            return Load(
+                "Sprites/Units/Fungus Blue",
+                "Sprites/units/Fungus Blue",
+                "Sprites/Units/Fungus_Blue",
+                "Sprites/Units/FungusBlue",
+                "Sprites/Units/Fungoid");
+        }
+
         static string DragonColorSuffix(PlayerState owner)
         {
             if (owner == null)

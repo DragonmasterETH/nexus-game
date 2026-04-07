@@ -372,6 +372,38 @@ namespace NexusGame
                 }
             }
 
+            if (type == UnitType.Fungoid)
+            {
+                var fungusArt = NexusGuiArt.LoadFungoidForPlayer(owner);
+                if (!fungusArt.IsEmpty)
+                {
+                    float hoverY = 0.12f * (Board != null ? Board.HexRadius / 0.7f : 1f);
+                    var fungoidRootGo = new GameObject(type + "_Unit");
+                    fungoidRootGo.transform.position = tile.View.transform.position + Vector3.up * hoverY;
+
+                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "FungusArt";
+                    quad.transform.SetParent(fungoidRootGo.transform, false);
+                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    float hexScale = Board != null ? Board.HexRadius / 0.7f : 1f;
+                    float baseSize = 0.48f * hexScale;
+                    float a = Mathf.Max(0.2f, fungusArt.AspectRatio);
+                    quad.transform.localScale = new Vector3(baseSize * Mathf.Min(1f, a), baseSize / Mathf.Max(1f, a),
+                        1f);
+                    Object.Destroy(quad.GetComponent<Collider>());
+
+                    var qrend = quad.GetComponent<Renderer>();
+                    var mat = new Material(Shader.Find("Sprites/Default"));
+                    NexusGuiArt.ApplyImageToMaterial(mat, fungusArt, Color.magenta);
+                    qrend.material = mat;
+
+                    var fungoidInstance = fungoidRootGo.AddComponent<UnitInstance>();
+                    fungoidInstance.Initialize(owner, def, tile, hasAlreadyMovedThisTurn);
+                    _unitsByPlayer[owner].Add(fungoidInstance);
+                    return fungoidInstance;
+                }
+            }
+
             // Distinct piece shapes per UnitType (so all units are visually unique).
             PrimitiveType prim;
             Quaternion rot = Quaternion.identity;
