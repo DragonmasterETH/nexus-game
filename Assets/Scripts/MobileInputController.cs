@@ -58,6 +58,17 @@ namespace NexusGame
                 return;
             if (Game != null && Game.IsAiControlled(Game.CurrentPlayer))
                 return;
+            if (IsBattleOverlayBlockingBoardInput())
+            {
+                if (_selectedTile != null)
+                    ClearSelection();
+                _pendingTap = false;
+                _dragging = false;
+                _dragPrepared = false;
+                _dragSourceTile = null;
+                _dragStartUnit = null;
+                return;
+            }
 
             // Touch: pinch zoom / single-finger pan (BoardCameraPanZoom) before board taps / unit drags
             if (Input.touchCount >= 2)
@@ -188,6 +199,8 @@ namespace NexusGame
         {
             if (Game == null || Game.CurrentPlayer == null || Game.IsAiControlled(Game.CurrentPlayer))
                 return;
+            if (IsBattleOverlayBlockingBoardInput())
+                return;
             if (MainCamera == null)
                 return;
             if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
@@ -285,6 +298,8 @@ namespace NexusGame
 
         void HandleTap(Vector2 screenPos)
         {
+            if (IsBattleOverlayBlockingBoardInput())
+                return;
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
                 return;
             if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
@@ -718,6 +733,19 @@ namespace NexusGame
         public void ClearSelection()
         {
             SetSelectedTile(null);
+        }
+
+        bool IsBattleOverlayBlockingBoardInput()
+        {
+            if (Game == null)
+                return false;
+            if (Game.BattleClashIntroActive)
+                return true;
+            if (Game.PendingBattleArrangement || Game.BattlePhaseBlockingPlay || Game.ActiveBattleHex != null)
+                return true;
+            if (Game.EnergizePromptPlayer != null || Game.FocusFirePicker != null || Game.CasualtyPick != null)
+                return true;
+            return Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting;
         }
 
         public bool CanUnitMoveTo(UnitInstance unit, BoardTile target)

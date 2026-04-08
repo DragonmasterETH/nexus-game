@@ -28,7 +28,8 @@ namespace NexusGame
     {
         OneVOne,
         TwoToFour,        // radius-3 mainland
-        TwoToFourSmall    // 12-hex outer, 6-hex inner, 1 center
+        TwoToFourSmall,   // 12-hex outer, 6-hex inner, 1 center
+        BattleTest        // 1v1 micro map: left home, center lane, right home
     }
 
     public class BoardGenerator : MonoBehaviour
@@ -100,7 +101,44 @@ namespace NexusGame
                 case BoardLayoutMode.TwoToFourSmall:
                     GenerateTwoToFourSmallLayout();
                     break;
+                case BoardLayoutMode.BattleTest:
+                    GenerateBattleTestLayout();
+                    break;
             }
+        }
+
+        void GenerateBattleTestLayout()
+        {
+            // Minimal 3-hex lane for quick 1v1 battle testing.
+            RingRadius = 1;
+            CreateBattleTestTile(-1, 0, TileType.HomeBase);
+            CreateBattleTestTile(0, 0, TileType.Plains);
+            CreateBattleTestTile(1, 0, TileType.HomeBase);
+        }
+
+        void CreateBattleTestTile(int q, int r, TileType type)
+        {
+            Vector3 pos = AxialToWorld(q, r);
+            GameObject tileObj = CreateHexVisual(pos, type);
+            var tile = new BoardTile
+            {
+                Q = q,
+                R = r,
+                Type = type,
+                View = tileObj,
+                ExtraMineYield = 0,
+                ExplorationReward = ExplorationReward.None,
+                ExplorationRevealed = true,
+                Highlight = tileObj.transform.Find("Highlight") != null
+                    ? tileObj.transform.Find("Highlight").gameObject
+                    : null,
+                MineLabel = null
+            };
+
+            var proxy = tileObj.AddComponent<TileClickProxy>();
+            proxy.Q = q;
+            proxy.R = r;
+            Tiles[(q, r)] = tile;
         }
 
         void GenerateOneVOneLayout()

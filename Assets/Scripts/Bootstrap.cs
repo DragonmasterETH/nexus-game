@@ -351,6 +351,15 @@ namespace NexusGame
 
             y += btnH + gap;
 
+            if (GUI.Button(new Rect(x, y, bw, btnH), "1v1 Battle Test (3 Hex)", btnStyle))
+            {
+                _selectedLayout = BoardLayoutMode.BattleTest;
+                EnsureGameSystems();
+                _state = UiState.InGame;
+            }
+
+            y += btnH + gap;
+
             var subHdr = new GUIStyle(GUI.skin.label)
             {
                 fontSize = Mathf.Clamp(Screen.width / 32, 15, 20),

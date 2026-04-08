@@ -252,18 +252,19 @@ namespace NexusGame
             float rxRes = 12f;
             if (!rub.IsEmpty)
                 rxRes += MainHudIconHeight * rub.AspectRatio + 6f;
-
-            var rubNumStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = Mathf.Clamp(Screen.width / 32, 15, 20),
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft
-            };
-            float tw = rubNumStyle.CalcSize(new GUIContent(player.Rubium.ToString())).x;
+            int hudFontSize = Mathf.Clamp(Screen.width / 32, 15, 20);
+            float tw = EstimateHudNumberWidth(player.Rubium, hudFontSize);
             rxRes += Mathf.Max(28f, tw) + 12f;
             float vpW = vp.IsEmpty ? MainHudIconHeight : MainHudIconHeight * vp.AspectRatio;
             float cx = rxRes + vpW * 0.5f;
             return new Vector2(cx, cy);
+        }
+
+        static float EstimateHudNumberWidth(int value, int fontSize)
+        {
+            string s = Mathf.Max(0, value).ToString();
+            // Approximate monospace-like digit width to avoid GUI API in Update().
+            return s.Length * (fontSize * 0.58f) + 4f;
         }
 
         void DrawFlyingRubiumIncome()
@@ -492,8 +493,8 @@ namespace NexusGame
                 return;
             _battleWindowStyle = new GUIStyle(GUI.skin.window);
             _battleWindowBg = new Texture2D(1, 1, TextureFormat.RGBA32, false);
-            // Keep only ~5% of board visible through battle window body (95% opaque).
-            _battleWindowBg.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.95f));
+            // Deep navy translucent shell for a cleaner, modern battle modal.
+            _battleWindowBg.SetPixel(0, 0, new Color(0.04f, 0.06f, 0.11f, 0.93f));
             _battleWindowBg.Apply();
             _battleWindowStyle.normal.background = _battleWindowBg;
             _battleWindowStyle.onNormal.background = _battleWindowBg;
@@ -501,6 +502,11 @@ namespace NexusGame
             _battleWindowStyle.onFocused.background = _battleWindowBg;
             _battleWindowStyle.active.background = _battleWindowBg;
             _battleWindowStyle.onActive.background = _battleWindowBg;
+            _battleWindowStyle.fontSize = 15;
+            _battleWindowStyle.fontStyle = FontStyle.Bold;
+            _battleWindowStyle.alignment = TextAnchor.UpperLeft;
+            _battleWindowStyle.padding = new RectOffset(14, 14, 24, 10);
+            _battleWindowStyle.normal.textColor = new Color(0.95f, 0.97f, 1f, 0.95f);
         }
 
         void OnGUI()
@@ -1337,8 +1343,9 @@ namespace NexusGame
             float h = Mathf.Min(Screen.height - 30f, 620f);
             var r = new Rect((Screen.width - w) * 0.5f, 15f, w, h);
             EnsureBattleWindowStyle();
+            DrawTintedRect(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0.02f, 0.03f, 0.06f, 0.68f));
             GUI.Window(900, r, _ => { BattleMainWindow(currentPlayer, h); }, "Battle", _battleWindowStyle);
-            DrawOutlineRect(r, new Color(0.95f, 0.82f, 0.2f, 0.95f), 2f);
+            DrawOutlineRect(r, new Color(0.42f, 0.62f, 0.98f, 0.85f), 2f);
         }
 
         void BattleMainWindow(PlayerState currentPlayer, float windowHeight)
@@ -1346,15 +1353,27 @@ namespace NexusGame
             var left = Game.ActiveBattleAttacker ?? currentPlayer;
             var right = Game.ActiveBattleDefender;
             var hex = Game.ActiveBattleHex;
+            bool casualtyDecision = Game.CasualtyPick != null;
+            bool compactForDecision = casualtyDecision ||
+                                      Game.EnergizePromptPlayer != null ||
+                                      Game.FocusFirePicker != null ||
+                                      (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting);
 
             GUILayout.BeginVertical(GUI.skin.box);
             DrawBattleContextBar(hex, left, right);
-            GUILayout.Label(BattleNextActionShort(), new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold });
+            GUILayout.Label(BattleNextActionShort(), new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = new Color(0.86f, 0.91f, 1f, 0.96f) }
+            });
             if (Game.HasActiveBattleStep)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("Step", GUILayout.Width(36));
+                GUILayout.Label("Now", GUILayout.Width(36));
                 var stepIcon = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(30f), GUILayout.Height(26f));
+                DrawTintedRect(new Rect(stepIcon.x - 2f, stepIcon.y - 2f, stepIcon.width + 4f, stepIcon.height + 4f),
+                    new Color(0.19f, 0.24f, 0.34f, 0.95f));
                 DrawUnitMiniIcon(stepIcon, Game.ActiveBattleStepUnitType, BattleStepTintedUnitIconOwner());
                 GUILayout.Label(UnitUiName(Game.ActiveBattleStepUnitType),
                     new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold });
@@ -1362,14 +1381,16 @@ namespace NexusGame
             }
 
             DrawBattleDiceRollBanner();
-            DrawBattleHitSummaryRow();
-            DrawBattleOrderRibbonIcons();
+            if (!casualtyDecision)
+                DrawBattleOrderRibbonIcons();
             GUILayout.EndVertical();
 
             GUILayout.BeginVertical(GUI.skin.box);
             GUILayout.BeginHorizontal();
             DrawBattleSideColumn(left, hex, true, Game.ActiveBattleAttacker);
-            GUILayout.Space(12f);
+            GUILayout.FlexibleSpace();
+            DrawBattleCenterClashMark(40);
+            GUILayout.FlexibleSpace();
             DrawBattleSideColumn(right, hex, false, Game.ActiveBattleDefender);
             GUILayout.EndHorizontal();
             GUILayout.EndVertical();
@@ -1392,22 +1413,25 @@ namespace NexusGame
                 GUILayout.Label("🔒 " + lockedReason, new GUIStyle(GUI.skin.label) { fontSize = 10, wordWrap = true });
             GUILayout.EndVertical();
 
-            GUILayout.Space(6f);
-            GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label("📜 Log", GUI.skin.box);
-            string battleLog = !string.IsNullOrEmpty(Game.LiveBattlePhaseLog) ? Game.LiveBattlePhaseLog : Game.LastBattlePhaseLog;
-            string safe = UiSafeText(battleLog);
-            if (safe.Length != _lastBattleLogLen)
+            if (!compactForDecision)
             {
-                _lastBattleLogLen = safe.Length;
-                _scrollBattleMainLog.y = 100000f;
+                GUILayout.Space(6f);
+                GUILayout.BeginVertical(GUI.skin.box);
+                GUILayout.Label("📜 Log", GUI.skin.box);
+                string battleLog = !string.IsNullOrEmpty(Game.LiveBattlePhaseLog) ? Game.LiveBattlePhaseLog : Game.LastBattlePhaseLog;
+                string safe = UiSafeText(battleLog);
+                if (safe.Length != _lastBattleLogLen)
+                {
+                    _lastBattleLogLen = safe.Length;
+                    _scrollBattleMainLog.y = 100000f;
+                }
+                float logH = Mathf.Max(90f, windowHeight * 0.23f);
+                _scrollBattleMainLog = GUILayout.BeginScrollView(_scrollBattleMainLog, GUILayout.Height(logH));
+                var logBody = new GUIStyle(GUI.skin.label) { fontSize = 10, wordWrap = true };
+                GUILayout.Label(string.IsNullOrEmpty(safe) ? "(No battle log yet)" : safe, logBody);
+                GUILayout.EndScrollView();
+                GUILayout.EndVertical();
             }
-            float logH = Mathf.Max(90f, windowHeight * 0.23f);
-            _scrollBattleMainLog = GUILayout.BeginScrollView(_scrollBattleMainLog, GUILayout.Height(logH));
-            var logBody = new GUIStyle(GUI.skin.label) { fontSize = 10, wordWrap = true };
-            GUILayout.Label(string.IsNullOrEmpty(safe) ? "(No battle log yet)" : safe, logBody);
-            GUILayout.EndScrollView();
-            GUILayout.EndVertical();
         }
 
         void DrawBattleContextBar(BoardTile hex, PlayerState left, PlayerState right)
@@ -1419,7 +1443,13 @@ namespace NexusGame
                 ctx = $"⬡({hex.Q},{hex.R})  P{left.PlayerIndex + 1}⚔P{right.PlayerIndex + 1}";
             else
                 ctx = hex != null ? $"⬡({hex.Q},{hex.R})" : "Battle";
-            GUILayout.Label(ctx, new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold });
+            GUILayout.Label(ctx, new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.95f, 0.97f, 1f, 0.98f) }
+            });
         }
 
         void DrawBattleDiceRollBanner()
@@ -1444,11 +1474,13 @@ namespace NexusGame
                 foreach (var v in d.Rolls)
                 {
                     var dr = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(28f), GUILayout.Height(28f));
+                    DrawTintedRect(dr, new Color(0.17f, 0.22f, 0.32f, 0.98f));
                     GUI.Box(dr, v.ToString(), new GUIStyle(GUI.skin.box)
                     {
                         fontSize = 14,
                         fontStyle = FontStyle.Bold,
-                        alignment = TextAnchor.MiddleCenter
+                        alignment = TextAnchor.MiddleCenter,
+                        normal = { textColor = new Color(0.95f, 0.97f, 1f, 1f) }
                     });
                 }
             }
@@ -1470,6 +1502,14 @@ namespace NexusGame
             string sideTag = expectedSide != null && player == expectedSide
                 ? (player == Game.ActiveBattleAttacker ? "⚔" : "🛡")
                 : "";
+            int pendingHits = 0;
+            if (player != null)
+            {
+                if (player == Game.ActiveBattleAttacker)
+                    pendingHits = Game.ActiveBattleHitsOnAttacker;
+                else if (player == Game.ActiveBattleDefender)
+                    pendingHits = Game.ActiveBattleHitsOnDefender;
+            }
             var prev = GUI.color;
             if (player == Game.ActiveBattleAttacker)
                 GUI.color = new Color(0.2f, 0.38f, 0.8f, 0.95f);
@@ -1477,8 +1517,17 @@ namespace NexusGame
                 GUI.color = new Color(0.78f, 0.26f, 0.2f, 0.95f);
             GUILayout.BeginVertical(GUI.skin.box, GUILayout.Width(220f), GUILayout.MinHeight(100f));
             GUI.color = prev;
-            GUILayout.Label(string.IsNullOrEmpty(sideTag) ? title : $"{title} {sideTag}",
-                new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 12 });
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontStyle = FontStyle.Bold,
+                fontSize = 12,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.93f, 0.96f, 1f, 1f) }
+            };
+            string hdr = string.IsNullOrEmpty(sideTag) ? title : $"{title} {sideTag}";
+            if (player == Game.ActiveBattleAttacker || player == Game.ActiveBattleDefender)
+                hdr += $" ☠{pendingHits}";
+            GUILayout.Label(hdr, titleStyle);
             if (player == null || hex == null)
             {
                 GUILayout.Label("(—)");
@@ -1513,8 +1562,11 @@ namespace NexusGame
                     i++;
                     GUILayout.BeginVertical(GUILayout.Width(102f));
                     var box = GUILayoutUtility.GetRect(88f, 52f, GUILayout.Width(96f), GUILayout.Height(56f));
+                    DrawTintedRect(box, new Color(0.15f, 0.19f, 0.29f, 0.95f));
                     GUI.Box(box, "");
                     var iconR = new Rect(box.x + 6f, box.y + 4f, 36f, 36f);
+                    DrawTintedRect(new Rect(iconR.x - 1f, iconR.y - 1f, iconR.width + 2f, iconR.height + 2f),
+                        new Color(0.24f, 0.30f, 0.44f, 0.95f));
                     DrawUnitMiniIcon(iconR, kvp.Key, TintedIconOwnerForUnitOnSide(kvp.Key, player));
                     var nameStyle = new GUIStyle(GUI.skin.label)
                     {
@@ -1526,6 +1578,53 @@ namespace NexusGame
                     GUI.Label(new Rect(box.x + 2f, box.yMax - 16f, box.width - 4f, 14f), "×" + kvp.Value, nameStyle);
                     GUI.Label(new Rect(box.x + 44f, box.y + 6f, 48f, 40f), UnitTypeAbbrev(kvp.Key),
                         new GUIStyle(GUI.skin.label) { fontSize = 9, wordWrap = true });
+
+                    var cp = Game.CasualtyPick;
+                    bool canPickHere = cp != null && cp.Owner == player;
+                    if (canPickHere)
+                    {
+                        int selected = cp.Selected.Count(u => u != null && u.Definition.Type == kvp.Key);
+                        string selText = $"{selected}/{kvp.Value}";
+                        if (selected > 0)
+                        {
+                            // Strong selected state: bright border + warm fill so chosen casualties are obvious.
+                            DrawTintedRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
+                                new Color(0.92f, 0.64f, 0.12f, 0.26f));
+                            DrawOutlineRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
+                                new Color(1f, 0.82f, 0.2f, 0.98f), 2f);
+                        }
+                        var badgeRect = new Rect(box.x + 2f, box.y + 2f, 44f, 18f);
+                        DrawTintedRect(badgeRect, selected > 0
+                            ? new Color(0.95f, 0.72f, 0.18f, 0.92f)
+                            : new Color(0.18f, 0.22f, 0.30f, 0.9f));
+                        GUI.Label(badgeRect, selText,
+                            new GUIStyle(GUI.skin.label)
+                            {
+                                fontSize = 11,
+                                fontStyle = FontStyle.Bold,
+                                alignment = TextAnchor.MiddleCenter,
+                                normal = { textColor = selected > 0 ? new Color(0.15f, 0.1f, 0.02f, 1f) : new Color(0.82f, 0.88f, 0.98f, 1f) }
+                            });
+
+                        bool canAdd = cp.Selected.Count < cp.Required && selected < kvp.Value;
+                        bool prevEnabled = GUI.enabled;
+                        GUI.enabled = canAdd;
+                        if (GUI.Button(box, GUIContent.none, GUIStyle.none))
+                            AdjustCasualtyTypeSelection(cp, kvp.Key, +1);
+                        GUI.enabled = prevEnabled;
+
+                        var minusRect = new Rect(box.xMax - 18f, box.y + 2f, 16f, 14f);
+                        bool canSub = selected > 0;
+                        prevEnabled = GUI.enabled;
+                        var prevColor = GUI.color;
+                        GUI.enabled = canSub;
+                        if (!canSub)
+                            GUI.color = new Color(0.55f, 0.55f, 0.6f, 0.9f);
+                        if (GUI.Button(minusRect, "-"))
+                            AdjustCasualtyTypeSelection(cp, kvp.Key, -1);
+                        GUI.enabled = prevEnabled;
+                        GUI.color = prevColor;
+                    }
                     GUILayout.EndVertical();
                 }
 
@@ -1533,29 +1632,6 @@ namespace NexusGame
             }
 
             GUILayout.EndVertical();
-        }
-
-        void DrawBattleHitSummaryRow()
-        {
-            if (Game.ActiveBattleAttacker == null || Game.ActiveBattleDefender == null)
-                return;
-            GUILayout.BeginHorizontal();
-            DrawBattleChip(
-                $"P{Game.ActiveBattleAttacker.PlayerIndex + 1} ☠{Game.ActiveBattleHitsOnAttacker}",
-                new Color(0.25f, 0.4f, 0.95f, 0.9f));
-            GUILayout.Space(10f);
-            DrawBattleChip(
-                $"P{Game.ActiveBattleDefender.PlayerIndex + 1} ☠{Game.ActiveBattleHitsOnDefender}",
-                new Color(0.92f, 0.3f, 0.24f, 0.9f));
-            GUILayout.EndHorizontal();
-        }
-
-        void DrawBattleChip(string text, Color color)
-        {
-            var prev = GUI.color;
-            GUI.color = color;
-            GUILayout.Box(text, GUILayout.Height(24f));
-            GUI.color = prev;
         }
 
         void DrawBattleOrderRibbonIcons()
@@ -1568,6 +1644,9 @@ namespace NexusGame
                 GUI.color = active ? new Color(1f, 0.85f, 0.2f, 1f) : new Color(0.35f, 0.35f, 0.35f, 0.9f);
                 GUILayout.BeginVertical(GUILayout.Width(34f));
                 var ir = GUILayoutUtility.GetRect(28f, 28f, GUILayout.Width(32f), GUILayout.Height(30f));
+                if (active)
+                    DrawOutlineRect(new Rect(ir.x - 1f, ir.y - 1f, ir.width + 2f, ir.height + 2f),
+                        new Color(1f, 0.83f, 0.33f, 0.95f), 1f);
                 DrawUnitMiniIcon(ir, t);
                 GUILayout.Label(UnitTypeAbbrev(t),
                     new GUIStyle(GUI.skin.label) { fontSize = 7, alignment = TextAnchor.MiddleCenter });
@@ -1793,25 +1872,76 @@ namespace NexusGame
             GUI.color = prev;
 
             GUILayout.Label(
-                $"P{cp.Owner.PlayerIndex + 1} pick {cp.Required}  ·  {cp.Selected.Count}/{cp.Required}",
+                $"Tap unit cards above to add casualties. Use the small '-' on a card to subtract.",
                 new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold });
-            foreach (var u in cp.Pool)
-            {
-                if (u == null)
-                    continue;
-                bool on = cp.Selected.Contains(u);
-                GUILayout.BeginHorizontal();
-                var ir = GUILayoutUtility.GetRect(28f, 28f, GUILayout.Width(32f), GUILayout.Height(28f));
-                DrawUnitMiniIcon(ir, u.Definition.Type, TintedIconOwnerForUnitOnSide(u.Definition.Type, u.Owner));
-                if (GUILayout.Toggle(on, " " + UnitUiName(u.Definition.Type), GUILayout.Height(28f)) != on)
-                    Game.ToggleCasualtyUnit(u);
-                GUILayout.EndHorizontal();
-            }
+            GUILayout.Label(
+                $"P{cp.Owner.PlayerIndex + 1} pick {cp.Required}  ·  {cp.Selected.Count}/{cp.Required}",
+                new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, normal = { textColor = new Color(1f, 0.9f, 0.35f, 1f) } });
+
+            GUILayout.Space(6f);
+            if (GUILayout.Button("Auto-pick casualties", GUILayout.Height(24f)))
+                AutoPickCasualties(cp);
+            if (GUILayout.Button("Clear selected casualties", GUILayout.Height(24f)))
+                cp.Selected.Clear();
 
             GUI.enabled = cp.Selected.Count == cp.Required;
-            if (GUILayout.Button("Confirm casualties", GUILayout.Height(32)))
+            if (GUILayout.Button("Confirm casualties", GUILayout.Height(28f)))
                 Game.SubmitCasualtyPick();
             GUI.enabled = true;
+        }
+
+        void DrawBattleCenterClashMark(int fontSize)
+        {
+            var s = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = fontSize,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(1f, 0.86f, 0.3f, 0.96f) }
+            };
+            GUILayout.Label("⚔", s, GUILayout.Width(fontSize + 16f), GUILayout.Height(fontSize + 10f));
+        }
+
+        static void AdjustCasualtyTypeSelection(CasualtyPickState cp, UnitType type, int delta)
+        {
+            if (cp == null || delta == 0)
+                return;
+
+            if (delta > 0)
+            {
+                if (cp.Selected.Count >= cp.Required)
+                    return;
+
+                var next = cp.Pool.FirstOrDefault(u => u != null && u.Definition.Type == type && !cp.Selected.Contains(u));
+                if (next != null)
+                    cp.Selected.Add(next);
+                return;
+            }
+
+            for (int i = cp.Selected.Count - 1; i >= 0; i--)
+            {
+                var s = cp.Selected[i];
+                if (s != null && s.Definition.Type == type)
+                {
+                    cp.Selected.RemoveAt(i);
+                    return;
+                }
+            }
+        }
+
+        static void AutoPickCasualties(CasualtyPickState cp)
+        {
+            if (cp == null)
+                return;
+
+            cp.Selected.RemoveAll(u => u == null || !cp.Pool.Contains(u));
+            while (cp.Selected.Count < cp.Required)
+            {
+                var next = cp.Pool.FirstOrDefault(u => u != null && !cp.Selected.Contains(u));
+                if (next == null)
+                    break;
+                cp.Selected.Add(next);
+            }
         }
 
         void SecretMissionWindow()

@@ -174,6 +174,37 @@ namespace NexusGame
             // For TwoToFour / TwoToFourSmall: left, right, top, and bottom strips.
             var layout = Board != null ? Board.LayoutMode : BoardLayoutMode.OneVOne;
 
+            if (layout == BoardLayoutMode.BattleTest)
+            {
+                var leftHome = Board.GetTile(-1, 0);
+                var rightHome = Board.GetTile(1, 0);
+                if (leftHome == null || rightHome == null || Players.Count < 2)
+                    return;
+
+                var p1 = Players[0];
+                var p2 = Players[1];
+
+                leftHome.Type = TileType.HomeBase;
+                leftHome.Owner = p1;
+                leftHome.HomeBaseStartingOwnerIndex = p1.PlayerIndex;
+                rightHome.Type = TileType.HomeBase;
+                rightHome.Owner = p2;
+                rightHome.HomeBaseStartingOwnerIndex = p2.PlayerIndex;
+
+                // Pre-seeded varied armies for immediate one-step move into center battle.
+                UnitType[] p1Start = { UnitType.Human, UnitType.Fungoid, UnitType.Crystalline, UnitType.RockStrider };
+                UnitType[] p2Start = { UnitType.Human, UnitType.Fungoid, UnitType.LavaLeaper, UnitType.RubiumDragon };
+
+                foreach (var t in p1Start)
+                    CreateUnit(p1, t, leftHome, hasAlreadyMovedThisTurn: false);
+                foreach (var t in p2Start)
+                    CreateUnit(p2, t, rightHome, hasAlreadyMovedThisTurn: false);
+
+                GrantBattleTestStartingBattleEnergize(p1, 6);
+                GrantBattleTestStartingBattleEnergize(p2, 6);
+                return;
+            }
+
             var baseStrips = new List<List<BoardTile>>();
 
             int homeQLeft = -Board.RingRadius - 1;
@@ -246,6 +277,31 @@ namespace NexusGame
             }
 
             // No starting units; players must purchase and deploy during their turns.
+        }
+
+        void GrantBattleTestStartingBattleEnergize(PlayerState player, int count)
+        {
+            if (player == null || count <= 0)
+                return;
+
+            if (_cardRng == null)
+                _cardRng = new System.Random(System.Environment.TickCount);
+
+            var options = new List<EnergizeBattleId>();
+            foreach (EnergizeBattleId id in System.Enum.GetValues(typeof(EnergizeBattleId)))
+            {
+                if (id != EnergizeBattleId.None)
+                    options.Add(id);
+            }
+
+            if (options.Count == 0)
+                return;
+
+            for (int i = 0; i < count; i++)
+            {
+                int idx = _cardRng.Next(0, options.Count);
+                player.BattleEnergize.Add(options[idx]);
+            }
         }
 
         void CreateHomeMineLabel(BoardTile tile)
@@ -628,7 +684,8 @@ namespace NexusGame
                 return false;
             if (tile.HomeBaseStartingOwnerIndex != player.PlayerIndex)
                 return false;
-            if (IsTileContested(tile))
+            // Friendly stacks are allowed; enemy presence blocks home-base deployment.
+            if (TileHasEnemyForOwner(tile, player))
                 return false;
             return true;
         }
