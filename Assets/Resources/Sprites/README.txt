@@ -1,6 +1,9 @@
 Runtime-loaded UI sprites (Resources folder)
 =============================================
 
+Board backdrop (in-match only, under hexes):
+  background.png  ->  Resources path "Sprites/background" (fallback "Sprites/Background")
+
 Place PNGs here so scripts can use Resources.Load without Inspector wiring.
 
 Rubium (currency):

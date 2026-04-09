@@ -21,6 +21,13 @@ namespace NexusGame
         public float MinDistanceFromTarget = 5f;
         public float MaxDistanceFromTarget = 24f;
 
+        [Header("Spectate / turn focus")]
+        [Tooltip("Seconds to ease the look target when focusing another seat's home cluster.")]
+        public float SmoothLookTargetSeconds = 0.55f;
+
+        [Tooltip("Stop auto-pan when within this XZ distance of the goal.")]
+        public float SmoothLookTargetArriveEpsilon = 0.06f;
+
         Camera _cam;
         Vector3 _lookTarget = Vector3.zero;
 
@@ -35,6 +42,10 @@ namespace NexusGame
         bool _panning;
         bool _gestureEndedAsPan;
         bool _singleTouchTracked;
+
+        bool _smoothLookActive;
+        Vector3 _smoothLookGoal;
+        Vector3 _smoothLookVelocity;
 
         void Start()
         {
@@ -58,6 +69,49 @@ namespace NexusGame
             transform.SetPositionAndRotation(
                 new Vector3(_lookTarget.x, GroundPlaneY + _heightAboveGround, _lookTarget.z),
                 Quaternion.Euler(90f, 0f, 0f));
+        }
+
+        /// <summary>
+        /// Ease the board look target toward a ground point (e.g. opponent home cluster). Cancelled when the player pans.
+        /// </summary>
+        public void BeginSmoothLookTarget(Vector3 worldOnGroundPlane)
+        {
+            worldOnGroundPlane.y = GroundPlaneY;
+            _smoothLookGoal = worldOnGroundPlane;
+            _smoothLookActive = true;
+            _smoothLookVelocity = Vector3.zero;
+        }
+
+        void CancelSmoothLookTarget()
+        {
+            _smoothLookActive = false;
+            _smoothLookVelocity = Vector3.zero;
+        }
+
+        void LateUpdate()
+        {
+            if (!_smoothLookActive)
+                return;
+
+            _lookTarget = Vector3.SmoothDamp(
+                _lookTarget,
+                _smoothLookGoal,
+                ref _smoothLookVelocity,
+                SmoothLookTargetSeconds,
+                Mathf.Infinity,
+                Time.deltaTime);
+            _lookTarget.y = GroundPlaneY;
+            ApplyTopDownPose();
+
+            float dist = Vector2.Distance(
+                new Vector2(_lookTarget.x, _lookTarget.z),
+                new Vector2(_smoothLookGoal.x, _smoothLookGoal.z));
+            if (dist <= SmoothLookTargetArriveEpsilon)
+            {
+                _lookTarget = _smoothLookGoal;
+                CancelSmoothLookTarget();
+                ApplyTopDownPose();
+            }
         }
 
         /// <summary>Call from input code on touch Began after you know if the gesture started on a movable unit.</summary>
@@ -196,6 +250,7 @@ namespace NexusGame
 
         void ApplyPanScreenDelta(Vector2 prevScreen, Vector2 currScreen)
         {
+            CancelSmoothLookTarget();
             if (!TryRayGround(prevScreen, out var p0) || !TryRayGround(currScreen, out var p1))
                 return;
 

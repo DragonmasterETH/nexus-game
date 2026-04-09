@@ -13,8 +13,13 @@ namespace NexusGame
         public GameController Game;
         public MobileInputController Input;
 
+        [Min(0f)]
+        [Tooltip("Pause after the AI becomes the active player before buying, moving, or ending turn.")]
+        public float TurnStartDelaySeconds = 1f;
+
         [Min(0.05f)]
-        public float ActionDelaySeconds = 0.38f;
+        [Tooltip("Pause after each deployment, purchase, or move during the AI turn.")]
+        public float ActionDelaySeconds = 0.5f;
 
         static int AxialDist(BoardTile a, BoardTile b)
         {
@@ -295,6 +300,9 @@ namespace NexusGame
                 yield break;
             if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null)
                 yield break;
+
+            if (TurnStartDelaySeconds > 0.001f)
+                yield return new WaitForSeconds(TurnStartDelaySeconds);
 
             int safety = 0;
             while (safety++ < 56 &&

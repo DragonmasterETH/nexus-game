@@ -206,6 +206,8 @@ namespace NexusGame
             ai.Game = game;
             ai.Input = input;
             ai.enabled = _vsAi || _aiVsAi;
+
+            BoardBackground.EnsureLoaded();
         }
 
         void OnGUI()
@@ -399,7 +401,10 @@ namespace NexusGame
             y += btnH + gap + 6f;
 
             if (GUI.Button(new Rect(x, y, bw, btnH), "Back", btnStyle))
+            {
+                BoardBackground.Remove();
                 _state = UiState.MainMenu;
+            }
         }
 
         void EnsureRulebookStyles()
@@ -468,7 +473,10 @@ namespace NexusGame
             if (GUI.Button(
                     new Rect(panel.x + (panel.width - backW) * 0.5f, panel.yMax - backH - 12f, backW, backH),
                     "Back to menu", MenuButtonStyle()))
+            {
+                BoardBackground.Remove();
                 _state = UiState.MainMenu;
+            }
         }
     }
 }

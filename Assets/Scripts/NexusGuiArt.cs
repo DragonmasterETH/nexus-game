@@ -190,6 +190,79 @@ namespace NexusGame
                 "Sprites/Units/Fungoid");
         }
 
+        /// <summary>Human art per seat (e.g. Sprites/Units/Human Red).</summary>
+        public static NexusGuiImage LoadHumanForPlayer(PlayerState owner)
+        {
+            string c = DragonColorSuffix(owner);
+            return Load(
+                $"Sprites/Units/Human {c}",
+                $"Sprites/units/Human {c}",
+                $"Sprites/Units/Human_{c}",
+                $"Sprites/units/Human_{c}",
+                $"Sprites/Units/Human{c}",
+                $"Sprites/Units/Colonist_{c}",
+                $"Sprites/Units/Colonist {c}");
+        }
+
+        public static NexusGuiImage LoadHumanLegendIcon()
+        {
+            return Load(
+                "Sprites/Units/Human Blue",
+                "Sprites/units/Human Blue",
+                "Sprites/Units/Human_Blue",
+                "Sprites/Units/Human",
+                "Sprites/Units/Colonist");
+        }
+
+        /// <summary>Lava Leaper art per seat (e.g. Sprites/Units/Leaper Red).</summary>
+        public static NexusGuiImage LoadLavaLeaperForPlayer(PlayerState owner)
+        {
+            string c = DragonColorSuffix(owner);
+            return Load(
+                $"Sprites/Units/Leaper {c}",
+                $"Sprites/units/Leaper {c}",
+                $"Sprites/Units/Leaper_{c}",
+                $"Sprites/units/Leaper_{c}",
+                $"Sprites/Units/Leaper{c}",
+                $"Sprites/Units/LavaLeaper_{c}",
+                $"Sprites/Units/LavaLeaper {c}",
+                $"Sprites/Units/Lava_Leaper_{c}");
+        }
+
+        public static NexusGuiImage LoadLavaLeaperLegendIcon()
+        {
+            return Load(
+                "Sprites/Units/Leaper Blue",
+                "Sprites/units/Leaper Blue",
+                "Sprites/Units/Leaper_Blue",
+                "Sprites/Units/LavaLeaper",
+                "Sprites/Units/Lava_Leaper");
+        }
+
+        /// <summary>Crystalline art per seat (e.g. Sprites/Units/Crystal Red).</summary>
+        public static NexusGuiImage LoadCrystallineForPlayer(PlayerState owner)
+        {
+            string c = DragonColorSuffix(owner);
+            return Load(
+                $"Sprites/Units/Crystal {c}",
+                $"Sprites/units/Crystal {c}",
+                $"Sprites/Units/Crystal_{c}",
+                $"Sprites/units/Crystal_{c}",
+                $"Sprites/Units/Crystal{c}",
+                $"Sprites/Units/Crystalline_{c}",
+                $"Sprites/Units/Crystalline {c}");
+        }
+
+        public static NexusGuiImage LoadCrystallineLegendIcon()
+        {
+            return Load(
+                "Sprites/Units/Crystal Blue",
+                "Sprites/units/Crystal Blue",
+                "Sprites/Units/Crystal_Blue",
+                "Sprites/Units/Crystal",
+                "Sprites/Units/Crystalline");
+        }
+
         static string DragonColorSuffix(PlayerState owner)
         {
             if (owner == null)

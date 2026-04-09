@@ -39,17 +39,38 @@ namespace NexusGame
         public Sprite OreChip2Sprite;
         public Sprite OreChip3Sprite;
 
-        bool _showBuyMenu;
-        Rect _buyMenuGuiRect;
-        bool _buyMenuGuiRectValid;
+        bool _showCenterBuyModal;
+        Vector2 _scrollCenterBuyDeploy;
+        Texture2D _hexModalSilhouetteMask;
 
-        /// <summary>IMGUI buy panel (screen space, top-left origin) for blocking board taps.</summary>
+        public Rect GetCenterBuyModalPanelGuiRect()
+        {
+            float panelW = Mathf.Min(640f, Screen.width - 24f);
+            float panelH = Mathf.Min(580f, Screen.height - 40f);
+            float px = (Screen.width - panelW) * 0.5f;
+            float py = (Screen.height - panelH) * 0.5f;
+            return new Rect(px, py, panelW, panelH);
+        }
+
+        /// <summary>Centered deploy (buy) modal is open.</summary>
+        public bool IsCenterBuyModalOpen => _showCenterBuyModal;
+
+        public void OpenCenterBuyModal() => _showCenterBuyModal = true;
+
+        public void HandleCenterBuyModalTap(Vector2 screenPosition)
+        {
+            var gui = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
+            if (!GetCenterBuyModalPanelGuiRect().Contains(gui))
+                _showCenterBuyModal = false;
+        }
+
+        /// <summary>True when the pointer is over the deploy modal panel (suppresses drag-prep on that finger).</summary>
         public bool ScreenPointOverlapsBuyMenu(Vector2 screenPosition)
         {
-            if (!_buyMenuGuiRectValid)
+            if (!_showCenterBuyModal)
                 return false;
             var gui = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
-            return _buyMenuGuiRect.Contains(gui);
+            return GetCenterBuyModalPanelGuiRect().Contains(gui);
         }
         bool _showQuickRef;
         bool _showSettingsMenu;
@@ -116,6 +137,9 @@ namespace NexusGame
         readonly Dictionary<int, NexusGuiImage> _dragonIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _striderIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _fungoidIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
+        readonly Dictionary<int, NexusGuiImage> _humanIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
+        readonly Dictionary<int, NexusGuiImage> _lavaLeaperIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
+        readonly Dictionary<int, NexusGuiImage> _crystallineIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         GUIStyle _battleWindowStyle;
         Texture2D _battleWindowBg;
         GUIStyle _topIconButtonStyle;
@@ -520,7 +544,6 @@ namespace NexusGame
             }
 
             var player = Game.CurrentPlayer;
-            _buyMenuGuiRectValid = false;
 
             DrawFullBattleOverlays(player);
             DrawDragonPhaseOverlay();
@@ -619,11 +642,12 @@ namespace NexusGame
                 ly += bodyH + 6f;
             }
 
-            if (!string.IsNullOrEmpty(Game.LastDrawPhaseLog))
+            if (!string.IsNullOrEmpty(Game.LastDrawPhaseLog) && !_showCenterBuyModal)
             {
                 float logBarH = 40f;
                 GUI.Box(new Rect(10f, ly, Mathf.Min(600f, Screen.width - 20f), logBarH), "");
-                GUI.Label(new Rect(16f, ly + 10f, Screen.width - 32f, logBarH - 8f), Game.LastDrawPhaseLog,
+                GUI.Label(new Rect(16f, ly + 10f, Mathf.Min(580f, Screen.width - 40f), logBarH - 8f),
+                    Game.LastDrawPhaseLog,
                     new GUIStyle(hudLabel) { fontSize = 10, wordWrap = true });
                 ly += logBarH + 6f;
             }
@@ -633,7 +657,7 @@ namespace NexusGame
 
             float hudBottom = ly + 4f;
             const float battleLogPanelH = 140f;
-            if (!string.IsNullOrEmpty(battleLog) && !Game.PendingBattleArrangement)
+            if (!string.IsNullOrEmpty(battleLog) && !Game.PendingBattleArrangement && !_showCenterBuyModal)
             {
                 var battleRect = new Rect(10, hudBottom + 8f, 420, battleLogPanelH);
                 GUI.Box(battleRect, "Battle log");
@@ -672,7 +696,7 @@ namespace NexusGame
             if (GUI.Button(new Rect(10, topY, 130, 28), "End Turn"))
             {
                 Game.EndTurn();
-                _showBuyMenu = false;
+                _showCenterBuyModal = false;
             }
 
             GUI.enabled = true;
@@ -687,47 +711,19 @@ namespace NexusGame
             if (Game.AnyMovementOccurredThisTurn)
                 canBuyHere = false;
 
-            if (!canBuyHere)
+            bool canOpenHexDetailModal = InputController != null && InputController.SelectedTile != null;
+            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || Game.IsAiControlled(player))
+                canOpenHexDetailModal = false;
+
+            if (_showCenterBuyModal && !canOpenHexDetailModal)
+                _showCenterBuyModal = false;
+
+            if (!canOpenHexDetailModal)
                 GUI.enabled = false;
             if (GUI.Button(new Rect(150, topY, 40, 28), "$"))
-                _showBuyMenu = !_showBuyMenu;
+                _showCenterBuyModal = !_showCenterBuyModal;
 
             GUI.enabled = true;
-
-            if (_showBuyMenu && canBuyHere)
-            {
-                int y = (int)topY + 35;
-                _buyMenuGuiRect = new Rect(10f, y, 380f, 520f);
-                _buyMenuGuiRectValid = true;
-                GUILayout.BeginArea(_buyMenuGuiRect);
-                var buyHdr = new GUIStyle(GUI.skin.box) { fontSize = 12, fontStyle = FontStyle.Bold };
-                GUILayout.Label("Buy units", buyHdr);
-                const float gridStartY = 30f;
-                DrawBuyUnitGrid(8f, gridStartY, _buyMenuGuiRect.width - 16f);
-                GUILayout.Space(228f);
-                GUILayout.Label("Deployment Energize", GUI.skin.box);
-                var sel = InputController != null ? InputController.SelectedTile : null;
-                if (Game.AnyMovementOccurredThisTurn)
-                    GUILayout.Label("(Deployment locked after any movement this turn)");
-                foreach (var g in player.DeployEnergize.GroupBy(x => x).OrderBy(x => x.Key.ToString()))
-                {
-                    var id = g.Key;
-                    int n = g.Count();
-                    string note = id == EnergizeDeploymentId.FreeHuman &&
-                                  (sel == null || !Game.CanDeployToStartingHomeTile(player, sel))
-                        ? " [select home hex]"
-                        : "";
-                    if (Game.AnyMovementOccurredThisTurn)
-                        GUI.enabled = false;
-                    if (GUILayout.Button(EnergizeDeploymentCatalog.GetName(id) + " x" + n + note))
-                        Game.TryPlayDeploymentEnergize(id, sel);
-                    GUI.enabled = true;
-                }
-
-                if (player.DeployEnergize.Count == 0)
-                    GUILayout.Label("(No deployment cards)");
-                GUILayout.EndArea();
-            }
 
             DrawBottomCardHand(player);
             DrawPhaseRibbon(player);
@@ -735,6 +731,7 @@ namespace NexusGame
             DrawHandPileViewerOverlay(player);
             DrawBattleFocusOverlay();
             DrawEnergizeHelpWindow();
+            DrawCenterBuyDeployModal(player);
 
             if (_showSettingsMenu)
                 DrawSettingsOverlay();
@@ -1137,6 +1134,432 @@ namespace NexusGame
                 DrawHandPileModalSecret(content, player);
         }
 
+        void DrawCenterBuyDeployModal(PlayerState player)
+        {
+            if (!_showCenterBuyModal || player == null || InputController == null)
+                return;
+
+            var sel = InputController.SelectedTile;
+            if (sel == null)
+            {
+                _showCenterBuyModal = false;
+                return;
+            }
+
+            bool showShop = Game.CanDeployToStartingHomeTile(player, sel) && !Game.AnyMovementOccurredThisTurn;
+
+            var dim = new Color(0f, 0f, 0f, 0.88f);
+            Color prev = GUI.color;
+            GUI.color = dim;
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture,
+                ScaleMode.StretchToFill);
+            GUI.color = prev;
+
+            var panel = GetCenterBuyModalPanelGuiRect();
+            GUI.Box(panel, "");
+            DrawOutlineRect(panel, new Color(0.95f, 0.82f, 0.2f, 0.95f), 2f);
+
+            var hdr = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft
+            };
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 10f, 200f, 22f), "Tile info", hdr);
+            if (GUI.Button(new Rect(panel.xMax - 78f, panel.y + 8f, 68f, 28f), "Close"))
+                _showCenterBuyModal = false;
+
+            var inner = new Rect(panel.x + 8f, panel.y + 42f, panel.width - 16f, panel.height - 50f);
+            float cw = inner.width - 18f;
+            int deployGrp = player.DeployEnergize == null ? 0 : player.DeployEnergize.GroupBy(x => x).Count();
+            const float nameBoxH = 138f;
+            const float shopIconSz = 86f;
+            const float iconRowH = 30f;
+            const float costGap = 10f;
+            const float rowGap = 18f;
+            const int shopColumns = 3;
+            float rowStride = nameBoxH + costGap + iconRowH + rowGap;
+            float buyH = rowStride * 2f;
+            float energizeH = 36f + Mathf.Max(1, deployGrp) * 36f + 48f;
+
+            const float hexRowH = 118f;
+            const float occupyingLabelH = 20f;
+            const float creatureRowH = 52f;
+            const float creatureRowGap = 4f;
+            float creatureBlock = occupyingLabelH + creatureRowH * 2f + creatureRowGap;
+            float shopBlock = 0f;
+            if (showShop)
+                shopBlock = 20f + 24f + buyH + 22f + energizeH + 12f;
+            float contentH = hexRowH + creatureBlock + shopBlock + 20f;
+
+            _scrollCenterBuyDeploy = GUI.BeginScrollView(inner, _scrollCenterBuyDeploy, new Rect(0f, 0f, cw, contentH));
+            GUILayout.BeginArea(new Rect(0f, 0f, cw, contentH));
+
+            Rect hexRowRect = GUILayoutUtility.GetRect(cw, hexRowH);
+            {
+                Color prevRow = GUI.color;
+                GUI.color = new Color(0.07f, 0.08f, 0.1f, 1f);
+                GUI.DrawTexture(hexRowRect, Texture2D.whiteTexture);
+                GUI.color = prevRow;
+            }
+
+            DrawHexModalTopRow(hexRowRect, player, sel);
+
+            var occHdr = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft
+            };
+            GUILayout.Label("Occupying forces:", occHdr);
+            GUILayout.Space(4f);
+
+            DrawHexModalCreatureGrid2Rows3Cols(sel, player, cw, creatureRowH, creatureRowGap);
+
+            if (showShop)
+            {
+                GUILayout.Space(18f);
+                var depHdr = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 13,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft
+                };
+                GUILayout.Label("DEPLOY UNITS", depHdr);
+                GUILayout.Space(10f);
+                Rect gridR = GUILayoutUtility.GetRect(cw, buyH);
+                DrawBuyUnitGrid(gridR.x, gridR.y, gridR.width, shopColumns, nameBoxH, shopIconSz, iconRowH, costGap,
+                    rowGap, 12, true);
+
+                GUILayout.Space(12f);
+                GUILayout.Label("Deployment Energize", new GUIStyle(GUI.skin.box)
+                {
+                    fontSize = 12,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft
+                });
+                if (Game.AnyMovementOccurredThisTurn)
+                    GUILayout.Label("(Deployment locked after any movement this turn)");
+                foreach (var g in player.DeployEnergize.GroupBy(x => x).OrderBy(x => x.Key.ToString()))
+                {
+                    var id = g.Key;
+                    int n = g.Count();
+                    string note = id == EnergizeDeploymentId.FreeHuman &&
+                                  !Game.CanDeployToStartingHomeTile(player, sel)
+                        ? " [select home hex]"
+                        : "";
+                    if (Game.AnyMovementOccurredThisTurn)
+                        GUI.enabled = false;
+                    if (GUILayout.Button(EnergizeDeploymentCatalog.GetName(id) + " x" + n + note))
+                        Game.TryPlayDeploymentEnergize(id, sel);
+                    GUI.enabled = true;
+                }
+
+                if (player.DeployEnergize == null || player.DeployEnergize.Count == 0)
+                    GUILayout.Label("(No deployment cards)");
+            }
+
+            GUILayout.EndArea();
+            GUI.EndScrollView();
+        }
+
+        void DrawHexModalTopRow(Rect row, PlayerState player, BoardTile tile)
+        {
+            if (tile == null)
+                return;
+
+            TileDefinition def = Game.Config != null ? Game.Config.GetTile(tile.Type) : null;
+            Color fill = def != null ? def.Color : new Color(0.45f, 0.45f, 0.48f);
+            Color stroke = new Color(fill.r * 0.55f, fill.g * 0.55f, fill.b * 0.55f, 1f);
+
+            const float gapMid = 6f;
+            float rightColW = Mathf.Clamp(row.width * 0.22f, 68f, 100f);
+            float hexSide = Mathf.Min(row.height - 10f, 96f);
+            float leftColW = hexSide + 10f;
+            float centerW = row.width - leftColW - rightColW - gapMid * 2f;
+            if (centerW < 64f)
+            {
+                hexSide = Mathf.Max(52f, hexSide - (64f - centerW));
+                hexSide = Mathf.Min(hexSide, row.height - 10f);
+                leftColW = hexSide + 10f;
+                centerW = row.width - leftColW - rightColW - gapMid * 2f;
+            }
+
+            centerW = Mathf.Max(48f, centerW);
+            var hexR = new Rect(row.x + 4f, row.y + (row.height - hexSide) * 0.5f, hexSide, hexSide);
+            DrawModalHexPreview(hexR, fill, stroke);
+
+            float centerX = row.x + leftColW + gapMid;
+            var centerRect = new Rect(centerX, row.y + 4f, centerW, row.height - 8f);
+            float rightX = centerX + centerW + gapMid;
+            var rightRect = new Rect(rightX, row.y + 4f, rightColW, row.height - 8f);
+
+            string tileName = TileTypeDisplayName(tile.Type);
+            string meta = HexModalOwnerMetaLine(player, tile);
+
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true,
+                clipping = TextClipping.Clip
+            };
+            var subStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 9,
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true,
+                normal = { textColor = new Color(0.78f, 0.8f, 0.88f) }
+            };
+            var rubSmall = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 9,
+                alignment = TextAnchor.UpperRight,
+                wordWrap = false,
+                clipping = TextClipping.Clip
+            };
+            var numStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 17,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleRight,
+                clipping = TextClipping.Clip
+            };
+
+            int yield = tile.ExtraMineYield;
+            string yieldText = yield > 0 ? yield.ToString() : "—";
+            var rubGui = GetRubiumGui();
+
+            const float padY = 2f;
+            float yTop = centerRect.y + padY;
+            float yBottom = Mathf.Min(centerRect.yMax, rightRect.yMax) - padY;
+
+            float titleH = titleStyle.CalcHeight(new GUIContent(tileName), centerRect.width);
+            titleH = Mathf.Max(titleH, 17f);
+            float rubHeadH = rubSmall.CalcHeight(new GUIContent("Rubium / turn"), rightRect.width);
+            rubHeadH = Mathf.Max(rubHeadH, 14f);
+            float row1H = Mathf.Max(titleH, rubHeadH);
+
+            GUI.Label(new Rect(centerRect.x, yTop, centerRect.width, row1H), tileName, titleStyle);
+            GUI.Label(new Rect(rightRect.x, yTop, rightRect.width, row1H), "Rubium / turn", rubSmall);
+
+            float y2 = yTop + row1H + 3f;
+            float subH = subStyle.CalcHeight(new GUIContent(meta), centerRect.width);
+            float iconH = 20f;
+            float numW = Mathf.Min(numStyle.CalcSize(new GUIContent(yieldText)).x + 4f, rightRect.width * 0.5f);
+            float numH = numStyle.CalcHeight(new GUIContent(yieldText), numW);
+            numH = Mathf.Max(numH, 20f);
+            float iconDrawW = rubGui.IsEmpty ? 0f : iconH * rubGui.AspectRatio;
+            float gapIconNum = iconDrawW > 0f ? 6f : 0f;
+            float bundleW = iconDrawW + gapIconNum + numW;
+            bundleW = Mathf.Min(bundleW, rightRect.width);
+            float iconRowH = Mathf.Max(iconH, numH);
+            float rightBlockH = Mathf.Max(subH, iconRowH);
+            rightBlockH = Mathf.Min(rightBlockH, Mathf.Max(0f, yBottom - y2));
+
+            GUI.Label(new Rect(centerRect.x, y2, centerRect.width, rightBlockH), meta, subStyle);
+
+            float startX = rightRect.x + rightRect.width - bundleW;
+            startX = Mathf.Max(rightRect.x, startX);
+            float iconNumY = y2 + (rightBlockH - iconRowH) * 0.5f;
+            float midY = iconNumY + iconRowH * 0.5f;
+            if (!rubGui.IsEmpty)
+                rubGui.Draw(startX, midY - iconH * 0.5f, iconH);
+            Color prevC = GUI.color;
+            if (yield <= 0)
+                GUI.color = new Color(0.55f, 0.55f, 0.58f);
+            GUI.Label(new Rect(startX + iconDrawW + gapIconNum, midY - numH * 0.5f, numW, numH), yieldText,
+                numStyle);
+            GUI.color = prevC;
+        }
+
+        static string TileTypeDisplayName(TileType t)
+        {
+            return t switch
+            {
+                TileType.HomeBase => "Home base",
+                TileType.CrystalField => "Crystal field",
+                TileType.Rock => "Rock",
+                TileType.Plains => "Plains",
+                TileType.Forest => "Forest",
+                TileType.Lava => "Lava",
+                TileType.Monolith => "Monolith",
+                _ => t.ToString()
+            };
+        }
+
+        void DrawModalHexPreview(Rect r, Color fill, Color stroke)
+        {
+            var mask = HexModalSilhouetteMask();
+            if (mask == null)
+            {
+                DrawTintedRect(r, fill);
+                return;
+            }
+
+            const float strokePx = 3f;
+            Color p = GUI.color;
+            GUI.color = stroke;
+            GUI.DrawTexture(
+                new Rect(r.x - strokePx, r.y - strokePx, r.width + strokePx * 2f, r.height + strokePx * 2f),
+                mask, ScaleMode.StretchToFill);
+            GUI.color = fill;
+            GUI.DrawTexture(r, mask, ScaleMode.StretchToFill);
+            GUI.color = p;
+        }
+
+        Texture2D HexModalSilhouetteMask()
+        {
+            if (_hexModalSilhouetteMask != null)
+                return _hexModalSilhouetteMask;
+
+            const int n = 128;
+            var t = new Texture2D(n, n, TextureFormat.RGBA32, false);
+            float cx = (n - 1) * 0.5f;
+            float cy = (n - 1) * 0.5f;
+            float R = n * 0.42f;
+            for (int y = 0; y < n; y++)
+            {
+                for (int x = 0; x < n; x++)
+                {
+                    bool inside = PointInConvexPointyHex(x - cx, y - cy, R);
+                    t.SetPixel(x, y, inside ? Color.white : Color.clear);
+                }
+            }
+
+            t.Apply();
+            t.wrapMode = TextureWrapMode.Clamp;
+            t.filterMode = FilterMode.Bilinear;
+            _hexModalSilhouetteMask = t;
+            return _hexModalSilhouetteMask;
+        }
+
+        static bool PointInConvexPointyHex(float px, float py, float rad)
+        {
+            Vector2 p = new Vector2(px, py);
+            Vector2[] v = new Vector2[6];
+            for (int i = 0; i < 6; i++)
+            {
+                float a = Mathf.Deg2Rad * (60f * i + 30f);
+                v[i] = new Vector2(rad * Mathf.Cos(a), rad * Mathf.Sin(a));
+            }
+
+            for (int i = 0; i < 6; i++)
+            {
+                Vector2 a = v[i];
+                Vector2 b = v[(i + 1) % 6];
+                float cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+                if (cross < 0f)
+                    return false;
+            }
+
+            return true;
+        }
+
+        string HexModalOwnerMetaLine(PlayerState player, BoardTile tile)
+        {
+            bool hasAnyUnit = false;
+            bool hasOtherOwner = false;
+            int? soleOwnerIndex = null;
+            foreach (var unit in FindObjectsOfType<UnitInstance>())
+            {
+                if (unit.Tile != tile)
+                    continue;
+                hasAnyUnit = true;
+                if (soleOwnerIndex == null)
+                    soleOwnerIndex = unit.Owner.PlayerIndex;
+                else if (soleOwnerIndex != unit.Owner.PlayerIndex)
+                    hasOtherOwner = true;
+            }
+
+            if (hasAnyUnit && hasOtherOwner)
+                return "CONTESTED";
+            if (tile.Owner != null)
+                return "Owner P" + (tile.Owner.PlayerIndex + 1) + "  ·  (" + tile.Q + "," + tile.R + ")";
+            return "Unowned  ·  (" + tile.Q + "," + tile.R + ")";
+        }
+
+        void DrawHexModalCreatureGrid2Rows3Cols(BoardTile tile, PlayerState hudPlayer, float width, float rowH,
+            float rowGap)
+        {
+            var types = new[]
+            {
+                UnitType.Human, UnitType.Fungoid, UnitType.Crystalline,
+                UnitType.RockStrider, UnitType.LavaLeaper, UnitType.RubiumDragon
+            };
+
+            var countByType = new Dictionary<UnitType, int>();
+            foreach (var ut in types)
+                countByType[ut] = 0;
+
+            foreach (var unit in FindObjectsOfType<UnitInstance>())
+            {
+                if (unit == null || unit.Tile != tile)
+                    continue;
+                var t = unit.Definition.Type;
+                if (countByType.ContainsKey(t))
+                    countByType[t]++;
+            }
+
+            const float gap = 4f;
+            float cellW = (width - gap * 2f) / 3f;
+
+            for (int row = 0; row < 2; row++)
+            {
+                GUILayout.BeginHorizontal();
+                for (int col = 0; col < 3; col++)
+                {
+                    int i = row * 3 + col;
+                    var ut = types[i];
+                    int n = countByType[ut];
+                    PlayerState tintOwner = FirstOwnerOfUnitTypeOnTile(tile, ut, hudPlayer);
+                    Rect cell = GUILayoutUtility.GetRect(cellW, rowH, GUILayout.Width(cellW), GUILayout.Height(rowH));
+                    DrawHexModalOccupyingForceCell(cell, ut, n, tintOwner);
+                }
+
+                GUILayout.EndHorizontal();
+                if (row == 0)
+                    GUILayout.Space(rowGap);
+            }
+        }
+
+        PlayerState FirstOwnerOfUnitTypeOnTile(BoardTile tile, UnitType type, PlayerState fallback)
+        {
+            foreach (var unit in FindObjectsOfType<UnitInstance>())
+            {
+                if (unit != null && unit.Tile == tile && unit.Definition.Type == type)
+                    return unit.Owner;
+            }
+
+            return fallback;
+        }
+
+        void DrawHexModalOccupyingForceCell(Rect cell, UnitType type, int count, PlayerState tintOwner)
+        {
+            const float padX = 2f;
+            const float padY = 2f;
+            float iconSz = Mathf.Min(cell.height - padY * 2f, cell.width * 0.38f);
+            iconSz = Mathf.Max(22f, iconSz);
+            var iconR = new Rect(cell.x + padX, cell.y + (cell.height - iconSz) * 0.5f, iconSz, iconSz);
+            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, tintOwner));
+
+            var countStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip
+            };
+            float countX = iconR.xMax + 4f;
+            var countRect = new Rect(countX, cell.y + padY, cell.xMax - countX - padX, cell.height - padY * 2f);
+            Color p = GUI.color;
+            if (count <= 0)
+                GUI.color = new Color(0.55f, 0.55f, 0.58f);
+            GUI.Label(countRect, "×" + count, countStyle);
+            GUI.color = p;
+        }
+
         void DrawHandPileModalBattle(Rect content, PlayerState player)
         {
             var battleGroups = player.BattleEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
@@ -1249,7 +1672,7 @@ namespace NexusGame
                 return "Dragon";
             if (Game.BattlePhaseBlockingPlay || Game.PendingBattleArrangement || Game.ActiveBattleHex != null)
                 return "Battle";
-            if (_showBuyMenu)
+            if (_showCenterBuyModal)
                 return "Deployment";
             // In this implementation, deployment purchases/cards are available during movement window.
             if (player != null && !Game.IsAiControlled(player))
@@ -2051,15 +2474,13 @@ namespace NexusGame
             GUI.color = prev;
         }
 
-        void DrawBuyUnitGrid(float x0, float y0, float width)
+        void DrawBuyUnitGrid(float x0, float y0, float width, int columns, float nameBoxH, float shopIconSize,
+            float iconRowH, float costGap, float rowGap, int nameFontSize, bool largeShopCards = false)
         {
-            const float colGap = 8f;
-            const float nameBoxH = 72f;
-            const float costGap = 4f;
-            const float iconRowH = 22f;
-            const float rowGap = 12f;
-            float cellW = (width - colGap * 2f) / 3f;
-            float rowStride = nameBoxH + costGap + iconRowH + rowGap;
+            float colGap = largeShopCards ? 14f : (columns >= 2 ? 12f : 8f);
+            float cellW = (width - colGap * (columns - 1f)) / columns;
+            float cardH = nameBoxH + costGap + iconRowH;
+            float rowStride = cardH + rowGap;
 
             var items = new[]
             {
@@ -2073,17 +2494,18 @@ namespace NexusGame
 
             for (int i = 0; i < items.Length; i++)
             {
-                int col = i % 3;
-                int row = i / 3;
+                int col = i % columns;
+                int row = i / columns;
                 float cx = x0 + col * (cellW + colGap);
                 float cy = y0 + row * rowStride;
-                var nameRect = new Rect(cx, cy, cellW, nameBoxH);
-                DrawBuyUnitCell(nameRect, items[i].Item2, items[i].Item3, items[i].Item1, costGap, iconRowH);
+                var cardRect = new Rect(cx, cy, cellW, cardH);
+                DrawBuyUnitCell(cardRect, items[i].Item2, items[i].Item3, items[i].Item1, costGap, iconRowH,
+                    shopIconSize, nameFontSize, largeShopCards);
             }
         }
 
-        void DrawBuyUnitCell(Rect nameRect, UnitType type, int baseCost, string displayName, float costGap,
-            float iconRowH)
+        void DrawBuyUnitCell(Rect cardRect, UnitType type, int baseCost, string displayName, float costGap,
+            float iconRowH, float shopIconSize = 34f, int nameFontSize = 10, bool largeShopCard = false)
         {
             var player = Game.CurrentPlayer;
             int maxOff = Mathf.Max(0, baseCost - 1);
@@ -2095,50 +2517,68 @@ namespace NexusGame
             {
                 alignment = TextAnchor.MiddleCenter,
                 wordWrap = true,
-                fontSize = 10,
+                fontSize = nameFontSize,
                 fontStyle = FontStyle.Bold,
                 clipping = TextClipping.Clip
             };
+
+            float pad = largeShopCard ? 10f : 2f;
+            float barH = largeShopCard ? iconRowH + 8f : iconRowH;
+            float costY = largeShopCard ? cardRect.yMax - barH : cardRect.yMax - iconRowH;
+            float bodyBottom = largeShopCard ? costY : costY - costGap;
+            float iconTop = cardRect.y + pad;
+            float iconUse = Mathf.Min(shopIconSize, (bodyBottom - iconTop) * (largeShopCard ? 0.72f : 0.65f));
+            iconUse = Mathf.Max(22f, iconUse);
 
             Color prev = GUI.color;
             if (!canAfford)
                 GUI.color = new Color(0.55f, 0.55f, 0.58f);
 
-            GUI.Box(nameRect, "");
-            const float shopIcon = 34f;
+            if (largeShopCard)
+            {
+                DrawTintedRect(cardRect, new Color(0.09f, 0.1f, 0.14f, 0.96f));
+                DrawOutlineRect(cardRect, new Color(0.88f, 0.78f, 0.28f, 0.55f), 1.5f);
+                var bar = new Rect(cardRect.x + 2f, costY, cardRect.width - 4f, barH - 1f);
+                DrawTintedRect(bar, new Color(0.05f, 0.06f, 0.09f, 0.92f));
+            }
+            else
+                GUI.Box(cardRect, "");
+
             var shopIconRect = new Rect(
-                nameRect.x + (nameRect.width - shopIcon) * 0.5f,
-                nameRect.y + 2f,
-                shopIcon,
-                shopIcon);
+                cardRect.x + (cardRect.width - iconUse) * 0.5f,
+                iconTop,
+                iconUse,
+                iconUse);
             DrawUnitMiniIcon(shopIconRect, type, TintedIconOwnerForUnitOnSide(type, player));
-            var nameLabelRect = new Rect(nameRect.x, nameRect.y + shopIcon + 4f, nameRect.width,
-                Mathf.Max(18f, nameRect.height - shopIcon - 6f));
+
+            float nameTop = shopIconRect.yMax + (largeShopCard ? 6f : 4f);
+            float nameH = Mathf.Max(16f, bodyBottom - nameTop - (largeShopCard ? 4f : costGap));
+            var nameLabelRect = new Rect(cardRect.x + pad, nameTop, cardRect.width - pad * 2f, nameH);
             GUI.Label(nameLabelRect, displayName, nameStyle);
-            // Invisible hit target so unit art isn’t covered by default button chrome.
-            if (GUI.Button(nameRect, GUIContent.none, GUIStyle.none) && canAfford)
+
+            if (GUI.Button(cardRect, GUIContent.none, GUIStyle.none) && canAfford)
                 TryBuyUnit(type, player, use, pay);
 
             GUI.color = prev;
 
-            float costY = nameRect.yMax + costGap;
             var rub = GetRubiumGui();
-            float iconH = 18f;
-            float iconW = rub.IsEmpty ? 0f : iconH * rub.AspectRatio;
-            float textW = 36f;
+            float rubH = largeShopCard ? Mathf.Min(22f, iconRowH) : 18f;
+            float iconW = rub.IsEmpty ? 0f : rubH * rub.AspectRatio;
+            float textW = largeShopCard ? 44f : 36f;
             float rowW = iconW + 6f + textW;
-            float startX = nameRect.x + (nameRect.width - rowW) * 0.5f;
+            float startX = cardRect.x + (cardRect.width - rowW) * 0.5f;
+            float costLineY = largeShopCard ? costY + (barH - 1f - rubH) * 0.5f : costY;
             if (!rub.IsEmpty)
-                rub.Draw(startX, costY + 1f, iconH);
+                rub.Draw(startX, costLineY + 1f, rubH);
             var costStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 13,
+                fontSize = largeShopCard ? 15 : 13,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft
             };
             if (!canAfford)
                 GUI.color = new Color(0.55f, 0.55f, 0.58f);
-            GUI.Label(new Rect(startX + iconW + 6f, costY, textW, iconRowH), pay.ToString(), costStyle);
+            GUI.Label(new Rect(startX + iconW + 6f, costLineY, textW, iconRowH), pay.ToString(), costStyle);
             GUI.color = prev;
         }
 
@@ -2400,6 +2840,32 @@ namespace NexusGame
             GUI.Label(new Rect(tx, r.y + 14f, tw, 18f), UnitTypeAbbrev(type) + "×" + count, s1);
         }
 
+        void DrawTileUnitReadonlyChipLarge(Rect r, string ownerPrefix, UnitType type, int count, PlayerState stackOwner)
+        {
+            DrawTintedRect(new Rect(r.x, r.y, r.width, r.height), new Color(0.22f, 0.22f, 0.28f));
+            GUI.Box(r, "");
+            float iconSz = Mathf.Min(36f, r.height - 8f);
+            var iconR = new Rect(r.x + 6f, r.y + (r.height - iconSz) * 0.5f, iconSz, iconSz);
+            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, stackOwner));
+            float tx = iconR.xMax + 10f;
+            float tw = Mathf.Max(40f, r.xMax - tx - 6f);
+            var s0 = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 10,
+                alignment = TextAnchor.MiddleLeft,
+                wordWrap = false
+            };
+            var s1 = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                wordWrap = false
+            };
+            GUI.Label(new Rect(tx, r.y + 6f, tw, 16f), ownerPrefix, s0);
+            GUI.Label(new Rect(tx, r.y + 22f, tw, 22f), UnitUiName(type) + " ×" + count, s1);
+        }
+
         PlayerState BattleStepTintedUnitIconOwner()
         {
             if (Game == null || !UsesPerPlayerTint(Game.ActiveBattleStepUnitType))
@@ -2410,8 +2876,10 @@ namespace NexusGame
             return Game.ActiveBattleAttacker;
         }
 
+        /// <summary>Units with seat-colored sprites (Human Red, Leaper Blue, etc.).</summary>
         static bool UsesPerPlayerTint(UnitType t) =>
-            t == UnitType.RubiumDragon || t == UnitType.RockStrider || t == UnitType.Fungoid;
+            t == UnitType.Human || t == UnitType.Fungoid || t == UnitType.Crystalline ||
+            t == UnitType.RockStrider || t == UnitType.LavaLeaper || t == UnitType.RubiumDragon;
 
         static PlayerState TintedIconOwnerForUnitOnSide(UnitType t, PlayerState sidePlayer) =>
             UsesPerPlayerTint(t) ? sidePlayer : null;
@@ -2421,24 +2889,44 @@ namespace NexusGame
 
         void DrawUnitMiniIcon(Rect r, UnitType type, PlayerState ownerForTint = null)
         {
-            NexusGuiImage icon;
-            if (type == UnitType.RubiumDragon && ownerForTint != null)
-                icon = GetDragonUnitIcon(ownerForTint);
-            else if (type == UnitType.RockStrider && ownerForTint != null)
-                icon = GetRockStriderUnitIcon(ownerForTint);
-            else if (type == UnitType.Fungoid && ownerForTint != null)
-                icon = GetFungoidUnitIcon(ownerForTint);
-            else
-                icon = GetUnitIcon(type);
+            var icon = UsesPerPlayerTint(type) && ownerForTint != null
+                ? IconForUnitWithOwner(type, ownerForTint)
+                : GetUnitIcon(type);
             if (!icon.IsEmpty)
             {
                 icon.Draw(r);
-                GUI.Box(r, GUIContent.none);
                 return;
             }
 
             DrawTintedRect(r, new Color(0.85f, 0.85f, 0.9f));
-            GUI.Box(r, UnitUiName(type).Substring(0, 1));
+            var letterStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
+                clipping = TextClipping.Clip
+            };
+            GUI.Label(r, UnitUiName(type).Substring(0, 1), letterStyle);
+        }
+
+        NexusGuiImage IconForUnitWithOwner(UnitType type, PlayerState owner)
+        {
+            switch (type)
+            {
+                case UnitType.RubiumDragon:
+                    return GetDragonUnitIcon(owner);
+                case UnitType.RockStrider:
+                    return GetRockStriderUnitIcon(owner);
+                case UnitType.Fungoid:
+                    return GetFungoidUnitIcon(owner);
+                case UnitType.Human:
+                    return GetHumanUnitIcon(owner);
+                case UnitType.LavaLeaper:
+                    return GetLavaLeaperUnitIcon(owner);
+                case UnitType.Crystalline:
+                    return GetCrystallineUnitIcon(owner);
+                default:
+                    return GetUnitIcon(type);
+            }
         }
 
         NexusGuiImage GetDragonUnitIcon(PlayerState owner)
@@ -2483,6 +2971,51 @@ namespace NexusGame
             if (img.IsEmpty)
                 img = GetUnitIcon(UnitType.Fungoid);
             _fungoidIconByPlayerIndex[owner.PlayerIndex] = img;
+            return img;
+        }
+
+        NexusGuiImage GetHumanUnitIcon(PlayerState owner)
+        {
+            if (owner == null)
+                return GetUnitIcon(UnitType.Human);
+
+            if (_humanIconByPlayerIndex.TryGetValue(owner.PlayerIndex, out var cached))
+                return cached;
+
+            var img = NexusGuiArt.LoadHumanForPlayer(owner);
+            if (img.IsEmpty)
+                img = GetUnitIcon(UnitType.Human);
+            _humanIconByPlayerIndex[owner.PlayerIndex] = img;
+            return img;
+        }
+
+        NexusGuiImage GetLavaLeaperUnitIcon(PlayerState owner)
+        {
+            if (owner == null)
+                return GetUnitIcon(UnitType.LavaLeaper);
+
+            if (_lavaLeaperIconByPlayerIndex.TryGetValue(owner.PlayerIndex, out var cached))
+                return cached;
+
+            var img = NexusGuiArt.LoadLavaLeaperForPlayer(owner);
+            if (img.IsEmpty)
+                img = GetUnitIcon(UnitType.LavaLeaper);
+            _lavaLeaperIconByPlayerIndex[owner.PlayerIndex] = img;
+            return img;
+        }
+
+        NexusGuiImage GetCrystallineUnitIcon(PlayerState owner)
+        {
+            if (owner == null)
+                return GetUnitIcon(UnitType.Crystalline);
+
+            if (_crystallineIconByPlayerIndex.TryGetValue(owner.PlayerIndex, out var cached))
+                return cached;
+
+            var img = NexusGuiArt.LoadCrystallineForPlayer(owner);
+            if (img.IsEmpty)
+                img = GetUnitIcon(UnitType.Crystalline);
+            _crystallineIconByPlayerIndex[owner.PlayerIndex] = img;
             return img;
         }
 
@@ -2535,8 +3068,7 @@ namespace NexusGame
 
         NexusGuiImage GetUnitIcon(UnitType type)
         {
-            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider && type != UnitType.Fungoid &&
-                _unitIconCache.TryGetValue(type, out var cached))
+            if (!UsesPerPlayerTint(type) && _unitIconCache.TryGetValue(type, out var cached))
                 return cached;
 
             var pathList = new List<string>();
@@ -2548,8 +3080,14 @@ namespace NexusGame
                 loaded = NexusGuiArt.LoadRockStriderLegendIcon();
             if (type == UnitType.Fungoid && loaded.IsEmpty)
                 loaded = NexusGuiArt.LoadFungoidLegendIcon();
+            if (type == UnitType.Human && loaded.IsEmpty)
+                loaded = NexusGuiArt.LoadHumanLegendIcon();
+            if (type == UnitType.LavaLeaper && loaded.IsEmpty)
+                loaded = NexusGuiArt.LoadLavaLeaperLegendIcon();
+            if (type == UnitType.Crystalline && loaded.IsEmpty)
+                loaded = NexusGuiArt.LoadCrystallineLegendIcon();
 
-            if (type != UnitType.RubiumDragon && type != UnitType.RockStrider && type != UnitType.Fungoid)
+            if (!UsesPerPlayerTint(type))
                 _unitIconCache[type] = loaded;
             return loaded;
         }

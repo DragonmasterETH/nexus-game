@@ -460,6 +460,102 @@ namespace NexusGame
                 }
             }
 
+            if (type == UnitType.Human)
+            {
+                var humanArt = NexusGuiArt.LoadHumanForPlayer(owner);
+                if (!humanArt.IsEmpty)
+                {
+                    float hoverY = 0.12f * (Board != null ? Board.HexRadius / 0.7f : 1f);
+                    var humanRootGo = new GameObject(type + "_Unit");
+                    humanRootGo.transform.position = tile.View.transform.position + Vector3.up * hoverY;
+
+                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "HumanArt";
+                    quad.transform.SetParent(humanRootGo.transform, false);
+                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    float hexScale = Board != null ? Board.HexRadius / 0.7f : 1f;
+                    float baseSize = 0.48f * hexScale;
+                    float a = Mathf.Max(0.2f, humanArt.AspectRatio);
+                    quad.transform.localScale = new Vector3(baseSize * Mathf.Min(1f, a), baseSize / Mathf.Max(1f, a),
+                        1f);
+                    Object.Destroy(quad.GetComponent<Collider>());
+
+                    var qrend = quad.GetComponent<Renderer>();
+                    var mat = new Material(Shader.Find("Sprites/Default"));
+                    NexusGuiArt.ApplyImageToMaterial(mat, humanArt, Color.magenta);
+                    qrend.material = mat;
+
+                    var humanInstance = humanRootGo.AddComponent<UnitInstance>();
+                    humanInstance.Initialize(owner, def, tile, hasAlreadyMovedThisTurn);
+                    _unitsByPlayer[owner].Add(humanInstance);
+                    return humanInstance;
+                }
+            }
+
+            if (type == UnitType.LavaLeaper)
+            {
+                var leaperArt = NexusGuiArt.LoadLavaLeaperForPlayer(owner);
+                if (!leaperArt.IsEmpty)
+                {
+                    float hoverY = 0.12f * (Board != null ? Board.HexRadius / 0.7f : 1f);
+                    var leaperRootGo = new GameObject(type + "_Unit");
+                    leaperRootGo.transform.position = tile.View.transform.position + Vector3.up * hoverY;
+
+                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "LeaperArt";
+                    quad.transform.SetParent(leaperRootGo.transform, false);
+                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    float hexScale = Board != null ? Board.HexRadius / 0.7f : 1f;
+                    float baseSize = 0.5f * hexScale;
+                    float a = Mathf.Max(0.2f, leaperArt.AspectRatio);
+                    quad.transform.localScale = new Vector3(baseSize * Mathf.Min(1f, a), baseSize / Mathf.Max(1f, a),
+                        1f);
+                    Object.Destroy(quad.GetComponent<Collider>());
+
+                    var qrend = quad.GetComponent<Renderer>();
+                    var mat = new Material(Shader.Find("Sprites/Default"));
+                    NexusGuiArt.ApplyImageToMaterial(mat, leaperArt, Color.magenta);
+                    qrend.material = mat;
+
+                    var leaperInstance = leaperRootGo.AddComponent<UnitInstance>();
+                    leaperInstance.Initialize(owner, def, tile, hasAlreadyMovedThisTurn);
+                    _unitsByPlayer[owner].Add(leaperInstance);
+                    return leaperInstance;
+                }
+            }
+
+            if (type == UnitType.Crystalline)
+            {
+                var crystalArt = NexusGuiArt.LoadCrystallineForPlayer(owner);
+                if (!crystalArt.IsEmpty)
+                {
+                    float hoverY = 0.12f * (Board != null ? Board.HexRadius / 0.7f : 1f);
+                    var crystalRootGo = new GameObject(type + "_Unit");
+                    crystalRootGo.transform.position = tile.View.transform.position + Vector3.up * hoverY;
+
+                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "CrystalArt";
+                    quad.transform.SetParent(crystalRootGo.transform, false);
+                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    float hexScale = Board != null ? Board.HexRadius / 0.7f : 1f;
+                    float baseSize = 0.48f * hexScale;
+                    float a = Mathf.Max(0.2f, crystalArt.AspectRatio);
+                    quad.transform.localScale = new Vector3(baseSize * Mathf.Min(1f, a), baseSize / Mathf.Max(1f, a),
+                        1f);
+                    Object.Destroy(quad.GetComponent<Collider>());
+
+                    var qrend = quad.GetComponent<Renderer>();
+                    var mat = new Material(Shader.Find("Sprites/Default"));
+                    NexusGuiArt.ApplyImageToMaterial(mat, crystalArt, Color.magenta);
+                    qrend.material = mat;
+
+                    var crystalInstance = crystalRootGo.AddComponent<UnitInstance>();
+                    crystalInstance.Initialize(owner, def, tile, hasAlreadyMovedThisTurn);
+                    _unitsByPlayer[owner].Add(crystalInstance);
+                    return crystalInstance;
+                }
+            }
+
             // Distinct piece shapes per UnitType (so all units are visually unique).
             PrimitiveType prim;
             Quaternion rot = Quaternion.identity;
@@ -808,6 +904,86 @@ namespace NexusGame
                     BeginBattleArrangement(player);
             }
 
+            MaybePanCameraTowardCurrentPlayerHomes(player);
+        }
+
+        /// <summary>
+        /// Ease the board camera toward this player's front line: a hex they occupy that is closest to the board center (monolith).
+        /// Falls back to home-cluster centroid if they have no units on the board.
+        /// </summary>
+        void MaybePanCameraTowardCurrentPlayerHomes(PlayerState player)
+        {
+            if (player == null || Players == null || Players.Count < 2 || Board == null || IsGameOver)
+                return;
+
+            var cam = FindObjectOfType<BoardCameraPanZoom>();
+            if (cam == null)
+                return;
+
+            if (!TryGetSpectateFocusWorld(player, out Vector3 focus))
+                return;
+
+            cam.BeginSmoothLookTarget(focus);
+        }
+
+        bool TryGetSpectateFocusWorld(PlayerState player, out Vector3 worldOnGround)
+        {
+            worldOnGround = default;
+            BoardTile bestTile = null;
+            int bestDist = int.MaxValue;
+
+            foreach (var u in FindObjectsOfType<UnitInstance>())
+            {
+                if (u == null || u.Tile == null || u.Owner != player)
+                    continue;
+                var t = u.Tile;
+                int d = AxialDistanceToCenter(t.Q, t.R);
+                if (d < bestDist || (d == bestDist && IsTileEarlierInTieBreak(t, bestTile)))
+                {
+                    bestDist = d;
+                    bestTile = t;
+                }
+            }
+
+            if (bestTile != null)
+            {
+                worldOnGround = bestTile.View != null
+                    ? bestTile.View.transform.position
+                    : Board.AxialToWorld(bestTile.Q, bestTile.R);
+                return true;
+            }
+
+            Vector3 sum = Vector3.zero;
+            int n = 0;
+            foreach (var t in Board.AllTiles)
+            {
+                if (t.Type != TileType.HomeBase || t.HomeBaseStartingOwnerIndex != player.PlayerIndex)
+                    continue;
+                sum += t.View != null ? t.View.transform.position : Board.AxialToWorld(t.Q, t.R);
+                n++;
+            }
+
+            if (n == 0)
+                return false;
+            worldOnGround = sum / n;
+            return true;
+        }
+
+        static int AxialDistanceToCenter(int q, int r)
+        {
+            int dq = q;
+            int dr = r;
+            int ds = -(q + r);
+            return (Mathf.Abs(dq) + Mathf.Abs(dr) + Mathf.Abs(ds)) / 2;
+        }
+
+        static bool IsTileEarlierInTieBreak(BoardTile a, BoardTile b)
+        {
+            if (b == null)
+                return true;
+            if (a.Q != b.Q)
+                return a.Q < b.Q;
+            return a.R < b.R;
         }
 
         /// <summary>HUD: take pending mine→bank rubium flights (cleared after call). Only populated for human turns with income hexes.</summary>

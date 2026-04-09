@@ -7,7 +7,7 @@ namespace NexusGame
         {
         public Camera MainCamera;
         public GameController Game;
-        [Tooltip("Used to ignore board taps while the IMGUI buy menu is open.")]
+        [Tooltip("Used for the centered deploy modal: block drags on the panel, close on outside tap, double-tap open.")]
         public DemoHUD Hud;
 
         [Header("Debug")]
@@ -36,6 +36,14 @@ namespace NexusGame
             UnitInstance _dragStartUnit;
 
             BoardCameraPanZoom _boardCam;
+
+            float _lastTapTime = -999f;
+            Vector2 _lastTapScreenPos;
+            int _lastTapQ;
+            int _lastTapR;
+            bool _lastTapValid;
+            const float DoubleTapMaxGapSeconds = 0.42f;
+            const float DoubleTapMaxMovePixels = 42f;
 
             public BoardTile SelectedTile => _selectedTile;
             public System.Collections.Generic.IReadOnlyDictionary<UnitType, int> SelectedMoveCounts => _moveSelection;
@@ -203,6 +211,8 @@ namespace NexusGame
                 return;
             if (MainCamera == null)
                 return;
+            if (Hud != null && Hud.IsCenterBuyModalOpen)
+                return;
             if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
                 return;
 
@@ -229,6 +239,8 @@ namespace NexusGame
 
         void TryDragMove(Vector2 screenPos)
         {
+            if (Hud != null && Hud.IsCenterBuyModalOpen)
+                return;
             if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
                 return;
             var target = ResolveTileFromPointer(screenPos);
@@ -302,8 +314,11 @@ namespace NexusGame
                 return;
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
                 return;
-            if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
+            if (Hud != null && Hud.IsCenterBuyModalOpen)
+            {
+                Hud.HandleCenterBuyModalTap(screenPos);
                 return;
+            }
 
             var ray = MainCamera.ScreenPointToRay(screenPos);
             var hits = Physics.RaycastAll(ray, 100f);
@@ -358,6 +373,21 @@ namespace NexusGame
             if (DebugClicks)
                 Debug.Log($"CLICK RESOLVED: tile=({clickedTile.Q},{clickedTile.R}) type={clickedTile.Type}");
 
+            bool isDoubleTap = _lastTapValid &&
+                               _lastTapQ == clickedTile.Q &&
+                               _lastTapR == clickedTile.R &&
+                               (Time.time - _lastTapTime) <= DoubleTapMaxGapSeconds &&
+                               Vector2.Distance(screenPos, _lastTapScreenPos) <= DoubleTapMaxMovePixels;
+
+            if (Game != null && Game.CurrentPlayer != null && isDoubleTap)
+            {
+                SetSelectedTile(clickedTile);
+                if (Hud != null)
+                    Hud.OpenCenterBuyModal();
+                RecordLastTapForDoubleTap(clickedTile, screenPos);
+                return;
+            }
+
             // If no source tile is selected yet, or we clicked the same tile, toggle selection/popup.
             if (_selectedTile == null || clickedTile == _selectedTile)
             {
@@ -369,6 +399,8 @@ namespace NexusGame
                 {
                     SetSelectedTile(clickedTile);
                 }
+
+                RecordLastTapForDoubleTap(clickedTile, screenPos);
                 return;
             }
 
@@ -379,7 +411,19 @@ namespace NexusGame
                 TryMoveGroupTo(clickedTile);
                 // After moving, focus selection on the destination so the popup reflects new contents.
                 SetSelectedTile(clickedTile);
+                RecordLastTapForDoubleTap(clickedTile, screenPos);
             }
+        }
+
+        void RecordLastTapForDoubleTap(BoardTile tile, Vector2 screenPos)
+        {
+            if (tile == null)
+                return;
+            _lastTapTime = Time.time;
+            _lastTapScreenPos = screenPos;
+            _lastTapQ = tile.Q;
+            _lastTapR = tile.R;
+            _lastTapValid = true;
         }
 
         [Tooltip("How much the hex fill darkens while selected (0 = none, 1 = black).")]
