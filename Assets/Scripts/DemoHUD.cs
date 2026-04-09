@@ -72,6 +72,38 @@ namespace NexusGame
             var gui = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
             return GetCenterBuyModalPanelGuiRect().Contains(gui);
         }
+
+        /// <summary>
+        /// True when the pointer is over HUD UI that should block board tile taps/drags.
+        /// Uses broad gameplay-safe regions to prevent click-through between IMGUI layers.
+        /// </summary>
+        public bool ScreenPointOverlapsBlockingHud(Vector2 screenPosition)
+        {
+            var gui = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
+
+            // Any overlay/modal captures board input.
+            if (_showCenterBuyModal || _showQuickRef || _showSettingsMenu || _showMyEnergizeHelp || _showEndGameStats)
+                return true;
+            if (_handPileViewer != HandPileViewerKind.None)
+                return true;
+
+            // Top strip and icon row.
+            const float topBarY = 6f;
+            const float topBarH = 52f;
+            if (new Rect(0f, topBarY, Screen.width, topBarH).Contains(gui))
+                return true;
+
+            // Bottom card/tile panel area (plus small pad above).
+            if (_lastCardBarY > 0f && gui.y >= _lastCardBarY - 4f)
+                return true;
+
+            // Dragon strike panel is interactive and should block board taps.
+            if (Game != null && Game.DragonPhase != null &&
+                new Rect(20f, Screen.height - 200f, Screen.width - 40f, 190f).Contains(gui))
+                return true;
+
+            return false;
+        }
         bool _showQuickRef;
         bool _showSettingsMenu;
         int _quickRefTab; // 0 = rules, 1 = units
@@ -584,6 +616,10 @@ namespace NexusGame
             const float iconBtn = 44f;
             float iconY = topBarY + (topBarH - iconBtn) * 0.5f;
             float iconRight = Screen.width - 12f - iconBtn * 2f - 10f;
+            bool blockTopIcons = _showCenterBuyModal;
+            bool prevEnabled = GUI.enabled;
+            if (blockTopIcons)
+                GUI.enabled = false;
             if (GUI.Button(new Rect(iconRight, iconY, iconBtn, iconBtn), "\u2139", _topIconButtonStyle))
             {
                 _showSettingsMenu = false;
@@ -595,6 +631,7 @@ namespace NexusGame
                 _showQuickRef = false;
                 _showSettingsMenu = true;
             }
+            GUI.enabled = prevEnabled;
 
             float metaY = topBarY + topBarH + 6f;
             float metaW = Mathf.Min(400f, Screen.width - 20f);

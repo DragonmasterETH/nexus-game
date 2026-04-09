@@ -538,6 +538,34 @@ namespace NexusGame
 
             highlight.SetActive(false);
 
+            // Move destination highlight: green ring used by movement UI (initially hidden).
+            var moveHighlight = new GameObject("MoveHighlight");
+            moveHighlight.transform.SetParent(go.transform, worldPositionStays: false);
+            moveHighlight.transform.localPosition = new Vector3(0f, 0.055f, 0f);
+            moveHighlight.transform.localRotation = Quaternion.identity;
+            moveHighlight.transform.localScale = Vector3.one;
+
+            var mlr = moveHighlight.AddComponent<LineRenderer>();
+            mlr.useWorldSpace = false;
+            mlr.positionCount = 7;
+            mlr.loop = true;
+            mlr.widthMultiplier = 0.09f;
+            mlr.sharedMaterial = SelectionLineMaterial();
+            mlr.startColor = mlr.endColor = new Color(0.2f, 0.95f, 0.25f, 1f);
+            mlr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mlr.receiveShadows = false;
+
+            float moveRadius = HexRadius * 1.045f;
+            for (int i = 0; i < 7; i++)
+            {
+                float angle = Mathf.Deg2Rad * (60f * i + 30f);
+                float x = Mathf.Cos(angle) * moveRadius;
+                float z = Mathf.Sin(angle) * moveRadius;
+                mlr.SetPosition(i, new Vector3(x, 0f, z));
+            }
+
+            moveHighlight.SetActive(false);
+
             return go;
         }
 

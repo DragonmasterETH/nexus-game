@@ -22,6 +22,8 @@ namespace NexusGame
                 new System.Collections.Generic.Dictionary<UnitType, int>();
             readonly System.Collections.Generic.HashSet<UnitType> _explicitMoveSelection =
                 new System.Collections.Generic.HashSet<UnitType>();
+            readonly System.Collections.Generic.HashSet<BoardTile> _activeMoveDestinationHighlights =
+                new System.Collections.Generic.HashSet<BoardTile>();
 
             // Drag-to-move support:
             // - If user presses on a movable unit, dragging selects all movable units of that unit type on the source hex.
@@ -105,6 +107,8 @@ namespace NexusGame
                     if (EventSystem.current != null &&
                         EventSystem.current.IsPointerOverGameObject(touch.fingerId))
                         _pendingTap = false;
+                    else if (Hud != null && !Hud.IsCenterBuyModalOpen && Hud.ScreenPointOverlapsBlockingHud(touch.position))
+                        _pendingTap = false;
                     else if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(touch.position))
                         _pendingTap = false;
 
@@ -168,6 +172,8 @@ namespace NexusGame
 
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
                     _pendingTap = false;
+                else if (Hud != null && !Hud.IsCenterBuyModalOpen && Hud.ScreenPointOverlapsBlockingHud(Input.mousePosition))
+                    _pendingTap = false;
                 else if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(Input.mousePosition))
                     _pendingTap = false;
 
@@ -212,6 +218,8 @@ namespace NexusGame
             if (MainCamera == null)
                 return;
             if (Hud != null && Hud.IsCenterBuyModalOpen)
+                return;
+            if (Hud != null && Hud.ScreenPointOverlapsBlockingHud(screenPos))
                 return;
             if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
                 return;
@@ -319,6 +327,8 @@ namespace NexusGame
                 Hud.HandleCenterBuyModalTap(screenPos);
                 return;
             }
+            if (Hud != null && Hud.ScreenPointOverlapsBlockingHud(screenPos))
+                return;
 
             var ray = MainCamera.ScreenPointToRay(screenPos);
             var hits = Physics.RaycastAll(ray, 100f);
@@ -432,6 +442,7 @@ namespace NexusGame
 
         void SetSelectedTile(BoardTile tile)
         {
+            ClearMoveDestinationHighlights();
             if (_selectedTile != null)
             {
                 ApplyHexFillSelectionDim(_selectedTile, false);
@@ -460,6 +471,8 @@ namespace NexusGame
                     }
                 }
             }
+
+            RefreshMoveDestinationHighlights();
         }
 
         /// <summary>Terrain fill only — not outlines, ore chips, or exploration quads.</summary>
@@ -747,6 +760,8 @@ namespace NexusGame
                 _explicitMoveSelection.Add(type);
             else
                 _explicitMoveSelection.Remove(type);
+
+            RefreshMoveDestinationHighlights();
         }
 
         public void SetMoveSelection(UnitType type, int amount)
@@ -772,11 +787,112 @@ namespace NexusGame
                 _explicitMoveSelection.Add(type);
             else
                 _explicitMoveSelection.Remove(type);
+
+            RefreshMoveDestinationHighlights();
         }
 
         public void ClearSelection()
         {
             SetSelectedTile(null);
+        }
+
+        void RefreshMoveDestinationHighlights()
+        {
+            ClearMoveDestinationHighlights();
+
+            if (_selectedTile == null || Game == null || Game.Board == null || Game.CurrentPlayer == null)
+                return;
+
+            var selectedMovers = CollectSelectedMovers();
+            if (selectedMovers.Count == 0)
+                return;
+
+            bool prevSuppress = SuppressMovementDiagnosticLogs;
+            SuppressMovementDiagnosticLogs = true;
+            try
+            {
+                var intersection = new System.Collections.Generic.HashSet<BoardTile>(Game.Board.AllTiles);
+                foreach (var unit in selectedMovers)
+                {
+                    var unitReachable = GetReachableTiles(unit);
+                    intersection.IntersectWith(unitReachable);
+                    if (intersection.Count == 0)
+                        break;
+                }
+
+                intersection.Remove(_selectedTile);
+                foreach (var tile in intersection)
+                    SetMoveHighlight(tile, true);
+            }
+            finally
+            {
+                SuppressMovementDiagnosticLogs = prevSuppress;
+            }
+        }
+
+        System.Collections.Generic.List<UnitInstance> CollectSelectedMovers()
+        {
+            var list = new System.Collections.Generic.List<UnitInstance>();
+            if (_selectedTile == null || Game == null || Game.CurrentPlayer == null)
+                return list;
+
+            var unitsByType = new System.Collections.Generic.Dictionary<UnitType, System.Collections.Generic.List<UnitInstance>>();
+            foreach (var unit in Object.FindObjectsOfType<UnitInstance>())
+            {
+                if (unit == null)
+                    continue;
+                if (unit.Tile != _selectedTile || unit.Owner != Game.CurrentPlayer || unit.HasMovedThisTurn)
+                    continue;
+
+                var type = unit.Definition.Type;
+                if (!unitsByType.TryGetValue(type, out var bucket))
+                {
+                    bucket = new System.Collections.Generic.List<UnitInstance>();
+                    unitsByType[type] = bucket;
+                }
+
+                bucket.Add(unit);
+            }
+
+            foreach (var kvp in _moveSelection)
+            {
+                int wanted = kvp.Value;
+                if (wanted <= 0)
+                    continue;
+                if (!_explicitMoveSelection.Contains(kvp.Key))
+                    continue;
+                if (!unitsByType.TryGetValue(kvp.Key, out var bucket) || bucket.Count == 0)
+                    continue;
+
+                int take = Mathf.Min(wanted, bucket.Count);
+                for (int i = 0; i < take; i++)
+                    list.Add(bucket[i]);
+            }
+
+            return list;
+        }
+
+        void ClearMoveDestinationHighlights()
+        {
+            var toClear = new System.Collections.Generic.List<BoardTile>(_activeMoveDestinationHighlights);
+            foreach (var tile in toClear)
+                SetMoveHighlight(tile, false);
+            _activeMoveDestinationHighlights.Clear();
+        }
+
+        void SetMoveHighlight(BoardTile tile, bool on)
+        {
+            if (tile == null || tile.View == null)
+                return;
+            var tf = tile.View.transform.Find("MoveHighlight");
+            if (tf == null)
+                return;
+
+            tf.gameObject.SetActive(on);
+            if (on)
+                _activeMoveDestinationHighlights.Add(tile);
+            else
+                _activeMoveDestinationHighlights.Remove(tile);
         }
 
         bool IsBattleOverlayBlockingBoardInput()
