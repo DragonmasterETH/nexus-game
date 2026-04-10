@@ -129,11 +129,9 @@ namespace NexusGame
                 ExtraMineYield = 0,
                 ExplorationReward = ExplorationReward.None,
                 ExplorationRevealed = true,
-                Highlight = tileObj.transform.Find("Highlight") != null
-                    ? tileObj.transform.Find("Highlight").gameObject
-                    : null,
                 MineLabel = null
             };
+            BindTileVisualRefs(tile, tileObj);
 
             var proxy = tileObj.AddComponent<TileClickProxy>();
             proxy.Q = q;
@@ -164,11 +162,9 @@ namespace NexusGame
                         ExtraMineYield = 0,
                         ExplorationReward = ExplorationReward.None,
                         ExplorationRevealed = false,
-                        Highlight = tileObj.transform.Find("Highlight") != null
-                            ? tileObj.transform.Find("Highlight").gameObject
-                            : null,
                         MineLabel = null
                     };
+                    BindTileVisualRefs(tile, tileObj);
 
                     // Attach click proxy to map collider hits back to this tile.
                     var proxy = tileObj.AddComponent<TileClickProxy>();
@@ -226,9 +222,7 @@ namespace NexusGame
             var centerTile = Tiles[center];
             centerTile.Type = TileType.Monolith;
             centerTile.View = CreateHexVisual(AxialToWorld(center.q, center.r), TileType.Monolith);
-            centerTile.Highlight = centerTile.View.transform.Find("Highlight") != null
-                ? centerTile.View.transform.Find("Highlight").gameObject
-                : null;
+            BindTileVisualRefs(centerTile, centerTile.View);
             var centerProxy = centerTile.View.AddComponent<TileClickProxy>();
             centerProxy.Q = center.q;
             centerProxy.R = center.r;
@@ -239,9 +233,7 @@ namespace NexusGame
                 var tile = Tiles[(q, r)];
                 tile.Type = TileType.Lava;
                 tile.View = CreateHexVisual(AxialToWorld(q, r), TileType.Lava);
-                tile.Highlight = tile.View.transform.Find("Highlight") != null
-                    ? tile.View.transform.Find("Highlight").gameObject
-                    : null;
+                BindTileVisualRefs(tile, tile.View);
                 var proxy = tile.View.AddComponent<TileClickProxy>();
                 proxy.Q = q;
                 proxy.R = r;
@@ -262,9 +254,7 @@ namespace NexusGame
                 var tile = Tiles[(q, r)];
                 tile.Type = ring2Types[i];
                 tile.View = CreateHexVisual(AxialToWorld(q, r), tile.Type);
-                tile.Highlight = tile.View.transform.Find("Highlight") != null
-                    ? tile.View.transform.Find("Highlight").gameObject
-                    : null;
+                BindTileVisualRefs(tile, tile.View);
                 var proxy = tile.View.AddComponent<TileClickProxy>();
                 proxy.Q = q;
                 proxy.R = r;
@@ -285,9 +275,7 @@ namespace NexusGame
                 var tile = Tiles[(q, r)];
                 tile.Type = ring3Types[i];
                 tile.View = CreateHexVisual(AxialToWorld(q, r), tile.Type);
-                tile.Highlight = tile.View.transform.Find("Highlight") != null
-                    ? tile.View.transform.Find("Highlight").gameObject
-                    : null;
+                BindTileVisualRefs(tile, tile.View);
                 var proxy = tile.View.AddComponent<TileClickProxy>();
                 proxy.Q = q;
                 proxy.R = r;
@@ -338,9 +326,7 @@ namespace NexusGame
             var centerTile = Tiles[center];
             centerTile.Type = TileType.Monolith;
             centerTile.View = CreateHexVisual(AxialToWorld(center.q, center.r), TileType.Monolith);
-            centerTile.Highlight = centerTile.View.transform.Find("Highlight") != null
-                ? centerTile.View.transform.Find("Highlight").gameObject
-                : null;
+            BindTileVisualRefs(centerTile, centerTile.View);
             var centerProxy = centerTile.View.AddComponent<TileClickProxy>();
             centerProxy.Q = center.q;
             centerProxy.R = center.r;
@@ -351,9 +337,7 @@ namespace NexusGame
                 var tile = Tiles[(q, r)];
                 tile.Type = TileType.Lava;
                 tile.View = CreateHexVisual(AxialToWorld(q, r), TileType.Lava);
-                tile.Highlight = tile.View.transform.Find("Highlight") != null
-                    ? tile.View.transform.Find("Highlight").gameObject
-                    : null;
+                BindTileVisualRefs(tile, tile.View);
                 var proxy = tile.View.AddComponent<TileClickProxy>();
                 proxy.Q = q;
                 proxy.R = r;
@@ -374,9 +358,7 @@ namespace NexusGame
                 var tile = Tiles[(q, r)];
                 tile.Type = ring2Types[i];
                 tile.View = CreateHexVisual(AxialToWorld(q, r), tile.Type);
-                tile.Highlight = tile.View.transform.Find("Highlight") != null
-                    ? tile.View.transform.Find("Highlight").gameObject
-                    : null;
+                BindTileVisualRefs(tile, tile.View);
                 var proxy = tile.View.AddComponent<TileClickProxy>();
                 proxy.Q = q;
                 proxy.R = r;
@@ -400,6 +382,14 @@ namespace NexusGame
                 int j = Random.Range(i, list.Count);
                 (list[i], list[j]) = (list[j], list[i]);
             }
+        }
+
+        void BindTileVisualRefs(BoardTile tile, GameObject root)
+        {
+            if (tile == null || root == null)
+                return;
+            Transform t = root.transform;
+            tile.Highlight = t.Find("Highlight")?.gameObject;
         }
 
         GameObject CreateHexVisual(Vector3 position, TileType type)
@@ -726,9 +716,6 @@ namespace NexusGame
 
             Vector3 pos = AxialToWorld(q, r);
             GameObject tileObj = CreateHexVisual(pos, TileType.HomeBase);
-            var highlight = tileObj.transform.Find("Highlight") != null
-                ? tileObj.transform.Find("Highlight").gameObject
-                : null;
 
             var tile = new BoardTile
             {
@@ -739,9 +726,9 @@ namespace NexusGame
                 ExtraMineYield = 0,
                 ExplorationReward = ExplorationReward.None,
                 ExplorationRevealed = true,
-                Highlight = highlight,
                 MineLabel = null
             };
+            BindTileVisualRefs(tile, tileObj);
 
             var proxy = tileObj.AddComponent<TileClickProxy>();
             proxy.Q = q;

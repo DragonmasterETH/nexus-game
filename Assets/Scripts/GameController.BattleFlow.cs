@@ -93,7 +93,12 @@ namespace NexusGame
 
         public BattleUiDiceRoll? LastBattleUiDiceRoll => _lastBattleUiDiceRoll;
 
-        const float BattleDiceUiPauseSeconds = 0.38f;
+        /// <summary>Battle HUD cycles random pip faces for this long before showing the real roll.</summary>
+        public const float BattleDiceRollSpinSeconds = 0.48f;
+
+        /// <summary>After dice are revealed, wait this long before resolving the next unit roll in the coroutine.</summary>
+        public const float BattleDiceRollHoldSeconds = 0.5f;
+
         const float BattleClashIntroSeconds = 0.55f;
 
         void SetBattleUiDiceRoll(BattleResolver.DiceRollResult roll, UnitType unitType, bool attackerRolling)
@@ -787,7 +792,7 @@ namespace NexusGame
                     hitsOnAttacker += roll.Hits;
                     SetBattleUiDiceRoll(roll, unitType, false);
                     if (!AutoResolveBattlesQuick)
-                        yield return new WaitForSeconds(BattleDiceUiPauseSeconds);
+                        yield return new WaitForSeconds(BattleDiceRollSpinSeconds + BattleDiceRollHoldSeconds);
                     if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
                     {
                         Log($"  {unitType} (def): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
@@ -813,7 +818,7 @@ namespace NexusGame
                     hitsOnDefender += roll.Hits;
                     SetBattleUiDiceRoll(roll, unitType, true);
                     if (!AutoResolveBattlesQuick)
-                        yield return new WaitForSeconds(BattleDiceUiPauseSeconds);
+                        yield return new WaitForSeconds(BattleDiceRollSpinSeconds + BattleDiceRollHoldSeconds);
                     if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
                     {
                         Log($"  {unitType} (atk): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
