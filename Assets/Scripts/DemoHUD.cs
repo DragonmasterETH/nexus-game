@@ -180,6 +180,10 @@ namespace NexusGame
         readonly Dictionary<int, NexusGuiImage> _crystallineIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         GUIStyle _battleWindowStyle;
         Texture2D _battleWindowBg;
+        GUIStyle _energizeHelpWindowStyle;
+        Texture2D _energizeHelpWindowBg;
+        GUIStyle _energizeHelpBodyLabelStyle;
+        GUIStyle _energizeHelpSectionLabelStyle;
         GUIStyle _battleRibbonLabelStyle;
         Texture2D _battleBtnPrimaryTex;
         Texture2D _battleBtnSecondaryTex;
@@ -577,6 +581,39 @@ namespace NexusGame
             _battleWindowStyle.normal.textColor = new Color(0.95f, 0.97f, 1f, 0.95f);
         }
 
+        void EnsureEnergizeHelpWindowStyles()
+        {
+            if (_energizeHelpWindowStyle != null)
+                return;
+            _energizeHelpWindowStyle = new GUIStyle(GUI.skin.window);
+            _energizeHelpWindowBg = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            _energizeHelpWindowBg.SetPixel(0, 0, new Color(0.06f, 0.07f, 0.11f, 1f));
+            _energizeHelpWindowBg.Apply();
+            _energizeHelpWindowStyle.normal.background = _energizeHelpWindowBg;
+            _energizeHelpWindowStyle.onNormal.background = _energizeHelpWindowBg;
+            _energizeHelpWindowStyle.focused.background = _energizeHelpWindowBg;
+            _energizeHelpWindowStyle.onFocused.background = _energizeHelpWindowBg;
+            _energizeHelpWindowStyle.active.background = _energizeHelpWindowBg;
+            _energizeHelpWindowStyle.onActive.background = _energizeHelpWindowBg;
+            _energizeHelpWindowStyle.fontSize = 14;
+            _energizeHelpWindowStyle.fontStyle = FontStyle.Bold;
+            _energizeHelpWindowStyle.alignment = TextAnchor.UpperLeft;
+            _energizeHelpWindowStyle.padding = new RectOffset(14, 14, 24, 12);
+            _energizeHelpWindowStyle.normal.textColor = new Color(0.96f, 0.97f, 1f, 1f);
+
+            _energizeHelpBodyLabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                wordWrap = true,
+                normal = { textColor = new Color(0.9f, 0.92f, 0.96f, 1f) }
+            };
+            _energizeHelpSectionLabelStyle = new GUIStyle(_energizeHelpBodyLabelStyle)
+            {
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = new Color(1f, 0.96f, 0.88f, 1f) }
+            };
+        }
+
         void EnsureBattleHudStyles()
         {
             if (_battleHudStylesReady)
@@ -585,7 +622,7 @@ namespace NexusGame
 
             _battleRibbonLabelStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 11,
+                fontSize = 10,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = new Color(0.96f, 0.97f, 1f, 1f) }
@@ -621,58 +658,39 @@ namespace NexusGame
             _battleSecondaryButtonStyleCached.padding = new RectOffset(12, 12, 10, 10);
         }
 
-        string BattleRibbonLeftLabel()
+        /// <summary>Single-line battle HUD phase title (center ribbon).</summary>
+        static string BattlePhaseStepTitle(GameController game)
         {
-            if (Game.PendingBattleArrangement)
-                return "ARRANGE BATTLES";
-            if (Game.FocusFirePicker != null)
-                return "FOCUS FIRE";
-            if (Game.EnergizePromptPlayer != null)
-                return "ENERGIZE";
-            if (Game.CasualtyPick != null)
-                return "CASUALTIES";
-            if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
-                return "SECRET MISSION";
-            if (Game.HasActiveBattleStep)
-                return "RESOLVE";
-            return "BATTLE";
-        }
-
-        string BattleRibbonRightLabel()
-        {
-            if (Game.CasualtyPick != null)
-                return "SELECT CASUALTIES";
-            if (Game.EnergizePromptPlayer != null)
-                return "PLAY OR PASS";
-            if (Game.PendingBattleArrangement)
-                return "CONFIRM ORDER";
-            if (Game.FocusFirePicker != null)
-                return "PICK UNIT TYPE";
-            if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
-                return "PLAY OR SKIP";
-            if (Game.HasActiveBattleStep)
-                return "DICE STEP";
-            return "READY";
+            if (game.PendingBattleArrangement)
+                return "ARRANGEMENT STEP";
+            if (game.FocusFirePicker != null)
+                return "FOCUS FIRE STEP";
+            if (game.EnergizePromptPlayer != null)
+                return "ENERGIZE STEP";
+            if (game.CasualtyPick != null)
+                return "CASUALTY STEP";
+            if (game.SecretMissionOffer != null && game.SecretMissionOffer.Waiting)
+                return "SECRET STEP";
+            if (game.HasActiveBattleStep)
+                return "BATTLE STEP";
+            return "BATTLE STEP";
         }
 
         void DrawBattlePhaseRibbon()
         {
             EnsureBattleHudStyles();
+            const float ribbonH = 30f;
             GUILayout.BeginHorizontal();
-            var ribbon = GUILayoutUtility.GetRect(12f, 40f, GUILayout.ExpandWidth(true), GUILayout.Height(40f));
+            var slot = GUILayoutUtility.GetRect(12f, ribbonH, GUILayout.ExpandWidth(true), GUILayout.Height(ribbonH));
             GUILayout.EndHorizontal();
 
-            float half = ribbon.width * 0.5f;
-            DrawTintedRect(new Rect(ribbon.x, ribbon.y, half, ribbon.height), new Color(0.12f, 0.05f, 0.06f, 0.94f));
-            DrawTintedRect(new Rect(ribbon.x + half, ribbon.y, ribbon.width - half, ribbon.height),
-                new Color(0.05f, 0.06f, 0.09f, 0.94f));
-            DrawOutlineRect(ribbon, new Color(0.75f, 0.18f, 0.12f, 0.65f), 1f);
-            DrawTintedRect(new Rect(ribbon.x + half - 1f, ribbon.y + 5f, 2f, ribbon.height - 10f),
-                new Color(1f, 0.28f, 0.18f, 0.45f));
+            float insetX = Mathf.Clamp(slot.width * 0.04f, 6f, 28f);
+            var ribbon = new Rect(slot.x + insetX, slot.y, slot.width - insetX * 2f, slot.height);
+            var fill = new Color(0.08f, 0.09f, 0.12f, 0.96f);
+            DrawTintedRect(ribbon, fill);
+            DrawOutlineRect(ribbon, new Color(0.55f, 0.16f, 0.12f, 0.55f), 1f);
 
-            GUI.Label(new Rect(ribbon.x, ribbon.y, half, ribbon.height), BattleRibbonLeftLabel(), _battleRibbonLabelStyle);
-            GUI.Label(new Rect(ribbon.x + half, ribbon.y, ribbon.width - half, ribbon.height), BattleRibbonRightLabel(),
-                _battleRibbonLabelStyle);
+            GUI.Label(ribbon, BattlePhaseStepTitle(Game), _battleRibbonLabelStyle);
         }
 
         void DrawMiniDiceRowOnUnitCardIfActive(Rect box, UnitType type, bool isAttackerColumn)
@@ -1086,6 +1104,13 @@ namespace NexusGame
             if (!_showMyEnergizeHelp)
                 return;
 
+            EnsureEnergizeHelpWindowStyles();
+            var dim = new Color(0.02f, 0.02f, 0.06f, 0.82f);
+            var prevCol = GUI.color;
+            GUI.color = dim;
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            GUI.color = prevCol;
+
             float winH = Mathf.Min(480f, Screen.height - 100f);
             var r = new Rect(12f, 80f, Mathf.Min(580f, Screen.width - 24f), winH);
             GUI.Window(953, r, _ =>
@@ -1100,7 +1125,7 @@ namespace NexusGame
 
                 GUILayout.Label(
                     $"P{subject.PlayerIndex + 1}{(Game.IsAiControlled(subject) ? " (AI)" : "")} - Energize in hand",
-                    GUI.skin.box);
+                    _energizeHelpSectionLabelStyle);
 
                 float scrollH = Mathf.Max(120f, winH - 110f);
                 _scrollMyEnergizeHelp = GUILayout.BeginScrollView(_scrollMyEnergizeHelp, GUILayout.Height(scrollH));
@@ -1108,26 +1133,27 @@ namespace NexusGame
                 bool hasBattle = subject.BattleEnergize != null && subject.BattleEnergize.Count > 0;
                 bool hasDeploy = subject.DeployEnergize != null && subject.DeployEnergize.Count > 0;
                 if (!hasBattle && !hasDeploy)
-                    GUILayout.Label("No Energize cards in hand.");
+                    GUILayout.Label("No Energize cards in hand.", _energizeHelpBodyLabelStyle);
 
                 if (hasBattle)
                 {
-                    GUILayout.Label("Battle (pre-dice step)", GUI.skin.box);
+                    GUILayout.Label("Battle (pre-dice step)", _energizeHelpSectionLabelStyle);
                     foreach (var g in subject.BattleEnergize.GroupBy(x => x).OrderBy(x => x.Key.ToString()))
                     {
-                        GUILayout.Label($"- {EnergizeBattleCatalog.GetName(g.Key)}  x{g.Count()}");
-                        GUILayout.Label(EnergizeBattleCatalog.GetDescription(g.Key));
+                        GUILayout.Label($"- {EnergizeBattleCatalog.GetName(g.Key)}  x{g.Count()}", _energizeHelpBodyLabelStyle);
+                        GUILayout.Label(EnergizeBattleCatalog.GetDescription(g.Key), _energizeHelpBodyLabelStyle);
                         GUILayout.Space(6f);
                     }
                 }
 
                 if (hasDeploy)
                 {
-                    GUILayout.Label("Deployment (buy phase)", GUI.skin.box);
+                    GUILayout.Label("Deployment (buy phase)", _energizeHelpSectionLabelStyle);
                     foreach (var g in subject.DeployEnergize.GroupBy(x => x).OrderBy(x => x.Key.ToString()))
                     {
-                        GUILayout.Label($"- {EnergizeDeploymentCatalog.GetName(g.Key)}  x{g.Count()}");
-                        GUILayout.Label(EnergizeDeploymentCatalog.GetDescription(g.Key));
+                        GUILayout.Label($"- {EnergizeDeploymentCatalog.GetName(g.Key)}  x{g.Count()}",
+                            _energizeHelpBodyLabelStyle);
+                        GUILayout.Label(EnergizeDeploymentCatalog.GetDescription(g.Key), _energizeHelpBodyLabelStyle);
                         GUILayout.Space(6f);
                     }
                 }
@@ -1135,7 +1161,7 @@ namespace NexusGame
                 GUILayout.EndScrollView();
                 if (GUILayout.Button("Close"))
                     _showMyEnergizeHelp = false;
-            }, "What do my Energize cards do?");
+            }, "What do my Energize cards do?", _energizeHelpWindowStyle);
         }
         void DrawBottomCardHand(PlayerState player)
         {
@@ -2126,13 +2152,6 @@ namespace NexusGame
 
             GUILayout.Space(6f);
             GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label(BattleNextActionShort(), new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 11,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.82f, 0.88f, 1f, 0.92f) }
-            }, GUILayout.ExpandWidth(true));
             DrawBattleOrderRibbonIcons();
             if (Game.HasActiveBattleStep)
             {
@@ -2479,24 +2498,6 @@ namespace NexusGame
             GUILayout.EndHorizontal();
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
-        }
-
-        string BattleNextActionShort()
-        {
-            if (Game.PendingBattleArrangement)
-                return "📋 Order fights → Confirm";
-            if (Game.FocusFirePicker != null)
-                return "🎯 Focus Fire: choose unit type (+2 dice)";
-            if (Game.EnergizePromptPlayer != null)
-                return "⚡ Battle Energize or Pass (P" + (Game.EnergizePromptPlayer.PlayerIndex + 1) + ")";
-            if (Game.CasualtyPick != null)
-                return "☠ Pick " + Game.CasualtyPick.Required + " casualty(s) (P" +
-                       (Game.CasualtyPick.Owner.PlayerIndex + 1) + ")";
-            if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
-                return "Optional secret mission (P" + (Game.SecretMissionOffer.Attacker.PlayerIndex + 1) + ")";
-            if (Game.HasActiveBattleStep)
-                return "🎲 Resolve step — casualties next if any";
-            return "Battle";
         }
 
         string BattleLockedReasonText()
