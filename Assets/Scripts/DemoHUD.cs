@@ -1390,7 +1390,22 @@ namespace NexusGame
             const float occupyingLabelH = 20f;
             const float creatureRowH = 52f;
             const float creatureRowGap = 4f;
-            float creatureBlock = occupyingLabelH + creatureRowH * 2f + creatureRowGap;
+            const float factionHdrH = 18f;
+            const float betweenFactionsH = 8f;
+            var ownersOnTile = GetPlayersWithUnitsOnTileOrdered(sel);
+            float creatureBlock = occupyingLabelH + 4f;
+            if (ownersOnTile.Count <= 1)
+                creatureBlock += creatureRowH * 2f + creatureRowGap;
+            else
+            {
+                for (int i = 0; i < ownersOnTile.Count; i++)
+                {
+                    creatureBlock += factionHdrH + creatureRowH * 2f + creatureRowGap;
+                    if (i < ownersOnTile.Count - 1)
+                        creatureBlock += betweenFactionsH;
+                }
+            }
+
             float shopBlock = 0f;
             if (showShop)
                 shopBlock = 20f + 24f + buyH + 22f + energizeH + 12f;
@@ -1693,8 +1708,62 @@ namespace NexusGame
             return "Unowned  ·  (" + tile.Q + "," + tile.R + ")";
         }
 
+        /// <summary>Distinct players with at least one unit on the tile, ordered by player index.</summary>
+        static List<PlayerState> GetPlayersWithUnitsOnTileOrdered(BoardTile tile)
+        {
+            var result = new List<PlayerState>();
+            if (tile == null)
+                return result;
+            var seen = new HashSet<int>();
+            foreach (var unit in FindObjectsOfType<UnitInstance>())
+            {
+                if (unit == null || unit.Tile != tile || unit.Owner == null)
+                    continue;
+                if (seen.Add(unit.Owner.PlayerIndex))
+                    result.Add(unit.Owner);
+            }
+
+            result.Sort((a, b) => a.PlayerIndex.CompareTo(b.PlayerIndex));
+            return result;
+        }
+
         void DrawHexModalCreatureGrid2Rows3Cols(BoardTile tile, PlayerState hudPlayer, float width, float rowH,
             float rowGap)
+        {
+            var ownersOrdered = GetPlayersWithUnitsOnTileOrdered(tile);
+            if (ownersOrdered.Count == 0)
+            {
+                DrawHexModalCreatureGrid2Rows3ColsForOwner(tile, hudPlayer, width, rowH, rowGap, null);
+                return;
+            }
+
+            if (ownersOrdered.Count == 1)
+            {
+                DrawHexModalCreatureGrid2Rows3ColsForOwner(tile, ownersOrdered[0], width, rowH, rowGap, ownersOrdered[0]);
+                return;
+            }
+
+            foreach (var o in ownersOrdered)
+            {
+                var factionHdr = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 10,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft
+                };
+                Color prev = GUI.color;
+                GUI.color = o.Color;
+                GUILayout.Label("P" + (o.PlayerIndex + 1), factionHdr);
+                GUI.color = prev;
+                GUILayout.Space(2f);
+                DrawHexModalCreatureGrid2Rows3ColsForOwner(tile, hudPlayer, width, rowH, rowGap, o);
+                GUILayout.Space(8f);
+            }
+        }
+
+        /// <param name="tintForCells">If null, aggregate all units on the tile for counts; otherwise only this owner's units. Tint uses the same owner when non-null, else <paramref name="hudPlayer"/> when counts are zero.</param>
+        void DrawHexModalCreatureGrid2Rows3ColsForOwner(BoardTile tile, PlayerState hudPlayer, float width, float rowH,
+            float rowGap, PlayerState tintForCells)
         {
             var types = new[]
             {
@@ -1710,6 +1779,8 @@ namespace NexusGame
             {
                 if (unit == null || unit.Tile != tile)
                     continue;
+                if (tintForCells != null && unit.Owner != tintForCells)
+                    continue;
                 var t = unit.Definition.Type;
                 if (countByType.ContainsKey(t))
                     countByType[t]++;
@@ -1717,6 +1788,7 @@ namespace NexusGame
 
             const float gap = 4f;
             float cellW = (width - gap * 2f) / 3f;
+            PlayerState tintBase = tintForCells ?? hudPlayer;
 
             for (int row = 0; row < 2; row++)
             {
@@ -1726,26 +1798,14 @@ namespace NexusGame
                     int i = row * 3 + col;
                     var ut = types[i];
                     int n = countByType[ut];
-                    PlayerState tintOwner = FirstOwnerOfUnitTypeOnTile(tile, ut, hudPlayer);
                     Rect cell = GUILayoutUtility.GetRect(cellW, rowH, GUILayout.Width(cellW), GUILayout.Height(rowH));
-                    DrawHexModalOccupyingForceCell(cell, ut, n, tintOwner);
+                    DrawHexModalOccupyingForceCell(cell, ut, n, tintBase);
                 }
 
                 GUILayout.EndHorizontal();
                 if (row == 0)
                     GUILayout.Space(rowGap);
             }
-        }
-
-        PlayerState FirstOwnerOfUnitTypeOnTile(BoardTile tile, UnitType type, PlayerState fallback)
-        {
-            foreach (var unit in FindObjectsOfType<UnitInstance>())
-            {
-                if (unit != null && unit.Tile == tile && unit.Definition.Type == type)
-                    return unit.Owner;
-            }
-
-            return fallback;
         }
 
         void DrawHexModalOccupyingForceCell(Rect cell, UnitType type, int count, PlayerState tintOwner)
@@ -1768,7 +1828,7 @@ namespace NexusGame
             var countRect = new Rect(countX, cell.y + padY, cell.xMax - countX - padX, cell.height - padY * 2f);
             Color p = GUI.color;
             if (count <= 0)
-                GUI.color = new Color(0.55f, 0.55f, 0.58f);
+                GUI.color = new Color(0.42f, 0.42f, 0.46f);
             GUI.Label(countRect, "×" + count, countStyle);
             GUI.color = p;
         }
@@ -2638,26 +2698,27 @@ namespace NexusGame
 
             var distinct = p.BattleEnergize.GroupBy(x => x).OrderBy(g => g.Key.ToString()).ToList();
             int nCards = distinct.Count;
-            // Two columns so stacks read as more rows (e.g. 6 cards → 3 rows); three columns would only be 2 rows.
-            int cols = 2;
-            cols = Mathf.Clamp(cols, 1, 4);
+            const int cols = 3;
             float gridW = Mathf.Min(560f, Screen.width - 48f);
             float gap = 6f;
-            float sq = Mathf.Floor((gridW - gap * (cols - 1)) / cols);
-            sq = Mathf.Clamp(sq, 88f, 130f);
+            float cardW = Mathf.Floor((gridW - gap * (cols - 1)) / cols);
+            cardW = Mathf.Clamp(cardW, 72f, 200f);
+            // Landscape tiles (wider than tall).
+            float cardH = Mathf.Clamp(cardW * 0.38f, 40f, 58f);
             int rows = Mathf.CeilToInt(nCards / (float)cols);
-            float wantedScrollH = Mathf.Max(120f, rows * (sq + gap) + 16f);
+            float rowStride = cardH + gap;
+            float wantedScrollH = Mathf.Max(120f, rows * rowStride + 12f);
             // Cap height so title + card grid scroll + PASS fit on screen; scroll inside if many cards.
             float maxScrollH = Mathf.Clamp(Screen.height * 0.22f, 100f, 200f);
             float scrollH = Mathf.Min(wantedScrollH, maxScrollH);
 
-            var squareCardStyle = new GUIStyle(GUI.skin.button)
+            var energizeCardStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 9,
+                fontSize = 8,
                 fontStyle = FontStyle.Bold,
                 wordWrap = true,
                 alignment = TextAnchor.MiddleCenter,
-                padding = new RectOffset(6, 6, 6, 6)
+                padding = new RectOffset(4, 4, 4, 4)
             };
 
             _scrollHand = GUILayout.BeginScrollView(_scrollHand, GUILayout.Height(scrollH), GUILayout.MaxHeight(maxScrollH));
@@ -2672,13 +2733,13 @@ namespace NexusGame
                     var g = distinct[idx];
                     int count = g.Count();
                     string label = EnergizeBattleCatalog.GetName(g.Key) + "\nx" + count;
-                    if (GUILayout.Button(label, squareCardStyle, GUILayout.Width(sq), GUILayout.Height(sq)))
+                    if (GUILayout.Button(label, energizeCardStyle, GUILayout.Width(cardW), GUILayout.Height(cardH)))
                         Game.SubmitEnergizePlay(g.Key);
                 }
 
                 GUILayout.EndHorizontal();
                 if ((row + 1) * cols < nCards)
-                    GUILayout.Space(4f);
+                    GUILayout.Space(gap);
             }
 
             GUILayout.EndScrollView();
@@ -3347,30 +3408,23 @@ namespace NexusGame
 
         void DrawUnitMiniIcon(Rect r, UnitType type, PlayerState ownerForTint = null, bool desaturateIcon = false)
         {
-            NexusGuiImage icon;
-            if (desaturateIcon)
-                icon = GetUnitIcon(type);
-            else
-                icon = UsesPerPlayerTint(type) && ownerForTint != null
-                    ? IconForUnitWithOwner(type, ownerForTint)
-                    : GetUnitIcon(type);
+            NexusGuiImage icon = UsesPerPlayerTint(type) && ownerForTint != null
+                ? IconForUnitWithOwner(type, ownerForTint)
+                : GetUnitIcon(type);
 
             if (!icon.IsEmpty)
             {
-                icon.Draw(r);
+                Color prev = GUI.color;
                 if (desaturateIcon)
-                {
-                    Color p = GUI.color;
-                    GUI.color = new Color(0.52f, 0.52f, 0.55f, 0.72f);
-                    GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill);
-                    GUI.color = p;
-                }
-
+                    // Multiply-tint (no full-rect overlay) so transparent pixels stay clear.
+                    GUI.color = new Color(0.38f, 0.38f, 0.42f, 1f);
+                icon.Draw(r);
+                GUI.color = prev;
                 return;
             }
 
             DrawTintedRect(r,
-                desaturateIcon ? new Color(0.32f, 0.32f, 0.35f) : new Color(0.85f, 0.85f, 0.9f));
+                desaturateIcon ? new Color(0.22f, 0.22f, 0.26f) : new Color(0.85f, 0.85f, 0.9f));
             var letterStyle = new GUIStyle(GUI.skin.label)
             {
                 alignment = TextAnchor.MiddleCenter,
@@ -3379,7 +3433,7 @@ namespace NexusGame
             };
             Color prevL = GUI.color;
             if (desaturateIcon)
-                GUI.color = new Color(0.55f, 0.55f, 0.58f, 1f);
+                GUI.color = new Color(0.48f, 0.48f, 0.52f, 1f);
             GUI.Label(r, UnitUiName(type).Substring(0, 1), letterStyle);
             GUI.color = prevL;
         }
