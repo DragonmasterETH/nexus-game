@@ -263,6 +263,54 @@ namespace NexusGame
                 "Sprites/Units/Crystalline");
         }
 
+        /// <summary>Desaturated / empty-slot HUD art (e.g. &quot;Human Gray&quot;, &quot;Leaper Gray&quot;).</summary>
+        public static NexusGuiImage LoadGrayUnitIcon(UnitType type)
+        {
+            return type switch
+            {
+                UnitType.Human => Load(
+                    "Sprites/Units/Human Gray",
+                    "Sprites/Units/Human_Gray",
+                    "Sprites/units/Human Gray",
+                    "Sprites/Units/HumanGray",
+                    "Sprites/Units/human gray"),
+                UnitType.Fungoid => Load(
+                    "Sprites/Units/Fungus Gray",
+                    "Sprites/Units/Fungus_Gray",
+                    "Sprites/Units/Fungoid Gray",
+                    "Sprites/units/Fungus Gray",
+                    "Sprites/Units/FungoidGray"),
+                UnitType.Crystalline => Load(
+                    "Sprites/Units/Crystal Gray",
+                    "Sprites/Units/Crystal_Gray",
+                    "Sprites/Units/Crystalline Gray",
+                    "Sprites/units/Crystal Gray",
+                    "Sprites/Units/CrystallineGray"),
+                UnitType.RockStrider => Load(
+                    "Sprites/Units/Strider Gray",
+                    "Sprites/Units/Strider_Gray",
+                    "Sprites/Units/Rock Strider Gray",
+                    "Sprites/Units/RockStrider Gray",
+                    "Sprites/units/Strider Gray",
+                    "Sprites/Units/StriderGray"),
+                UnitType.LavaLeaper => Load(
+                    "Sprites/Units/Leaper Gray",
+                    "Sprites/Units/Leaper_Gray",
+                    "Sprites/Units/Lava Leaper Gray",
+                    "Sprites/Units/LavaLeaper Gray",
+                    "Sprites/units/Leaper Gray",
+                    "Sprites/Units/LeaperGray"),
+                UnitType.RubiumDragon => Load(
+                    "Sprites/Units/Dragon Gray",
+                    "Sprites/Units/Dragon_Gray",
+                    "Sprites/Units/Rubium Dragon Gray",
+                    "Sprites/Units/RubiumDragon Gray",
+                    "Sprites/units/Dragon Gray",
+                    "Sprites/Units/DragonGray"),
+                _ => default
+            };
+        }
+
         static string DragonColorSuffix(PlayerState owner)
         {
             if (owner == null)

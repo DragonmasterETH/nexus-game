@@ -172,6 +172,7 @@ namespace NexusGame
         bool _oreResourcesTried;
         static Texture2D _dimTex;
         readonly Dictionary<UnitType, NexusGuiImage> _unitIconCache = new Dictionary<UnitType, NexusGuiImage>();
+        readonly Dictionary<UnitType, NexusGuiImage> _grayUnitIconCache = new Dictionary<UnitType, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _dragonIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _striderIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _fungoidIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
@@ -691,54 +692,6 @@ namespace NexusGame
             DrawOutlineRect(ribbon, new Color(0.55f, 0.16f, 0.12f, 0.55f), 1f);
 
             GUI.Label(ribbon, BattlePhaseStepTitle(Game), _battleRibbonLabelStyle);
-        }
-
-        void DrawMiniDiceRowOnUnitCardIfActive(Rect box, UnitType type, bool isAttackerColumn)
-        {
-            var dOpt = Game.LastBattleUiDiceRoll;
-            if (!dOpt.HasValue || !Game.HasActiveBattleStep)
-                return;
-            var d = dOpt.Value;
-            if (d.UnitType != type)
-                return;
-            if (d.AttackerRolling != isAttackerColumn)
-                return;
-
-            bool revealFinal = (Time.realtimeSinceStartup - _battleDiceAnimStartRealtime) >=
-                               GameController.BattleDiceRollSpinSeconds;
-            float rt = Time.realtimeSinceStartup;
-
-            int dieCount = 0;
-            if (d.Rolls != null && d.Rolls.Length > 0)
-                dieCount = d.Rolls.Length;
-            else if (d.Dice > 0 && d.Impossible)
-                dieCount = d.Dice;
-            if (dieCount <= 0)
-                return;
-
-            int showDice = Mathf.Min(dieCount, 4);
-            float gap = 2.5f;
-            float dieSz = (box.width - 8f - (showDice - 1) * gap) / Mathf.Max(1, showDice);
-            dieSz = Mathf.Clamp(dieSz, 10f, 18f);
-            float x0 = box.x + 4f;
-            float y0 = box.yMax - dieSz - 3f;
-            var faceImp = new Color(0.93f, 0.94f, 0.97f, 1f);
-            for (int i = 0; i < dieCount && i < 4; i++)
-            {
-                var dr = new Rect(x0 + i * (dieSz + gap), y0, dieSz, dieSz);
-                if (d.Rolls != null && i < d.Rolls.Length)
-                {
-                    int pip = revealFinal ? d.Rolls[i] : SpinningPipValue(i, rt);
-                    DrawBattleDieFace(dr, pip);
-                }
-                else if (d.Impossible)
-                {
-                    if (revealFinal)
-                        DrawBattleDieImpossibleFace(dr, faceImp);
-                    else
-                        DrawBattleDieFace(dr, SpinningPipValue(i, rt));
-                }
-            }
         }
 
         void OnGUI()
@@ -1815,7 +1768,7 @@ namespace NexusGame
             float iconSz = Mathf.Min(cell.height - padY * 2f, cell.width * 0.38f);
             iconSz = Mathf.Max(22f, iconSz);
             var iconR = new Rect(cell.x + padX, cell.y + (cell.height - iconSz) * 0.5f, iconSz, iconSz);
-            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, tintOwner), desaturateIcon: count <= 0);
+            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, tintOwner), useGraySprite: count <= 0);
 
             var countStyle = new GUIStyle(GUI.skin.label)
             {
@@ -2009,6 +1962,24 @@ namespace NexusGame
             }
         }
 
+        void SyncBattleDiceAnimState()
+        {
+            var dOpt = Game.LastBattleUiDiceRoll;
+            if (!dOpt.HasValue)
+            {
+                _battleDiceAnimFingerprint = 0;
+                return;
+            }
+
+            var d = dOpt.Value;
+            int fp = ComputeBattleDiceFingerprint(d);
+            if (fp != _battleDiceAnimFingerprint)
+            {
+                _battleDiceAnimFingerprint = fp;
+                _battleDiceAnimStartRealtime = Time.realtimeSinceStartup;
+            }
+        }
+
         static int SpinningPipValue(int dieIndex, float realtime)
         {
             int tick = Mathf.FloorToInt(realtime * 34f);
@@ -2189,18 +2160,23 @@ namespace NexusGame
             GUILayout.Space(8f);
 
             GUILayout.BeginVertical(GUI.skin.box);
-            const float clashColW = 40f;
-            float battleColW = Mathf.Clamp(Screen.width * 0.34f, 198f, 268f);
+            SyncBattleDiceAnimState();
+            // Fit strip inside battle window (padding, nested boxes); never exceed inner width.
+            float battleWinW = Mathf.Min(Screen.width - 16f, 920f);
+            float stripBudget = Mathf.Max(240f, battleWinW - 68f);
+            float clashColW = Mathf.Min(130f, Mathf.Max(78f, stripBudget * 0.185f));
+            float battleColW = (stripBudget - clashColW) * 0.5f - 4f;
+            battleColW = Mathf.Clamp(battleColW, 92f, 268f);
             float battleStripInnerW = battleColW * 2f + clashColW;
+            if (battleStripInnerW > stripBudget)
+                battleColW = Mathf.Max(88f, (stripBudget - clashColW) * 0.5f - 2f);
+            battleStripInnerW = battleColW * 2f + clashColW;
+
             GUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal(GUILayout.Width(battleStripInnerW));
             DrawBattleSideColumn(left, hex, true, Game.ActiveBattleAttacker, battleColW);
-            GUILayout.BeginVertical(GUILayout.Width(clashColW), GUILayout.ExpandHeight(true));
-            GUILayout.FlexibleSpace();
-            DrawBattleCenterClashMark(44);
-            GUILayout.FlexibleSpace();
-            GUILayout.EndVertical();
+            DrawBattleCenterClashAndDice(clashColW);
             DrawBattleSideColumn(right, hex, false, Game.ActiveBattleDefender, battleColW);
             GUILayout.EndHorizontal();
             GUILayout.FlexibleSpace();
@@ -2213,18 +2189,6 @@ namespace NexusGame
             GUILayout.Space(6f);
             GUILayout.BeginVertical(GUI.skin.box);
             DrawBattleOrderRibbonIcons();
-            if (Game.HasActiveBattleStep)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("Now", GUILayout.Width(36));
-                var stepIcon = GUILayoutUtility.GetRect(26f, 26f, GUILayout.Width(30f), GUILayout.Height(26f));
-                DrawTintedRect(new Rect(stepIcon.x - 2f, stepIcon.y - 2f, stepIcon.width + 4f, stepIcon.height + 4f),
-                    new Color(0.19f, 0.24f, 0.34f, 0.95f));
-                DrawUnitMiniIcon(stepIcon, Game.ActiveBattleStepUnitType, BattleStepTintedUnitIconOwner());
-                GUILayout.Label(UnitUiName(Game.ActiveBattleStepUnitType),
-                    new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold });
-                GUILayout.EndHorizontal();
-            }
 
             DrawBattleDiceRollBanner();
             GUILayout.EndVertical();
@@ -2291,21 +2255,12 @@ namespace NexusGame
 
         void DrawBattleDiceRollBanner()
         {
+            SyncBattleDiceAnimState();
             var dOpt = Game.LastBattleUiDiceRoll;
             if (!dOpt.HasValue)
-            {
-                _battleDiceAnimFingerprint = 0;
                 return;
-            }
 
             var d = dOpt.Value;
-            int fp = ComputeBattleDiceFingerprint(d);
-            if (fp != _battleDiceAnimFingerprint)
-            {
-                _battleDiceAnimFingerprint = fp;
-                _battleDiceAnimStartRealtime = Time.realtimeSinceStartup;
-            }
-
             bool revealFinal = (Time.realtimeSinceStartup - _battleDiceAnimStartRealtime) >=
                                GameController.BattleDiceRollSpinSeconds;
             float rt = Time.realtimeSinceStartup;
@@ -2317,6 +2272,18 @@ namespace NexusGame
             GUI.color = sideC;
             GUILayout.Label(side, GUILayout.Width(30));
             GUI.color = prev;
+
+            // Active battle step: icon + dice animate in the center column; banner stays text-only.
+            if (Game.HasActiveBattleStep)
+            {
+                if (d.Impossible && d.Dice > 0)
+                    GUILayout.Label($"need ≥{d.Need} (—)", GUILayout.ExpandWidth(false));
+                else if (d.Dice > 0)
+                    GUILayout.Label($"need ≥{d.Need}  →  {d.Hits} hit(s)", GUILayout.ExpandWidth(false));
+                GUILayout.EndHorizontal();
+                return;
+            }
+
             var ir = GUILayoutUtility.GetRect(22f, 22f, GUILayout.Width(26f), GUILayout.Height(24f));
             DrawUnitMiniIcon(ir, d.UnitType,
                 TintedIconOwnerForBattleSide(d.UnitType,
@@ -2329,9 +2296,8 @@ namespace NexusGame
                 dieCount = d.Dice;
 
             var faceBgImpossible = new Color(0.93f, 0.94f, 0.97f, 1f);
-            bool diceOnUnitCards = Game.HasActiveBattleStep;
 
-            if (dieCount > 0 && !diceOnUnitCards)
+            if (dieCount > 0)
             {
                 for (int i = 0; i < dieCount; i++)
                 {
@@ -2413,117 +2379,125 @@ namespace NexusGame
                 counts[u.Definition.Type]++;
             }
 
-            if (counts.Count == 0)
-                GUILayout.Label("(none)");
-            else
+            var dRollOpt = Game.LastBattleUiDiceRoll;
+            var nameStyle = new GUIStyle(GUI.skin.label)
             {
-                // 2 columns × 3 rows for up to 6 unit types (narrower, shorter tiles).
-                const int unitsPerRow = 2;
-                float innerPad = 4f;
-                float cellOuterW = Mathf.Floor((sidePanelW - innerPad * 2f) / unitsPerRow) - 3f;
-                cellOuterW = Mathf.Clamp(cellOuterW, 54f, 92f);
-                float boxW = cellOuterW - 2f;
-                float boxH = Mathf.Clamp(boxW * 0.58f, 44f, 56f);
+                fontSize = 8,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.LowerRight,
+                wordWrap = false
+            };
 
-                int i = 0;
-                GUILayout.BeginHorizontal();
-                foreach (var kvp in counts.OrderBy(k => Array.IndexOf(BattleResolver.BattleOrder, k.Key)))
+            // 2 columns × 3 rows — always six unit slots (gray art when count is 0).
+            const int unitsPerRow = 2;
+            float innerPad = 4f;
+            float cellOuterW = Mathf.Floor((sidePanelW - innerPad * 2f) / unitsPerRow) - 3f;
+            cellOuterW = Mathf.Clamp(cellOuterW, 48f, 86f);
+            float boxW = cellOuterW - 2f;
+            float boxH = Mathf.Clamp(boxW * 0.58f, 40f, 54f);
+
+            int slot = 0;
+            GUILayout.BeginHorizontal();
+            foreach (var unitType in BattleResolver.BattleOrder)
+            {
+                if (slot > 0 && slot % unitsPerRow == 0)
                 {
-                    if (i > 0 && i % unitsPerRow == 0)
-                    {
-                        GUILayout.EndHorizontal();
-                        GUILayout.BeginHorizontal();
-                    }
-
-                    i++;
-                    GUILayout.BeginVertical(GUILayout.Width(cellOuterW));
-                    var cp = Game.CasualtyPick;
-                    bool canPickHere = cp != null && cp.Owner == player;
-
-                    var box = GUILayoutUtility.GetRect(boxW, boxH, GUILayout.Width(boxW), GUILayout.Height(boxH));
-                    DrawTintedRect(box, new Color(0.08f, 0.1f, 0.16f, 0.97f));
-                    float iconSz = Mathf.Min(boxW * 0.88f, box.height - 13f);
-                    iconSz = Mathf.Max(22f, iconSz);
-                    float ix = box.x + (box.width - iconSz) * 0.5f;
-                    float iy = box.y + 2f;
-                    var iconR = new Rect(ix, iy, iconSz, iconSz);
-                    DrawUnitMiniIcon(iconR, kvp.Key, TintedIconOwnerForUnitOnSide(kvp.Key, player));
-
-                    if (!canPickHere && kvp.Value > 1)
-                    {
-                        GUI.Label(new Rect(box.x, iconR.yMax, box.width, 10f), "×" + kvp.Value,
-                            new GUIStyle(GUI.skin.label)
-                            {
-                                fontSize = 8,
-                                fontStyle = FontStyle.Bold,
-                                alignment = TextAnchor.MiddleCenter,
-                                normal = { textColor = new Color(0.88f, 0.92f, 1f, 1f) }
-                            });
-                    }
-
-                    var nameStyle = new GUIStyle(GUI.skin.label)
-                    {
-                        fontSize = 8,
-                        fontStyle = FontStyle.Bold,
-                        alignment = TextAnchor.LowerRight,
-                        wordWrap = false
-                    };
-                    GUI.Label(new Rect(box.x + 2f, box.yMax - 12f, box.width - 4f, 11f), UnitTypeAbbrev(kvp.Key),
-                        new GUIStyle(GUI.skin.label)
-                            { fontSize = 6, wordWrap = true, alignment = TextAnchor.LowerLeft });
-                    if (canPickHere)
-                        GUI.Label(new Rect(box.x + 2f, box.yMax - 16f, box.width - 4f, 14f), "×" + kvp.Value, nameStyle);
-
-                    DrawMiniDiceRowOnUnitCardIfActive(box, kvp.Key, isLeft);
-                    if (canPickHere)
-                    {
-                        int selected = cp.Selected.Count(u => u != null && u.Definition.Type == kvp.Key);
-                        string selText = $"{selected}/{kvp.Value}";
-                        if (selected > 0)
-                        {
-                            // Strong selected state: bright border + warm fill so chosen casualties are obvious.
-                            DrawTintedRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
-                                new Color(0.92f, 0.64f, 0.12f, 0.26f));
-                            DrawOutlineRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
-                                new Color(1f, 0.82f, 0.2f, 0.98f), 2f);
-                        }
-                        var badgeRect = new Rect(box.x + 2f, box.y + 2f, 44f, 18f);
-                        DrawTintedRect(badgeRect, selected > 0
-                            ? new Color(0.95f, 0.72f, 0.18f, 0.92f)
-                            : new Color(0.18f, 0.22f, 0.30f, 0.9f));
-                        GUI.Label(badgeRect, selText,
-                            new GUIStyle(GUI.skin.label)
-                            {
-                                fontSize = 11,
-                                fontStyle = FontStyle.Bold,
-                                alignment = TextAnchor.MiddleCenter,
-                                normal = { textColor = selected > 0 ? new Color(0.15f, 0.1f, 0.02f, 1f) : new Color(0.82f, 0.88f, 0.98f, 1f) }
-                            });
-
-                        bool canAdd = cp.Selected.Count < cp.Required && selected < kvp.Value;
-                        bool prevEnabled = GUI.enabled;
-                        GUI.enabled = canAdd;
-                        if (GUI.Button(box, GUIContent.none, GUIStyle.none))
-                            AdjustCasualtyTypeSelection(cp, kvp.Key, +1);
-                        GUI.enabled = prevEnabled;
-
-                        var minusRect = new Rect(box.xMax - 18f, box.y + 2f, 16f, 14f);
-                        bool canSub = selected > 0;
-                        prevEnabled = GUI.enabled;
-                        var prevColor = GUI.color;
-                        GUI.enabled = canSub;
-                        if (!canSub)
-                            GUI.color = new Color(0.55f, 0.55f, 0.6f, 0.9f);
-                        if (GUI.Button(minusRect, "-"))
-                            AdjustCasualtyTypeSelection(cp, kvp.Key, -1);
-                        GUI.enabled = prevEnabled;
-                        GUI.color = prevColor;
-                    }
-                    GUILayout.EndVertical();
+                    GUILayout.EndHorizontal();
+                    GUILayout.BeginHorizontal();
                 }
 
-                GUILayout.EndHorizontal();
+                slot++;
+                counts.TryGetValue(unitType, out int n);
+
+                GUILayout.BeginVertical(GUILayout.Width(cellOuterW));
+                var cp = Game.CasualtyPick;
+                bool canPickHere = cp != null && cp.Owner == player;
+
+                var box = GUILayoutUtility.GetRect(boxW, boxH, GUILayout.Width(boxW), GUILayout.Height(boxH));
+                DrawTintedRect(box, new Color(0.08f, 0.1f, 0.16f, 0.97f));
+
+                bool highlightRolling = Game.HasActiveBattleStep && dRollOpt.HasValue &&
+                    dRollOpt.Value.UnitType == unitType && player != null &&
+                    ((dRollOpt.Value.AttackerRolling && player == Game.ActiveBattleAttacker) ||
+                     (!dRollOpt.Value.AttackerRolling && player == Game.ActiveBattleDefender));
+                if (highlightRolling)
+                    DrawOutlineRect(box, new Color(1f, 0.55f, 0.22f, 0.98f), 3f);
+
+                float iconSz = Mathf.Min(boxW * 0.88f, box.height - 13f);
+                iconSz = Mathf.Max(22f, iconSz);
+                float ix = box.x + (box.width - iconSz) * 0.5f;
+                float iy = box.y + 2f;
+                var iconR = new Rect(ix, iy, iconSz, iconSz);
+                DrawUnitMiniIcon(iconR, unitType, TintedIconOwnerForUnitOnSide(unitType, player),
+                    useGraySprite: n <= 0);
+
+                if (!canPickHere && n > 1)
+                {
+                    GUI.Label(new Rect(box.x, iconR.yMax, box.width, 10f), "×" + n,
+                        new GUIStyle(GUI.skin.label)
+                        {
+                            fontSize = 8,
+                            fontStyle = FontStyle.Bold,
+                            alignment = TextAnchor.MiddleCenter,
+                            normal = { textColor = new Color(0.88f, 0.92f, 1f, 1f) }
+                        });
+                }
+
+                GUI.Label(new Rect(box.x + 2f, box.yMax - 12f, box.width - 4f, 11f), UnitTypeAbbrev(unitType),
+                    new GUIStyle(GUI.skin.label)
+                        { fontSize = 6, wordWrap = true, alignment = TextAnchor.LowerLeft });
+                if (canPickHere && n > 0)
+                    GUI.Label(new Rect(box.x + 2f, box.yMax - 16f, box.width - 4f, 14f), "×" + n, nameStyle);
+
+                if (canPickHere && n > 0)
+                {
+                    int selected = cp.Selected.Count(u => u != null && u.Definition.Type == unitType);
+                    string selText = $"{selected}/{n}";
+                    if (selected > 0)
+                    {
+                        DrawTintedRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
+                            new Color(0.92f, 0.64f, 0.12f, 0.26f));
+                        DrawOutlineRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
+                            new Color(1f, 0.82f, 0.2f, 0.98f), 2f);
+                    }
+
+                    var badgeRect = new Rect(box.x + 2f, box.y + 2f, 44f, 18f);
+                    DrawTintedRect(badgeRect, selected > 0
+                        ? new Color(0.95f, 0.72f, 0.18f, 0.92f)
+                        : new Color(0.18f, 0.22f, 0.30f, 0.9f));
+                    GUI.Label(badgeRect, selText,
+                        new GUIStyle(GUI.skin.label)
+                        {
+                            fontSize = 11,
+                            fontStyle = FontStyle.Bold,
+                            alignment = TextAnchor.MiddleCenter,
+                            normal = { textColor = selected > 0 ? new Color(0.15f, 0.1f, 0.02f, 1f) : new Color(0.82f, 0.88f, 0.98f, 1f) }
+                        });
+
+                    bool canAdd = cp.Selected.Count < cp.Required && selected < n;
+                    bool prevEnabled = GUI.enabled;
+                    GUI.enabled = canAdd;
+                    if (GUI.Button(box, GUIContent.none, GUIStyle.none))
+                        AdjustCasualtyTypeSelection(cp, unitType, +1);
+                    GUI.enabled = prevEnabled;
+
+                    var minusRect = new Rect(box.xMax - 18f, box.y + 2f, 16f, 14f);
+                    bool canSub = selected > 0;
+                    prevEnabled = GUI.enabled;
+                    var prevColor = GUI.color;
+                    GUI.enabled = canSub;
+                    if (!canSub)
+                        GUI.color = new Color(0.55f, 0.55f, 0.6f, 0.9f);
+                    if (GUI.Button(minusRect, "-"))
+                        AdjustCasualtyTypeSelection(cp, unitType, -1);
+                    GUI.enabled = prevEnabled;
+                    GUI.color = prevColor;
+                }
+
+                GUILayout.EndVertical();
             }
+
+            GUILayout.EndHorizontal();
 
             GUILayout.EndVertical();
         }
@@ -2536,8 +2510,21 @@ namespace NexusGame
             int n = BattleResolver.BattleOrder.Length;
             float sq = Mathf.Floor((Mathf.Min(520f, Screen.width - 80f) - 8f) / Mathf.Max(1, n)) - 4f;
             sq = Mathf.Clamp(sq, 36f, 48f);
+            var hex = Game.ActiveBattleHex;
             foreach (var t in BattleResolver.BattleOrder)
             {
+                PlayerState sampleOnHex = null;
+                if (hex != null)
+                {
+                    foreach (var u in FindObjectsOfType<UnitInstance>())
+                    {
+                        if (u == null || u.Tile != hex || u.Definition.Type != t)
+                            continue;
+                        sampleOnHex = u.Owner;
+                        break;
+                    }
+                }
+
                 bool active = Game.HasActiveBattleStep && Game.ActiveBattleStepUnitType == t;
                 GUILayout.BeginVertical(GUILayout.Width(sq + 2f));
                 var face = GUILayoutUtility.GetRect(sq, sq, GUILayout.Width(sq), GUILayout.Height(sq));
@@ -2548,7 +2535,8 @@ namespace NexusGame
                 float pad = 4f;
                 float iconL = Mathf.Max(12f, sq - pad * 2f);
                 var ir = new Rect(face.x + pad, face.y + pad, iconL, iconL);
-                DrawUnitMiniIcon(ir, t);
+                DrawUnitMiniIcon(ir, t, TintedIconOwnerForUnitOnSide(t, sampleOnHex),
+                    useGraySprite: sampleOnHex == null);
                 GUILayout.Label(UnitTypeAbbrev(t),
                     new GUIStyle(GUI.skin.label)
                         { fontSize = 7, alignment = TextAnchor.MiddleCenter, wordWrap = false });
@@ -2821,6 +2809,78 @@ namespace NexusGame
             if (GUILayout.Button("CONFIRM", _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
                 Game.SubmitCasualtyPick();
             GUI.enabled = true;
+        }
+
+        void DrawBattleCenterClashAndDice(float colW)
+        {
+            GUILayout.BeginVertical(GUILayout.Width(colW), GUILayout.ExpandHeight(true));
+            GUILayout.FlexibleSpace();
+
+            DrawBattleCenterClashMark(24);
+
+            var dOpt = Game.LastBattleUiDiceRoll;
+            if (Game.HasActiveBattleStep && dOpt.HasValue)
+            {
+                GUILayout.Space(2f);
+                var d = dOpt.Value;
+                PlayerState roller = d.AttackerRolling ? Game.ActiveBattleAttacker : Game.ActiveBattleDefender;
+
+                // Larger than side-grid tiles so the active roller is easy to read.
+                float iconBox = Mathf.Clamp(colW - 2f, 64f, 92f);
+                var iconOuter = GUILayoutUtility.GetRect(iconBox, iconBox, GUILayout.Width(iconBox),
+                    GUILayout.Height(iconBox));
+                DrawTintedRect(iconOuter, new Color(0.08f, 0.1f, 0.16f, 0.97f));
+                DrawOutlineRect(iconOuter, new Color(1f, 0.55f, 0.22f, 0.95f), 2f);
+                float pad = 2f;
+                var ir = new Rect(iconOuter.x + pad, iconOuter.y + pad, iconOuter.width - pad * 2f,
+                    iconOuter.height - pad * 2f);
+                DrawUnitMiniIcon(ir, d.UnitType, TintedIconOwnerForUnitOnSide(d.UnitType, roller));
+
+                bool revealFinal = (Time.realtimeSinceStartup - _battleDiceAnimStartRealtime) >=
+                                     GameController.BattleDiceRollSpinSeconds;
+                float rt = Time.realtimeSinceStartup;
+
+                int dieCount = 0;
+                if (d.Rolls != null && d.Rolls.Length > 0)
+                    dieCount = d.Rolls.Length;
+                else if (d.Dice > 0 && d.Impossible)
+                    dieCount = d.Dice;
+
+                if (dieCount > 0)
+                {
+                    GUILayout.BeginHorizontal();
+                    var faceBgImpossible = new Color(0.93f, 0.94f, 0.97f, 1f);
+                    int show = Mathf.Min(dieCount, 6);
+                    float gap = 3f;
+                    float dieSz = Mathf.Min(30f, (colW - 8f - (show - 1) * gap) / Mathf.Max(1, show));
+                    for (int i = 0; i < show; i++)
+                    {
+                        var dr = GUILayoutUtility.GetRect(dieSz, dieSz, GUILayout.Width(dieSz),
+                            GUILayout.Height(dieSz));
+                        if (d.Rolls != null && i < d.Rolls.Length)
+                        {
+                            int pip = revealFinal ? d.Rolls[i] : SpinningPipValue(i, rt);
+                            DrawBattleDieFace(dr, pip);
+                        }
+                        else if (d.Impossible)
+                        {
+                            if (revealFinal)
+                                DrawBattleDieImpossibleFace(dr, faceBgImpossible);
+                            else
+                                DrawBattleDieFace(dr, SpinningPipValue(i, rt));
+                        }
+                    }
+
+                    GUILayout.EndHorizontal();
+                }
+                else if (d.Dice <= 0)
+                {
+                    GUILayout.Label("0🎲", GUILayout.Width(36));
+                }
+            }
+
+            GUILayout.FlexibleSpace();
+            GUILayout.EndVertical();
         }
 
         void DrawBattleCenterClashMark(int fontSize)
@@ -3385,16 +3445,6 @@ namespace NexusGame
             GUI.Label(new Rect(tx, r.y + 22f, tw, 22f), UnitUiName(type) + " ×" + count, s1);
         }
 
-        PlayerState BattleStepTintedUnitIconOwner()
-        {
-            if (Game == null || !UsesPerPlayerTint(Game.ActiveBattleStepUnitType))
-                return null;
-            var d = Game.LastBattleUiDiceRoll;
-            if (d.HasValue && d.Value.UnitType == Game.ActiveBattleStepUnitType)
-                return d.Value.AttackerRolling ? Game.ActiveBattleAttacker : Game.ActiveBattleDefender;
-            return Game.ActiveBattleAttacker;
-        }
-
         /// <summary>Units with seat-colored sprites (Human Red, Leaper Blue, etc.).</summary>
         static bool UsesPerPlayerTint(UnitType t) =>
             t == UnitType.Human || t == UnitType.Fungoid || t == UnitType.Crystalline ||
@@ -3406,8 +3456,18 @@ namespace NexusGame
         static PlayerState TintedIconOwnerForBattleSide(UnitType t, PlayerState rollingPlayer) =>
             UsesPerPlayerTint(t) ? rollingPlayer : null;
 
-        void DrawUnitMiniIcon(Rect r, UnitType type, PlayerState ownerForTint = null, bool desaturateIcon = false)
+        void DrawUnitMiniIcon(Rect r, UnitType type, PlayerState ownerForTint = null, bool useGraySprite = false)
         {
+            if (useGraySprite)
+            {
+                var gray = GetGrayUnitIcon(type);
+                if (!gray.IsEmpty)
+                {
+                    gray.Draw(r);
+                    return;
+                }
+            }
+
             NexusGuiImage icon = UsesPerPlayerTint(type) && ownerForTint != null
                 ? IconForUnitWithOwner(type, ownerForTint)
                 : GetUnitIcon(type);
@@ -3415,8 +3475,7 @@ namespace NexusGame
             if (!icon.IsEmpty)
             {
                 Color prev = GUI.color;
-                if (desaturateIcon)
-                    // Multiply-tint (no full-rect overlay) so transparent pixels stay clear.
+                if (useGraySprite)
                     GUI.color = new Color(0.38f, 0.38f, 0.42f, 1f);
                 icon.Draw(r);
                 GUI.color = prev;
@@ -3424,7 +3483,7 @@ namespace NexusGame
             }
 
             DrawTintedRect(r,
-                desaturateIcon ? new Color(0.22f, 0.22f, 0.26f) : new Color(0.85f, 0.85f, 0.9f));
+                useGraySprite ? new Color(0.22f, 0.22f, 0.26f) : new Color(0.85f, 0.85f, 0.9f));
             var letterStyle = new GUIStyle(GUI.skin.label)
             {
                 alignment = TextAnchor.MiddleCenter,
@@ -3432,10 +3491,19 @@ namespace NexusGame
                 clipping = TextClipping.Clip
             };
             Color prevL = GUI.color;
-            if (desaturateIcon)
+            if (useGraySprite)
                 GUI.color = new Color(0.48f, 0.48f, 0.52f, 1f);
             GUI.Label(r, UnitUiName(type).Substring(0, 1), letterStyle);
             GUI.color = prevL;
+        }
+
+        NexusGuiImage GetGrayUnitIcon(UnitType type)
+        {
+            if (_grayUnitIconCache.TryGetValue(type, out var cached))
+                return cached;
+            var loaded = NexusGuiArt.LoadGrayUnitIcon(type);
+            _grayUnitIconCache[type] = loaded;
+            return loaded;
         }
 
         NexusGuiImage IconForUnitWithOwner(UnitType type, PlayerState owner)
