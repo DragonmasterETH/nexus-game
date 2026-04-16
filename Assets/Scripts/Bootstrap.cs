@@ -27,6 +27,9 @@ namespace NexusGame
 
         GUIStyle _menuButtonStyle;
 
+        /// <summary>Design pixels × layout scale (<see cref="GameUiScale.ImGuiHudScale"/>); menu text uses <see cref="GameUiScale.ImGuiFontScale"/>.</summary>
+        static float MenuS(float designPixels) => Mathf.Max(1f, designPixels * GameUiScale.ImGuiHudScale());
+
         void Awake()
         {
             ApplyPortraitForMobile();
@@ -50,16 +53,16 @@ namespace NexusGame
         {
             if (_menuButtonStyle == null)
             {
-                int fs = Mathf.Clamp(Screen.width / 26, 17, 24);
                 _menuButtonStyle = new GUIStyle(GUI.skin.button)
                 {
-                    fontSize = fs,
                     fontStyle = FontStyle.Bold,
                     alignment = TextAnchor.MiddleCenter,
                     wordWrap = true
                 };
             }
 
+            float s = GameUiScale.ImGuiFontScale();
+            _menuButtonStyle.fontSize = Mathf.Max(18, Mathf.RoundToInt(23f * s));
             return _menuButtonStyle;
         }
 
@@ -232,27 +235,28 @@ namespace NexusGame
         void DrawMainMenu()
         {
             var btnStyle = MenuButtonStyle();
-            float padX = 22f;
-            float bw = Mathf.Min(440f, Screen.width - padX * 2f);
-            const float titleH = 46f;
-            const float btnH = 58f;
-            const float btnGap = 12f;
-            const float footerH = 28f;
+            float padX = MenuS(22f);
+            float bw = Mathf.Min(MenuS(440f), Screen.width - padX * 2f);
+            float titleH = MenuS(46f);
+            float btnH = MenuS(58f);
+            float btnGap = MenuS(12f);
+            float footerH = MenuS(28f);
             const int nBtn = 7;
-            float h = titleH + nBtn * (btnH + btnGap) + footerH + 20f;
-            h = Mathf.Min(h, Screen.height - 24f);
-            var rect = new Rect((Screen.width - bw) / 2f, Mathf.Max(12f, (Screen.height - h) / 2f), bw, h);
+            float h = titleH + nBtn * (btnH + btnGap) + footerH + MenuS(20f);
+            h = Mathf.Min(h, Screen.height - MenuS(24f));
+            var rect = new Rect((Screen.width - bw) / 2f, Mathf.Max(MenuS(12f), (Screen.height - h) / 2f), bw, h);
             GUI.Box(rect, "");
 
+            float s = GameUiScale.ImGuiFontScale();
             var titleStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Clamp(Screen.width / 22, 20, 28),
+                fontSize = Mathf.Max(20, Mathf.RoundToInt(26f * s)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
-            GUI.Label(new Rect(rect.x, rect.y + 8f, rect.width, titleH), "Nexus Ops", titleStyle);
+            GUI.Label(new Rect(rect.x, rect.y + MenuS(8f), rect.width, titleH), "Nexus Ops", titleStyle);
 
-            float y = rect.y + titleH + 10f;
+            float y = rect.y + titleH + MenuS(10f);
             float x = rect.x + padX;
             float innerW = bw - padX * 2f;
 
@@ -313,36 +317,37 @@ namespace NexusGame
                 _state = UiState.MapSelect;
             }
 
-            float footerY = rect.yMax - footerH - 10f;
+            float footerY = rect.yMax - footerH - MenuS(10f);
             var creditStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 12,
+                fontSize = Mathf.Max(12, Mathf.RoundToInt(14f * s)),
                 alignment = TextAnchor.MiddleCenter
             };
-            GUI.Label(new Rect(rect.x + 8f, footerY, rect.width - 16f, footerH),
+            GUI.Label(new Rect(rect.x + MenuS(8f), footerY, rect.width - MenuS(16f), footerH),
                 "Made by Clanker Games Inc", creditStyle);
         }
 
         void DrawMapSelect()
         {
             var btnStyle = MenuButtonStyle();
-            float padX = 18f;
-            float w = Mathf.Min(460f, Screen.width - 20f);
+            float s = GameUiScale.ImGuiFontScale();
+            float padX = MenuS(18f);
+            float w = Mathf.Min(MenuS(460f), Screen.width - MenuS(20f));
             float x0 = (Screen.width - w) / 2f;
-            float y = 18f;
-            const float btnH = 54f;
-            const float gap = 12f;
+            float y = MenuS(18f);
+            float btnH = MenuS(54f);
+            float gap = MenuS(12f);
             float x = x0 + padX;
             float bw = w - padX * 2f;
 
             var hdr = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Clamp(Screen.width / 24, 18, 26),
+                fontSize = Mathf.Max(18, Mathf.RoundToInt(24f * s)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
-            GUI.Label(new Rect(x0, y, w, 40f), "Select Map", hdr);
-            y += 44f;
+            GUI.Label(new Rect(x0, y, w, MenuS(40f)), "Select Map", hdr);
+            y += MenuS(44f);
 
             if (GUI.Button(new Rect(x, y, bw, btnH), "1v1 Map (Current Board)", btnStyle))
             {
@@ -364,13 +369,13 @@ namespace NexusGame
 
             var subHdr = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Clamp(Screen.width / 32, 15, 20),
+                fontSize = Mathf.Max(15, Mathf.RoundToInt(19f * s)),
                 fontStyle = FontStyle.Bold
             };
-            GUI.Label(new Rect(x, y, bw, 28f), "2–4 Player Maps:", subHdr);
-            y += 30f;
+            GUI.Label(new Rect(x, y, bw, MenuS(28f)), "2–4 Player Maps:", subHdr);
+            y += MenuS(30f);
 
-            float previewCap = Mathf.Clamp(Screen.height * 0.28f, 100f, 200f);
+            float previewCap = Mathf.Clamp(Screen.height * 0.28f, MenuS(100f), MenuS(200f));
             if (TwoToFourPlayerMapPreview != null)
             {
                 GUI.DrawTexture(new Rect(x, y, bw, previewCap), TwoToFourPlayerMapPreview, ScaleMode.ScaleToFit);
@@ -378,8 +383,8 @@ namespace NexusGame
             }
             else
             {
-                GUI.Label(new Rect(x, y, bw, 44f), "(Assign 2–4 map preview texture)");
-                y += 48f;
+                GUI.Label(new Rect(x, y, bw, MenuS(44f)), "(Assign 2–4 map preview texture)");
+                y += MenuS(48f);
             }
 
             if (GUI.Button(new Rect(x, y, bw, btnH), "2–4 Map A (radius-3)", btnStyle))
@@ -398,7 +403,7 @@ namespace NexusGame
                 _state = UiState.InGame;
             }
 
-            y += btnH + gap + 6f;
+            y += btnH + gap + MenuS(6f);
 
             if (GUI.Button(new Rect(x, y, bw, btnH), "Back", btnStyle))
             {
@@ -423,31 +428,35 @@ namespace NexusGame
         {
             EnsureRulebookStyles();
 
-            float pad = 14f;
+            float s = GameUiScale.ImGuiFontScale();
+            _rulebookBodyStyle.fontSize = Mathf.Max(13, Mathf.RoundToInt(15f * s));
+
+            float pad = MenuS(14f);
             var panel = new Rect(pad, pad, Screen.width - 2f * pad, Screen.height - 2f * pad);
             GUI.Box(panel, "");
 
             var titleStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 17,
+                fontSize = Mathf.Max(17, Mathf.RoundToInt(20f * s)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
             string header = _rulebookTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
-            GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 28f), header, titleStyle);
+            GUI.Label(new Rect(panel.x, panel.y + MenuS(8f), panel.width, MenuS(28f)), header, titleStyle);
 
             var tabStyle = MenuButtonStyle();
-            float tabH = 48f;
-            float tabW = (panel.width - 40f) * 0.5f;
-            float tabY = panel.y + 36f;
-            if (GUI.Button(new Rect(panel.x + 14f, tabY, tabW - 6f, tabH), "Rules", tabStyle))
+            float tabH = MenuS(48f);
+            float tabW = (panel.width - MenuS(40f)) * 0.5f;
+            float tabY = panel.y + MenuS(36f);
+            if (GUI.Button(new Rect(panel.x + MenuS(14f), tabY, tabW - MenuS(6f), tabH), "Rules", tabStyle))
             {
                 if (_rulebookTab != 0)
                     _rulebookScroll = Vector2.zero;
                 _rulebookTab = 0;
             }
 
-            if (GUI.Button(new Rect(panel.x + 14f + tabW + 6f, tabY, tabW - 6f, tabH), "Units", tabStyle))
+            if (GUI.Button(new Rect(panel.x + MenuS(14f) + tabW + MenuS(6f), tabY, tabW - MenuS(6f), tabH), "Units",
+                    tabStyle))
             {
                 if (_rulebookTab != 1)
                     _rulebookScroll = Vector2.zero;
@@ -458,20 +467,21 @@ namespace NexusGame
                 ? NexusRulebook.Body
                 : NexusUnitQuickReference.Build(null);
 
-            const float backH = 54f;
-            var scrollRect = new Rect(panel.x + 12f, panel.y + 36f + tabH + 8f, panel.width - 24f,
-                panel.height - 36f - tabH - 8f - backH - 20f);
-            float innerW = scrollRect.width - 22f;
+            float backH = MenuS(54f);
+            float topBlock = MenuS(36f) + tabH + MenuS(8f);
+            var scrollRect = new Rect(panel.x + MenuS(12f), panel.y + topBlock, panel.width - MenuS(24f),
+                panel.height - topBlock - backH - MenuS(20f));
+            float innerW = scrollRect.width - MenuS(22f);
             float contentH = _rulebookBodyStyle.CalcHeight(new GUIContent(body), innerW);
-            contentH = Mathf.Max(contentH + 32f, scrollRect.height * 0.45f);
+            contentH = Mathf.Max(contentH + MenuS(32f), scrollRect.height * 0.45f);
 
             _rulebookScroll = GUI.BeginScrollView(scrollRect, _rulebookScroll, new Rect(0f, 0f, innerW, contentH));
-            GUI.Label(new Rect(8f, 8f, innerW - 16f, contentH), body, _rulebookBodyStyle);
+            GUI.Label(new Rect(MenuS(8f), MenuS(8f), innerW - MenuS(16f), contentH), body, _rulebookBodyStyle);
             GUI.EndScrollView();
 
-            float backW = Mathf.Min(panel.width - 40f, 420f);
+            float backW = Mathf.Min(panel.width - MenuS(40f), MenuS(420f));
             if (GUI.Button(
-                    new Rect(panel.x + (panel.width - backW) * 0.5f, panel.yMax - backH - 12f, backW, backH),
+                    new Rect(panel.x + (panel.width - backW) * 0.5f, panel.yMax - backH - MenuS(12f), backW, backH),
                     "Back to menu", MenuButtonStyle()))
             {
                 BoardBackground.Remove();

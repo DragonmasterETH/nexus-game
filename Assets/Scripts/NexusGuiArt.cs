@@ -47,6 +47,82 @@ namespace NexusGame
             return w;
         }
 
+        /// <summary>Largest rect inside <paramref name="container"/> that preserves native aspect (letterboxed).</summary>
+        public Rect RectAspectFit(Rect container)
+        {
+            if (IsEmpty || container.width < 0.001f || container.height < 0.001f)
+                return container;
+            float ar = AspectRatio;
+            float cw = container.width;
+            float ch = container.height;
+            float boxAr = cw / ch;
+            if (ar > boxAr)
+            {
+                float h = cw / ar;
+                return new Rect(container.x, container.y + (ch - h) * 0.5f, cw, h);
+            }
+
+            float w = ch * ar;
+            return new Rect(container.x + (cw - w) * 0.5f, container.y, w, ch);
+        }
+
+        public void DrawAspectFit(Rect container)
+        {
+            Draw(RectAspectFit(container));
+        }
+
+        /// <summary>
+        /// Smallest rect aligned with <paramref name="container"/> that preserves aspect and fully covers it
+        /// (like CSS <c>background-size: cover</c>) — no letterboxing on 9:16 portrait when art is 16:9, etc.
+        /// </summary>
+        public Rect RectAspectCover(Rect container)
+        {
+            if (IsEmpty || container.width < 0.001f || container.height < 0.001f)
+                return container;
+            float ar = AspectRatio;
+            float cw = container.width;
+            float ch = container.height;
+            float boxAr = cw / ch;
+            if (ar >= boxAr)
+            {
+                float w = ch * ar;
+                return new Rect(container.x + (cw - w) * 0.5f, container.y, w, ch);
+            }
+
+            float h = cw / ar;
+            return new Rect(container.x, container.y + (ch - h) * 0.5f, cw, h);
+        }
+
+        public void DrawAspectCover(Rect container)
+        {
+            Draw(RectAspectCover(container));
+        }
+
+        /// <summary>Fills <paramref name="container"/> exactly (may stretch non-uniformly); for full-screen framed art on portrait.</summary>
+        public void DrawStretchFill(Rect container)
+        {
+            if (IsEmpty || container.height <= 0f)
+                return;
+            if (Sprite != null)
+            {
+                var t = Sprite.texture;
+                var tr = Sprite.textureRect;
+                float tw = t.width;
+                float th = t.height;
+                var uv = new Rect(tr.x / tw, tr.y / th, tr.width / tw, tr.height / th);
+                GUI.DrawTextureWithTexCoords(container, t, uv, true);
+            }
+            else
+            {
+                GUI.DrawTexture(container, Texture, ScaleMode.StretchToFill, true);
+            }
+        }
+
+        public void DrawFlippedHAspectFit(Rect container)
+        {
+            DrawFlippedH(RectAspectFit(container));
+        }
+
         public void Draw(Rect r)
         {
             if (IsEmpty || r.height <= 0f)
@@ -65,10 +141,52 @@ namespace NexusGame
                 GUI.DrawTexture(r, Texture, ScaleMode.ScaleToFit, true);
             }
         }
+
+        /// <summary>Same as <see cref="Draw"/> but mirrored horizontally (defender blade in clash UI).</summary>
+        public void DrawFlippedH(Rect r)
+        {
+            if (IsEmpty || r.height <= 0f)
+                return;
+            if (Sprite != null)
+            {
+                var t = Sprite.texture;
+                var tr = Sprite.textureRect;
+                float tw = t.width;
+                float th = t.height;
+                var uv = new Rect(tr.x / tw, tr.y / th, tr.width / tw, tr.height / th);
+                uv = new Rect(uv.xMax, uv.y, -uv.width, uv.height);
+                GUI.DrawTextureWithTexCoords(r, t, uv, true);
+            }
+            else
+            {
+                GUI.DrawTextureWithTexCoords(r, Texture, new Rect(1f, 0f, -1f, 1f), true);
+            }
+        }
     }
 
     public static class NexusGuiArt
     {
+        /// <summary>Full-screen / modal frame art (Resources, e.g. &quot;Sprites/Tile info screen&quot;).</summary>
+        public static NexusGuiImage LoadTileInfoScreenBackground()
+        {
+            return Load(
+                "Sprites/Tile info screen",
+                "Sprites/TileInfoScreen",
+                "Sprites/UI/Tile info screen",
+                "Sprites/UI/TileInfoScreen",
+                "Sprites/Tile_Info_Screen");
+        }
+
+        /// <summary>Battle overlay panel frame (<c>Battle Screen.png</c> under Resources).</summary>
+        public static NexusGuiImage LoadBattleScreenBackground()
+        {
+            return Load(
+                "Sprites/Battle Screen",
+                "Sprites/BattleScreen",
+                "Sprites/UI/Battle Screen",
+                "Sprites/UI/BattleScreen");
+        }
+
         public static NexusGuiImage FromFields(Texture2D icon, Sprite spr)
         {
             if (icon != null)
@@ -309,6 +427,19 @@ namespace NexusGame
                     "Sprites/Units/DragonGray"),
                 _ => default
             };
+        }
+
+        /// <summary>Seat-colored sword art (e.g. Resources &quot;Sprites/Sword Red&quot;, &quot;Sword_Blue&quot;).</summary>
+        public static NexusGuiImage LoadSwordForPlayer(PlayerState owner)
+        {
+            string c = DragonColorSuffix(owner);
+            return Load(
+                $"Sprites/Sword {c}",
+                $"Sprites/Sword_{c}",
+                $"Sprites/Swords/Sword {c}",
+                $"Sprites/Swords/Sword_{c}",
+                $"Sprites/sword {c}",
+                $"Sprites/Sword{c}");
         }
 
         static string DragonColorSuffix(PlayerState owner)
