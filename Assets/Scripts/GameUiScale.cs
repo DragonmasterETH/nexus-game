@@ -3,9 +3,8 @@ using UnityEngine;
 namespace NexusGame
 {
     /// <summary>
-    /// Shared IMGUI scale for menus and HUD — same padded panel and uniform scale as the tile / deploy modal
-    /// (<see cref="GetPaddedModalPanelGuiRect"/> + <see cref="TileInfoModalPanelScale"/>). Fonts add
-    /// <see cref="TileInfoDeviceTextMultiplier"/> via <see cref="ImGuiFontScale"/>.
+    /// Shared IMGUI scale for menus and HUD — padded panel (<see cref="GetPaddedModalPanelGuiRect"/>) plus a
+    /// short-side readability floor so phones stay legible. Fonts use <see cref="ImGuiFontScale"/>.
     /// </summary>
     public static class GameUiScale
     {
@@ -45,30 +44,40 @@ namespace NexusGame
         }
 
         /// <summary>
-        /// IMGUI layout scale — same as tile-info modal <c>S()</c>: <see cref="TileInfoModalPanelScale"/> on the
-        /// padded panel only (no touch floor). Keeps positions stable vs screen size like <see cref="DrawCenterBuyDeployModal"/>.
+        /// Minimum scale so main HUD / menus stay legible and tappable on phones. Pure
+        /// <see cref="TileInfoModalPanelScale"/> alone can be ~0.35–0.5 on narrow portrait, which makes buttons unreadable.
+        /// </summary>
+        static float HudReadabilityScaleFloor()
+        {
+            float shortSide = Mathf.Min(Screen.width, Screen.height);
+            return Mathf.Clamp(shortSide / 460f, 0.86f, 1.12f);
+        }
+
+        /// <summary>
+        /// IMGUI layout scale — <see cref="TileInfoModalPanelScale"/> on the padded panel, with a readability floor on small devices.
         /// </summary>
         public static float ImGuiHudScale()
         {
             Rect panel = GetPaddedModalPanelGuiRect();
-            return TileInfoModalPanelScale(panel);
+            return Mathf.Max(TileInfoModalPanelScale(panel), HudReadabilityScaleFloor());
         }
 
         /// <summary>
-        /// IMGUI font scale — panel uniform scale × device text boost (tile-info <see cref="TileInfoScaledFont"/>).
+        /// IMGUI font scale — panel scale × device text boost, with the same floor as layout so labels match button size.
         /// </summary>
         public static float ImGuiFontScale()
         {
             Rect panel = GetPaddedModalPanelGuiRect();
-            return TileInfoModalPanelScale(panel) * TileInfoDeviceTextMultiplier();
+            float refF = TileInfoModalPanelScale(panel) * TileInfoDeviceTextMultiplier();
+            return Mathf.Max(refF, HudReadabilityScaleFloor() * TileInfoDeviceTextMultiplier());
         }
 
         /// <summary>
-        /// Battle overlay layout scale — uniform scale for the battle <paramref name="panel"/> (same idea as tile-info <c>scale</c>).
+        /// Battle overlay layout scale — panel uniform scale with the same readability floor as the main HUD.
         /// </summary>
         public static float BattleHudUiScale(Rect panel)
         {
-            return TileInfoModalPanelScale(panel);
+            return Mathf.Max(TileInfoModalPanelScale(panel), HudReadabilityScaleFloor());
         }
     }
 }

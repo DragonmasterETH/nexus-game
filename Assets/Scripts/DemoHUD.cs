@@ -158,16 +158,16 @@ namespace NexusGame
         {
             EnsureCardStyles();
             float s = _hudFontScale;
-            _cardTitleStyle.fontSize = Mathf.Max(10, Mathf.RoundToInt(11f * s));
-            _cardBodyStyle.fontSize = Mathf.Max(9, Mathf.RoundToInt(10f * s));
-            _cardBadgeStyle.fontSize = Mathf.Max(10, Mathf.RoundToInt(11f * s));
-            _cardColumnLabelStyle.fontSize = Mathf.Max(10, Mathf.RoundToInt(11f * s));
+            _cardTitleStyle.fontSize = Mathf.Max(12, Mathf.RoundToInt(12f * s));
+            _cardBodyStyle.fontSize = Mathf.Max(11, Mathf.RoundToInt(11f * s));
+            _cardBadgeStyle.fontSize = Mathf.Max(12, Mathf.RoundToInt(12f * s));
+            _cardColumnLabelStyle.fontSize = Mathf.Max(12, Mathf.RoundToInt(12f * s));
 
             EnsureTopIconButtonStyle();
-            _topIconButtonStyle.fontSize = Mathf.Max(16, Mathf.RoundToInt(22f * s));
+            _topIconButtonStyle.fontSize = Mathf.Max(18, Mathf.RoundToInt(24f * s));
 
             if (_flyRubiumAmountStyle != null)
-                _flyRubiumAmountStyle.fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * s));
+                _flyRubiumAmountStyle.fontSize = Mathf.Max(14, Mathf.RoundToInt(14f * s));
             if (_flyVpAmountStyle != null)
             {
                 _flyVpAmountStyle.fontSize = Mathf.Max(18, Mathf.RoundToInt(26f * s));
@@ -208,7 +208,7 @@ namespace NexusGame
         {
             if (_quickRefBodyStyle == null)
                 return;
-            _quickRefBodyStyle.fontSize = Mathf.Max(11, Mathf.RoundToInt(13f * _hudFontScale));
+            _quickRefBodyStyle.fontSize = Mathf.Max(13, Mathf.RoundToInt(15f * _hudFontScale));
         }
 
         /// <summary>Resources paths under <c>Assets/Resources/</c> (no extension) for full-card deploy shop art.</summary>
@@ -289,9 +289,9 @@ namespace NexusGame
             if (_handPileViewer != HandPileViewerKind.None)
                 return true;
 
-            // Top strip and icon row (match OnGUI — padded panel like tile-info).
+            // Top strip and icon row (match OnGUI — same scale as <see cref="MainHudUiScale"/>).
             var hp = GameUiScale.GetPaddedModalPanelGuiRect();
-            float hs = GameUiScale.TileInfoModalPanelScale(hp);
+            float hs = MainHudUiScale();
             float topBarY = hp.y + 6f * hs;
             float topBarH = 52f * hs;
             if (new Rect(hp.x, topBarY, hp.width, topBarH).Contains(gui))
@@ -958,8 +958,8 @@ namespace NexusGame
             _hudLayoutPanel = GetCenterBuyModalPanelGuiRect();
             _mainHudUiScale = MainHudUiScale();
             _hudFontScale = MainHudFontScale();
-            _hudCardBarHeight = HudS(136f);
-            _hudPhaseRibbonHeight = HudS(26f);
+            _hudCardBarHeight = HudS(152f);
+            _hudPhaseRibbonHeight = HudS(36f);
             ApplyMainHudScaledStyles();
 
             DrawDragonPhaseOverlay();
@@ -988,7 +988,7 @@ namespace NexusGame
                 rxRes += rubGui.Draw(rxRes, ly, mainHudIconH) + HudS(6f);
             var rubNumStyle = new GUIStyle(hudLabel)
             {
-                fontSize = Mathf.Max(14, Mathf.RoundToInt(Mathf.Clamp(hp.width / 32f, 15, 22) * _hudFontScale)),
+                fontSize = Mathf.Max(16, Mathf.RoundToInt(Mathf.Clamp(hp.width / 28f, 16, 24) * _hudFontScale)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft
             };
@@ -1028,7 +1028,7 @@ namespace NexusGame
                 $"Turn {Game.TurnNumber}  ·  P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}";
             var metaLineStyle = new GUIStyle(hudLabel)
             {
-                fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale)),
+                fontSize = Mathf.Max(14, Mathf.RoundToInt(15f * _hudFontScale)),
                 wordWrap = true
             };
             GUI.Label(new Rect(lx, ly, lw, HudS(36f)), curPrefix, metaLineStyle);
@@ -1039,7 +1039,7 @@ namespace NexusGame
             int s = player.SecretMissions?.Count ?? 0;
             var pileLineStyle = new GUIStyle(hudLabel)
             {
-                fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale))
+                fontSize = Mathf.Max(13, Mathf.RoundToInt(14f * _hudFontScale))
             };
             GUI.Label(new Rect(lx, ly, lw, HudS(22f)), $"⚔{b}   ▲{d}   S{s}", pileLineStyle);
             ly += HudS(24f);
@@ -1140,7 +1140,7 @@ namespace NexusGame
 
             if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || Game.IsAiControlled(player))
                 GUI.enabled = false;
-            if (GUI.Button(new Rect(hp.x + HudS(10f), topY, HudS(130f), HudS(28f)), "End Turn"))
+            if (GUI.Button(new Rect(hp.x + HudS(10f), topY, HudS(160f), HudS(46f)), "End Turn"))
             {
                 Game.EndTurn();
                 _showCenterBuyModal = false;
@@ -1439,12 +1439,12 @@ namespace NexusGame
             GUI.Box(new Rect(barX, barY, barW, _hudCardBarHeight), "");
 
             float pad = HudS(8f);
-            float headerH = HudS(18f);
+            float headerH = HudS(22f);
             string deckLine =
                 $"P{player.PlayerIndex + 1}  ·  Secret deck {Game.SecretDeckCount}  ·  Energize {Game.EnergizeDeckCount}";
             var deckStyle = new GUIStyle(_cardColumnLabelStyle)
             {
-                fontSize = Mathf.Max(9, Mathf.RoundToInt(10f * _hudFontScale))
+                fontSize = Mathf.Max(12, Mathf.RoundToInt(13f * _hudFontScale))
             };
             GUI.Label(new Rect(barX + pad, barY + HudS(2f), barW - pad * 2f, HudS(16f)), deckLine, deckStyle);
 
@@ -1455,9 +1455,9 @@ namespace NexusGame
 
             float splitGap = HudS(8f);
             float minTilePanelW = HudS(120f);
-            float cardsLabelW = HudS(44f);
-            float stackBtnW = HudS(46f);
-            float stackBtnH = HudS(26f);
+            float cardsLabelW = HudS(48f);
+            float stackBtnW = HudS(52f);
+            float stackBtnH = HudS(32f);
             float stackGap = HudS(3f);
             float cardsHdrH = HudS(12f);
             float cardsColGap = HudS(6f);
@@ -2410,7 +2410,7 @@ namespace NexusGame
             float segW = (w - innerPad) / phases.Length;
             var phaseStyle = new GUIStyle(GUI.skin.box)
             {
-                fontSize = Mathf.Max(8, Mathf.RoundToInt(10f * _hudFontScale)),
+                fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale)),
                 alignment = TextAnchor.MiddleCenter,
                 wordWrap = true,
                 clipping = TextClipping.Clip
@@ -2726,7 +2726,8 @@ namespace NexusGame
             GUILayout.BeginVertical(BattlePanelBoxStyle());
             DrawBattleContextBar(hex, _battlePanelScaleCached);
             GUILayout.EndVertical();
-            GUILayout.Space(BattleS(12f));
+            // Push battle strip / ribbon / actions down (~10% panel height); tile name stays in the bar above.
+            GUILayout.Space(Mathf.Clamp(panel.height * 0.10f, BattleS(12f), BattleS(96f)));
 
             GUILayout.BeginVertical(BattlePanelBoxStyle());
             SyncBattleDiceAnimState();
@@ -2752,6 +2753,8 @@ namespace NexusGame
             GUILayout.EndHorizontal();
             GUILayout.EndVertical();
 
+            // Space below P1/P2 strip before step title + order ribbon (fills gap toward action area).
+            GUILayout.Space(Mathf.Clamp(panel.height * 0.10f, BattleS(12f), BattleS(96f)));
             GUILayout.Space(BattleS(14f));
             GUILayout.Space(Mathf.Clamp(panel.height * 0.018f, BattleS(8f), BattleS(22f)));
             DrawBattlePhaseRibbon();
@@ -2991,20 +2994,17 @@ namespace NexusGame
             float boxW = cellOuterW - BattleS(2f);
             float boxH = Mathf.Clamp(boxW * 0.72f, BattleS(56f), BattleS(104f));
 
-            int slot = 0;
-            GUILayout.BeginHorizontal();
-            foreach (var unitType in BattleResolver.BattleOrder)
+            var unitOrder = BattleResolver.BattleOrder;
+            for (int row = 0; row < 3; row++)
             {
-                if (slot > 0 && slot % unitsPerRow == 0)
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                for (int col = 0; col < unitsPerRow; col++)
                 {
-                    GUILayout.EndHorizontal();
-                    GUILayout.BeginHorizontal();
-                }
+                    var unitType = unitOrder[row * unitsPerRow + col];
+                    counts.TryGetValue(unitType, out int n);
 
-                slot++;
-                counts.TryGetValue(unitType, out int n);
-
-                GUILayout.BeginVertical(GUILayout.Width(cellOuterW));
+                    GUILayout.BeginVertical(GUILayout.Width(cellOuterW));
                 var cp = Game.CasualtyPick;
                 bool canPickHere = cp != null && cp.Owner == player;
 
@@ -3018,11 +3018,16 @@ namespace NexusGame
                 if (highlightRolling)
                     DrawOutlineRect(box, new Color(1f, 0.55f, 0.22f, 0.98f), BattleS(3f));
 
-                float iconSz = Mathf.Min(boxW * 0.92f, box.height - BattleS(10f));
-                iconSz = Mathf.Max(BattleS(26f), iconSz);
+                // Reserve bottom strip for type abbrev; optional stack count under icon when shown.
+                float labelH = BattleS(14f);
+                float countH = !canPickHere && n > 1 ? BattleS(14f) : 0f;
+                float innerH = box.height - labelH;
+                float maxIcon = Mathf.Min(boxW * 0.92f, innerH - countH - BattleS(4f));
+                float iconSz = Mathf.Clamp(maxIcon, BattleS(26f), Mathf.Min(boxW * 0.95f, innerH));
+                float blockH = iconSz + countH;
+                float blockY = box.y + (innerH - blockH) * 0.5f;
                 float ix = box.x + (box.width - iconSz) * 0.5f;
-                float iy = box.y + 2f;
-                var iconR = new Rect(ix, iy, iconSz, iconSz);
+                var iconR = new Rect(ix, blockY, iconSz, iconSz);
                 DrawUnitMiniIcon(iconR, unitType, TintedIconOwnerForUnitOnSide(unitType, player),
                     useGraySprite: n <= 0);
 
@@ -3096,10 +3101,12 @@ namespace NexusGame
                     GUI.color = prevColor;
                 }
 
-                GUILayout.EndVertical();
-            }
+                    GUILayout.EndVertical();
+                }
 
-            GUILayout.EndHorizontal();
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+            }
 
             GUILayout.EndVertical();
         }
@@ -3112,6 +3119,7 @@ namespace NexusGame
             GUILayout.BeginVertical();
             GUILayout.Space(BattleS(14f));
             GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
             int n = BattleResolver.BattleOrder.Length;
             float ribbonW = _battlePanelContentWidth > 8f
                 ? _battlePanelContentWidth
@@ -3142,13 +3150,16 @@ namespace NexusGame
                     ? new Color(1f, 0.55f, 0.22f, 0.95f)
                     : new Color(0.45f, 0.48f, 0.55f, 0.75f), active ? BattleS(2f) : BattleS(1f));
                 float pad = BattleS(3f);
-                float iconL = Mathf.Max(BattleS(14f), sq - pad * 2f);
-                var ir = new Rect(face.x + pad, face.y + pad, iconL, iconL);
+                float iconL = Mathf.Clamp(Mathf.Min(sq - pad * 2f, face.height - pad * 2f), BattleS(14f), sq);
+                float ix = face.x + (face.width - iconL) * 0.5f;
+                float iy = face.y + (face.height - iconL) * 0.5f;
+                var ir = new Rect(ix, iy, iconL, iconL);
                 DrawUnitMiniIcon(ir, t, TintedIconOwnerForUnitOnSide(t, sampleOnHex),
                     useGraySprite: sampleOnHex == null);
                 GUILayout.EndVertical();
             }
 
+            GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
             GUILayout.Space(BattleS(12f));
             GUILayout.EndVertical();
