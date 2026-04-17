@@ -2709,6 +2709,9 @@ namespace NexusGame
             _battleHudUiScale = BattleHudUiScale(panel);
             ApplyBattleHudScaledStyles();
             float windowHeight = panel.height;
+            // Shift layout up: 5% global, then an extra 10% for the gap above step title + dice banner row.
+            float liftAll = Mathf.Clamp(panel.height * 0.05f, BattleS(6f), BattleS(56f));
+            float liftStepBanner = Mathf.Clamp(panel.height * 0.10f, BattleS(10f), BattleS(120f));
             var left = Game.ActiveBattleAttacker ?? currentPlayer;
             var right = Game.ActiveBattleDefender;
             var hex = Game.ActiveBattleHex;
@@ -2721,13 +2724,15 @@ namespace NexusGame
             // BeginGroup clips but does not always give GUILayout a height budget; BeginArea fixes FlexibleSpace.
             GUILayout.BeginArea(new Rect(0f, 0f, panel.width, panel.height));
             GUILayout.BeginVertical(GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-            GUILayout.Space(Mathf.Clamp(panel.height * 0.026f, BattleS(14f), BattleS(46f)));
+            GUILayout.Space(Mathf.Max(BattleS(8f),
+                Mathf.Clamp(panel.height * 0.026f, BattleS(14f), BattleS(46f)) - liftAll * 0.35f));
             GUILayout.BeginVertical(GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             GUILayout.BeginVertical(BattlePanelBoxStyle());
             DrawBattleContextBar(hex, _battlePanelScaleCached);
             GUILayout.EndVertical();
             // Push battle strip / ribbon / actions down (~10% panel height); tile name stays in the bar above.
-            GUILayout.Space(Mathf.Clamp(panel.height * 0.10f, BattleS(12f), BattleS(96f)));
+            GUILayout.Space(Mathf.Max(BattleS(8f),
+                Mathf.Clamp(panel.height * 0.10f, BattleS(12f), BattleS(96f)) - liftAll * 0.35f));
 
             GUILayout.BeginVertical(BattlePanelBoxStyle());
             SyncBattleDiceAnimState();
@@ -2753,10 +2758,13 @@ namespace NexusGame
             GUILayout.EndHorizontal();
             GUILayout.EndVertical();
 
-            // Space below P1/P2 strip before step title + order ribbon (fills gap toward action area).
-            GUILayout.Space(Mathf.Clamp(panel.height * 0.10f, BattleS(12f), BattleS(96f)));
-            GUILayout.Space(BattleS(14f));
-            GUILayout.Space(Mathf.Clamp(panel.height * 0.018f, BattleS(8f), BattleS(22f)));
+            // Space below P1/P2 strip before step title + order ribbon (pull up step + banner vs strip).
+            float prePhaseGap = Mathf.Clamp(panel.height * 0.10f, BattleS(12f), BattleS(96f))
+                + BattleS(14f)
+                + Mathf.Clamp(panel.height * 0.018f, BattleS(8f), BattleS(22f))
+                - liftAll * 0.3f
+                - liftStepBanner;
+            GUILayout.Space(Mathf.Max(BattleS(4f), prePhaseGap));
             DrawBattlePhaseRibbon();
 
             GUILayout.Space(BattleS(8f));
@@ -3445,6 +3453,8 @@ namespace NexusGame
 
                 // Larger than side-grid tiles so the active roller is easy to read.
                 float iconBox = Mathf.Clamp(colW - BattleS(2f), BattleS(96f), BattleS(152f));
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
                 var iconOuter = GUILayoutUtility.GetRect(iconBox, iconBox, GUILayout.Width(iconBox),
                     GUILayout.Height(iconBox));
                 DrawTintedRect(iconOuter, new Color(0.08f, 0.1f, 0.16f, 0.97f));
@@ -3453,6 +3463,8 @@ namespace NexusGame
                 var ir = new Rect(iconOuter.x + pad, iconOuter.y + pad, iconOuter.width - pad * 2f,
                     iconOuter.height - pad * 2f);
                 DrawUnitMiniIcon(ir, d.UnitType, TintedIconOwnerForUnitOnSide(d.UnitType, roller));
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
 
                 bool revealFinal = (Time.realtimeSinceStartup - _battleDiceAnimStartRealtime) >=
                                      GameController.BattleDiceRollSpinSeconds;
@@ -3467,11 +3479,13 @@ namespace NexusGame
                 if (dieCount > 0)
                 {
                     GUILayout.BeginHorizontal();
+                    GUILayout.FlexibleSpace();
                     var faceBgImpossible = new Color(0.93f, 0.94f, 0.97f, 1f);
                     int show = Mathf.Min(dieCount, 6);
-                    float gap = BattleS(3f);
-                    float dieSz = Mathf.Min(BattleS(30f),
+                    float gap = BattleS(4f);
+                    float dieSz = Mathf.Min(BattleS(46f),
                         (colW - BattleS(8f) - (show - 1) * gap) / Mathf.Max(1, show));
+                    dieSz = Mathf.Max(BattleS(34f), dieSz * 1.08f);
                     for (int i = 0; i < show; i++)
                     {
                         var dr = GUILayoutUtility.GetRect(dieSz, dieSz, GUILayout.Width(dieSz),
@@ -3490,11 +3504,16 @@ namespace NexusGame
                         }
                     }
 
+                    GUILayout.FlexibleSpace();
                     GUILayout.EndHorizontal();
                 }
                 else if (d.Dice <= 0)
                 {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.FlexibleSpace();
                     GUILayout.Label("0🎲", GUILayout.Width(BattleS(36f)));
+                    GUILayout.FlexibleSpace();
+                    GUILayout.EndHorizontal();
                 }
             }
 
