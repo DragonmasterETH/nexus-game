@@ -44,11 +44,13 @@ namespace NexusGame
         Queue<SecretMissionInHand> _secretDeck;
         System.Random _cardRng;
         int _nextSecretInstanceId = 1;
+        /// <summary>Round index: 1 until play returns to the first player, then 2, etc. (not per seat turn).</summary>
         int _turnNumber = 1;
 
         public string LastDrawPhaseLog { get; private set; } = "";
         public int EnergizeDeckCount => _unifiedEnergizeDeck != null ? _unifiedEnergizeDeck.Count : 0;
         public int SecretDeckCount => _secretDeck != null ? _secretDeck.Count : 0;
+        /// <summary>Round number (increments when turn order returns to player 1 / index 0).</summary>
         public int TurnNumber => _turnNumber;
 
         public bool BattlePhaseBlockingPlay { get; private set; }
@@ -202,8 +204,6 @@ namespace NexusGame
                 $"Turn {_turnNumber} Draw: P{player.PlayerIndex + 1} +{secretGained} Secret" +
                 (monolith ? $" | Monolith +{battleGained + deployGained} Energize ({battleGained} battle, {deployGained} deploy)" : "") +
                 $" | Decks: Secret {SecretDeckCount}, Energize {EnergizeDeckCount}";
-
-            _turnNumber++;
         }
 
         bool PlayerControlsMonolithAlone(PlayerState player)

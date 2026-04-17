@@ -684,6 +684,10 @@ namespace NexusGame
             }
 
             _currentPlayerIndex = (_currentPlayerIndex + 1) % Players.Count;
+            // Round number (HUD "Turn"): stays on 1 until play returns to the first player, then increments.
+            if (_currentPlayerIndex == 0)
+                _turnNumber++;
+
             BeginTurn();
         }
 

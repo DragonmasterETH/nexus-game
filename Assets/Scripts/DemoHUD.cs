@@ -165,6 +165,7 @@ namespace NexusGame
 
             EnsureTopIconButtonStyle();
             _topIconButtonStyle.fontSize = Mathf.Max(18, Mathf.RoundToInt(24f * s));
+            ApplyTileInfoFont(_topIconButtonStyle);
 
             if (_flyRubiumAmountStyle != null)
                 _flyRubiumAmountStyle.fontSize = Mathf.Max(14, Mathf.RoundToInt(14f * s));
@@ -973,34 +974,56 @@ namespace NexusGame
             var vpGui = GetVPGui();
             var hudLabel = GUI.skin.label;
 
-            // Top strip (Colonist-style): resources left, info + settings right
-            var topBarBg = new Color(0.06f, 0.07f, 0.12f, 0.88f);
-            Color prevGui = GUI.color;
-            GUI.color = topBarBg;
-            GUI.DrawTexture(new Rect(hp.x, topBarY, hp.width, topBarH), Texture2D.whiteTexture);
-            GUI.color = prevGui;
-
-            float lx = hp.x + HudS(12f);
-            float ly = topBarY + (topBarH - mainHudIconH) * 0.5f - HudS(2f);
-            float resLineH = Mathf.Max(HudS(22f), mainHudIconH + HudS(2f));
-            float rxRes = lx;
-            if (!rubGui.IsEmpty)
-                rxRes += rubGui.Draw(rxRes, ly, mainHudIconH) + HudS(6f);
-            var rubNumStyle = new GUIStyle(hudLabel)
-            {
-                fontSize = Mathf.Max(16, Mathf.RoundToInt(Mathf.Clamp(hp.width / 28f, 16, 24) * _hudFontScale)),
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft
-            };
-            GUI.Label(new Rect(rxRes, ly - HudS(2f), HudS(120f), resLineH), player.Rubium.ToString(), rubNumStyle);
-            rxRes += Mathf.Max(HudS(28f), rubNumStyle.CalcSize(new GUIContent(player.Rubium.ToString())).x) + HudS(12f);
-            if (!vpGui.IsEmpty)
-                rxRes += vpGui.Draw(rxRes, ly, mainHudIconH) + HudS(6f);
-            GUI.Label(new Rect(rxRes, ly - HudS(2f), HudS(80f), resLineH), player.VictoryPoints.ToString(), rubNumStyle);
-
             float iconBtn = HudS(44f);
             float iconY = topBarY + (topBarH - iconBtn) * 0.5f;
             float iconRight = hp.xMax - HudS(12f) - iconBtn * 2f - HudS(10f);
+
+            // Top strip: banner tinted by current player's color; rubium + VP + turn + player centered (phase is on the bottom ribbon).
+            var baseBar = new Color(0.06f, 0.07f, 0.12f, 0.88f);
+            Color pc = player.Color;
+            var topBarTint = Color.Lerp(baseBar, new Color(pc.r, pc.g, pc.b, 1f), 0.48f);
+            topBarTint.a = 0.9f;
+            Color prevGui = GUI.color;
+            GUI.color = topBarTint;
+            GUI.DrawTexture(new Rect(hp.x, topBarY, hp.width, topBarH), Texture2D.whiteTexture);
+            GUI.color = prevGui;
+
+            float ly = topBarY + (topBarH - mainHudIconH) * 0.5f - HudS(2f);
+            float resLineH = Mathf.Max(HudS(22f), mainHudIconH + HudS(2f));
+            float rowLeft = hp.x + HudS(12f);
+            float rowRight = iconRight - HudS(8f);
+            var rubNumStyle = new GUIStyle(hudLabel)
+            {
+                fontSize = Mathf.Max(11, Mathf.RoundToInt(Mathf.Clamp(hp.width / 38f, 11, 15) * _hudFontScale)),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft
+            };
+            ApplyTileInfoFont(rubNumStyle);
+            var lightOnBar = new Color(0.96f, 0.97f, 1f, 1f);
+            rubNumStyle.normal.textColor = lightOnBar;
+            string midText = $"T{Game.TurnNumber}  ·  P{player.PlayerIndex + 1}";
+            var centerMetaStyle = new GUIStyle(rubNumStyle) { alignment = TextAnchor.MiddleLeft };
+            ApplyTileInfoFont(centerMetaStyle);
+            float rubIconW = rubGui.IsEmpty ? 0f : mainHudIconH * rubGui.AspectRatio + HudS(6f);
+            float rubNumW =
+                Mathf.Max(HudS(28f), rubNumStyle.CalcSize(new GUIContent(player.Rubium.ToString())).x);
+            float vpIconW = vpGui.IsEmpty ? 0f : mainHudIconH * vpGui.AspectRatio + HudS(6f);
+            float vpNumW =
+                Mathf.Max(HudS(28f), rubNumStyle.CalcSize(new GUIContent(player.VictoryPoints.ToString())).x);
+            float gapRes = HudS(12f);
+            float gapMid = HudS(14f);
+            float totalRowW = rubIconW + rubNumW + gapRes + vpIconW + vpNumW + gapMid +
+                centerMetaStyle.CalcSize(new GUIContent(midText)).x;
+            float rxRes = rowLeft + Mathf.Max(0f, (rowRight - rowLeft - totalRowW) * 0.5f);
+            if (!rubGui.IsEmpty)
+                rxRes += rubGui.Draw(rxRes, ly, mainHudIconH) + HudS(6f);
+            GUI.Label(new Rect(rxRes, ly - HudS(2f), HudS(120f), resLineH), player.Rubium.ToString(), rubNumStyle);
+            rxRes += rubNumW + gapRes;
+            if (!vpGui.IsEmpty)
+                rxRes += vpGui.Draw(rxRes, ly, mainHudIconH) + HudS(6f);
+            GUI.Label(new Rect(rxRes, ly - HudS(2f), HudS(80f), resLineH), player.VictoryPoints.ToString(), rubNumStyle);
+            rxRes += vpNumW + gapMid;
+            GUI.Label(new Rect(rxRes, ly - HudS(2f), rowRight - rxRes, resLineH), midText, centerMetaStyle);
             bool blockTopIcons = _showCenterBuyModal;
             bool prevEnabled = GUI.enabled;
             if (blockTopIcons)
@@ -1018,41 +1041,11 @@ namespace NexusGame
             }
             GUI.enabled = prevEnabled;
 
-            float metaY = topBarY + topBarH + HudS(6f);
+            // Turn / hand counts / deploy discount live in the bottom card strip — no duplicate block under the top bar.
             float metaW = Mathf.Min(HudS(400f), hp.width - HudS(36f));
-            lx = hp.x + HudS(18f);
-            ly = metaY + HudS(6f);
+            float lx = hp.x + HudS(18f);
+            ly = topBarY + topBarH + HudS(6f);
             float lw = metaW - HudS(16f);
-
-            string curPrefix =
-                $"Turn {Game.TurnNumber}  ·  P{player.PlayerIndex + 1}{(Game.IsAiControlled(player) ? " (AI)" : "")}";
-            var metaLineStyle = new GUIStyle(hudLabel)
-            {
-                fontSize = Mathf.Max(14, Mathf.RoundToInt(15f * _hudFontScale)),
-                wordWrap = true
-            };
-            GUI.Label(new Rect(lx, ly, lw, HudS(36f)), curPrefix, metaLineStyle);
-            ly += HudS(22f);
-
-            int b = player.BattleEnergize?.Count ?? 0;
-            int d = player.DeployEnergize?.Count ?? 0;
-            int s = player.SecretMissions?.Count ?? 0;
-            var pileLineStyle = new GUIStyle(hudLabel)
-            {
-                fontSize = Mathf.Max(13, Mathf.RoundToInt(14f * _hudFontScale))
-            };
-            GUI.Label(new Rect(lx, ly, lw, HudS(22f)), $"⚔{b}   ▲{d}   S{s}", pileLineStyle);
-            ly += HudS(24f);
-
-            if (player.DeploymentPurchaseDiscountRubium > 0)
-            {
-                float dx = lx;
-                if (!rubGui.IsEmpty)
-                    dx += rubGui.Draw(dx, ly + HudS(1f), HudS(22f)) + HudS(6f);
-                GUI.Label(new Rect(dx, ly, HudS(200f), HudS(20f)), player.DeploymentPurchaseDiscountRubium.ToString(),
-                    pileLineStyle);
-                ly += HudS(22f);
-            }
 
             var sb = new StringBuilder();
             if (Game.AiVsAiMode)
@@ -1075,21 +1068,6 @@ namespace NexusGame
                 bodyH = Mathf.Clamp(bodyH + HudS(6f), HudS(24f), HudS(220f));
                 GUI.Label(new Rect(lx, ly, lw, bodyH), sb.ToString(), bodyStyle);
                 ly += bodyH + HudS(6f);
-            }
-
-            if (!string.IsNullOrEmpty(Game.LastDrawPhaseLog) && !_showCenterBuyModal)
-            {
-                float logBarH = HudS(40f);
-                float logW = Mathf.Min(HudS(600f), hp.width - HudS(20f));
-                GUI.Box(new Rect(hp.x + HudS(10f), ly, logW, logBarH), "");
-                GUI.Label(new Rect(hp.x + HudS(16f), ly + HudS(10f), Mathf.Min(HudS(580f), logW - HudS(12f)), logBarH - HudS(8f)),
-                    Game.LastDrawPhaseLog,
-                    new GUIStyle(hudLabel)
-                    {
-                        fontSize = Mathf.Max(10, Mathf.RoundToInt(10f * _hudFontScale)),
-                        wordWrap = true
-                    });
-                ly += logBarH + HudS(6f);
             }
 
             string battleLog =
@@ -1217,6 +1195,7 @@ namespace NexusGame
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
+            ApplyTileInfoFont(_topIconButtonStyle);
         }
 
         void DrawSettingsOverlay()
