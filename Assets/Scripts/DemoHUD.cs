@@ -224,6 +224,100 @@ namespace NexusGame
         };
 
         static readonly Dictionary<UnitType, Texture2D> DeployShopTextureCache = new Dictionary<UnitType, Texture2D>();
+        static readonly Dictionary<UnitType, Texture2D> DeployShopGreyscaleCache = new Dictionary<UnitType, Texture2D>();
+        static readonly Dictionary<int, Texture2D> GreyscaleFullTextureBySourceId = new Dictionary<int, Texture2D>();
+        static readonly Dictionary<int, Texture2D> GreyscaleSpriteBySpriteId = new Dictionary<int, Texture2D>();
+
+        static Texture2D CreateReadableTextureCopy(Texture2D src)
+        {
+            if (src == null || src.width <= 0 || src.height <= 0)
+                return null;
+            RenderTexture rt = RenderTexture.GetTemporary(src.width, src.height, 0, RenderTextureFormat.ARGB32,
+                RenderTextureReadWrite.sRGB);
+            Graphics.Blit(src, rt);
+            RenderTexture prev = RenderTexture.active;
+            RenderTexture.active = rt;
+            var copy = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false);
+            copy.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
+            copy.Apply();
+            RenderTexture.active = prev;
+            RenderTexture.ReleaseTemporary(rt);
+            return copy;
+        }
+
+        static void ApplyLuminanceGreyscaleInPlace(Texture2D tex)
+        {
+            Color[] px = tex.GetPixels();
+            for (int i = 0; i < px.Length; i++)
+            {
+                Color c = px[i];
+                float y = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
+                px[i] = new Color(y, y, y, c.a);
+            }
+
+            tex.SetPixels(px);
+            tex.Apply();
+        }
+
+        static Texture2D GetOrCreateGreyscaleFullTexture(Texture2D source)
+        {
+            if (source == null)
+                return null;
+            int id = source.GetInstanceID();
+            if (GreyscaleFullTextureBySourceId.TryGetValue(id, out var cached) && cached != null)
+                return cached;
+            Texture2D readable = CreateReadableTextureCopy(source);
+            if (readable == null)
+                return null;
+            ApplyLuminanceGreyscaleInPlace(readable);
+            GreyscaleFullTextureBySourceId[id] = readable;
+            return readable;
+        }
+
+        static Texture2D GetDeployShopTextureGreyscale(UnitType type)
+        {
+            if (DeployShopGreyscaleCache.TryGetValue(type, out var g) && g != null)
+                return g;
+            Texture2D src = GetDeployShopTexture(type);
+            if (src == null)
+                return null;
+            g = GetOrCreateGreyscaleFullTexture(src);
+            if (g != null)
+                DeployShopGreyscaleCache[type] = g;
+            return g;
+        }
+
+        static Texture2D GetOrCreateGreyscaleSpritePixels(Sprite sp)
+        {
+            if (sp == null || sp.texture == null)
+                return null;
+            int sid = sp.GetInstanceID();
+            if (GreyscaleSpriteBySpriteId.TryGetValue(sid, out var cached) && cached != null)
+                return cached;
+            Texture2D atlas = sp.texture;
+            Rect tr = sp.textureRect;
+            int x = Mathf.RoundToInt(tr.x);
+            int y = Mathf.RoundToInt(tr.y);
+            int w = Mathf.RoundToInt(tr.width);
+            int h = Mathf.RoundToInt(tr.height);
+            Texture2D readableAtlas = CreateReadableTextureCopy(atlas);
+            if (readableAtlas == null)
+                return null;
+            Color[] px = readableAtlas.GetPixels(x, y, w, h);
+            UnityEngine.Object.Destroy(readableAtlas);
+            for (int i = 0; i < px.Length; i++)
+            {
+                Color c = px[i];
+                float lum = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
+                px[i] = new Color(lum, lum, lum, c.a);
+            }
+
+            var outTex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            outTex.SetPixels(px);
+            outTex.Apply();
+            GreyscaleSpriteBySpriteId[sid] = outTex;
+            return outTex;
+        }
 
         static Texture2D GetDeployShopTexture(UnitType type)
         {
@@ -302,10 +396,19 @@ namespace NexusGame
             if (_lastCardBarY > 0f && gui.y >= _lastCardBarY - 4f * hs)
                 return true;
 
-            // Dragon strike panel is interactive and should block board taps.
-            if (Game != null && Game.DragonPhase != null &&
-                new Rect(hp.x + 20f * hs, hp.yMax - 200f * hs, hp.width - 40f * hs, 190f * hs).Contains(gui))
-                return true;
+            // Dragon: victim-pick / AI panel blocks; hex-target phase uses board taps (thin hint strip only).
+            if (Game != null && Game.DragonPhase != null)
+            {
+                var dp = Game.DragonPhase;
+                bool tallPanel = Game.IsAiControlled(dp.Player) ||
+                    (dp.PendingHit != null && dp.PendingEnemies != null);
+                if (tallPanel &&
+                    new Rect(hp.x + 20f * hs, hp.yMax - 200f * hs, hp.width - 40f * hs, 190f * hs).Contains(gui))
+                    return true;
+                if (!tallPanel && dp.Options != null && dp.Options.Count > 0 &&
+                    new Rect(hp.x + 12f * hs, hp.yMax - 44f * hs, hp.width - 24f * hs, 36f * hs).Contains(gui))
+                    return true;
+            }
 
             // Full-screen battle modal (dim + panel) — block board when it is shown.
             if (Game != null && Game.Players.Count > 0 &&
@@ -406,10 +509,15 @@ namespace NexusGame
 
         struct FlyingRubiumChip
         {
-            public Vector2 StartGui;
-            public Vector2 EndGui;
+            /// <summary>World position on the mine tile — used during grow so the chip follows the board while panning.</summary>
+            public Vector3 WorldStart;
             public float StartTime;
-            public float Duration;
+            public float GrowWorldDuration;
+            public float FlyDuration;
+            public float TotalDuration;
+            /// <summary>Screen position where the fly phase starts (set once when grow ends).</summary>
+            public Vector2 FlyStartGui;
+            public bool FlyStartCaptured;
             public int Amount;
         }
 
@@ -440,30 +548,27 @@ namespace NexusGame
             if (Game == null)
                 return;
 
+            var cam = Camera.main;
+
             if (Game.TryConsumeMiningIncomeFlights(out var list))
             {
-                var cam = Camera.main;
                 if (cam != null)
                 {
                     float stagger = 0f;
                     const float staggerStep = 0.12f;
                     foreach (var info in list)
                     {
-                        var sp = cam.WorldToScreenPoint(info.WorldStart);
-                        if (sp.z <= 0f)
-                        {
-                            stagger += staggerStep;
-                            continue;
-                        }
-
-                        var startGui = new Vector2(sp.x, Screen.height - sp.y);
-                        var endGui = GetRubiumBankIconCenterGui();
+                        const float rubGrowWorld = 0.5f;
+                        const float rubFly = 0.62f;
                         _flyingRubium.Add(new FlyingRubiumChip
                         {
-                            StartGui = startGui,
-                            EndGui = endGui,
+                            WorldStart = info.WorldStart,
                             StartTime = Time.time + stagger,
-                            Duration = 0.72f,
+                            GrowWorldDuration = rubGrowWorld,
+                            FlyDuration = rubFly,
+                            TotalDuration = rubGrowWorld + rubFly,
+                            FlyStartGui = default,
+                            FlyStartCaptured = false,
                             Amount = info.Amount
                         });
                         stagger += staggerStep;
@@ -473,8 +578,27 @@ namespace NexusGame
 
             for (int i = _flyingRubium.Count - 1; i >= 0; i--)
             {
-                if (Time.time > _flyingRubium[i].StartTime + _flyingRubium[i].Duration)
+                if (Time.time > _flyingRubium[i].StartTime + _flyingRubium[i].TotalDuration)
                     _flyingRubium.RemoveAt(i);
+            }
+
+            if (cam != null)
+            {
+                for (int i = 0; i < _flyingRubium.Count; i++)
+                {
+                    var chip = _flyingRubium[i];
+                    if (chip.FlyStartCaptured)
+                        continue;
+                    float elapsed = Time.time - chip.StartTime;
+                    if (elapsed < chip.GrowWorldDuration)
+                        continue;
+                    var sp = cam.WorldToScreenPoint(chip.WorldStart);
+                    if (sp.z <= 0f)
+                        continue;
+                    chip.FlyStartGui = new Vector2(sp.x, Screen.height - sp.y);
+                    chip.FlyStartCaptured = true;
+                    _flyingRubium[i] = chip;
+                }
             }
 
             if (Game.TryConsumeVictoryPointFlights(out var vpList))
@@ -571,21 +695,60 @@ namespace NexusGame
                 };
             }
 
+            var flyCam = Camera.main;
             float now = Time.time;
             Color prev = GUI.color;
+            float iconBase = 28f * MainHudUiScale();
+            const float peakScale = 1.48f;
+            const float startScale = 0.35f;
             foreach (var f in _flyingRubium)
             {
-                float u = Mathf.InverseLerp(f.StartTime, f.StartTime + f.Duration, now);
-                if (u < 0f || u > 1f)
+                float elapsed = now - f.StartTime;
+                if (elapsed < 0f || elapsed > f.TotalDuration)
                     continue;
-                float t = u * u * (3f - 2f * u);
-                var p = Vector2.Lerp(f.StartGui, f.EndGui, t);
-                float iconBase = 28f * MainHudUiScale();
-                float h = Mathf.Lerp(iconBase * 0.82f, iconBase, t);
-                float half = h * 0.5f;
-                var r = new Rect(p.x - half, p.y - half, h * rub.AspectRatio, h);
-                float a = u < 0.08f ? u / 0.08f : 1f;
-                GUI.color = new Color(1f, 1f, 1f, a);
+
+                Vector2 p;
+                float h;
+                float alpha;
+                Vector2 endGui = GetRubiumBankIconCenterGui();
+
+                if (elapsed < f.GrowWorldDuration)
+                {
+                    if (flyCam == null)
+                        continue;
+                    var sp = flyCam.WorldToScreenPoint(f.WorldStart);
+                    if (sp.z <= 0f)
+                        continue;
+                    p = new Vector2(sp.x, Screen.height - sp.y);
+                    float gu = elapsed / f.GrowWorldDuration;
+                    float scaleT = Mathf.SmoothStep(0f, 1f, gu);
+                    h = iconBase * Mathf.Lerp(startScale, peakScale, scaleT);
+                    alpha = Mathf.SmoothStep(0f, 1f, Mathf.Min(1f, gu * 1.5f));
+                }
+                else
+                {
+                    Vector2 flyFrom = f.FlyStartGui;
+                    if (!f.FlyStartCaptured && flyCam != null)
+                    {
+                        var sp = flyCam.WorldToScreenPoint(f.WorldStart);
+                        flyFrom = sp.z > 0f
+                            ? new Vector2(sp.x, Screen.height - sp.y)
+                            : new Vector2(Screen.width * 0.5f, Screen.height * 0.42f);
+                    }
+                    else if (!f.FlyStartCaptured)
+                        flyFrom = new Vector2(Screen.width * 0.5f, Screen.height * 0.42f);
+
+                    float flyElapsed = elapsed - f.GrowWorldDuration;
+                    float fu = Mathf.Clamp01(f.FlyDuration > 0.001f ? flyElapsed / f.FlyDuration : 1f);
+                    float t = fu * fu * (3f - 2f * fu);
+                    p = Vector2.Lerp(flyFrom, endGui, t);
+                    h = Mathf.Lerp(iconBase * peakScale, iconBase, Mathf.SmoothStep(0f, 1f, fu));
+                    alpha = 1f;
+                }
+
+                float w = h * rub.AspectRatio;
+                var r = new Rect(p.x - w * 0.5f, p.y - h * 0.5f, w, h);
+                GUI.color = new Color(1f, 1f, 1f, alpha);
                 rub.Draw(r);
                 if (f.Amount > 1)
                     GUI.Label(new Rect(r.xMax + 2f, r.y, 36f * MainHudUiScale(), h), "+" + f.Amount,
@@ -1110,18 +1273,45 @@ namespace NexusGame
                 ? hudBottom + HudS(8f)
                 : hudBottom + HudS(8f) + battleLogPanelH + HudS(10f);
             if (Game.DragonPhase != null)
-                topY = Mathf.Max(topY, hp.yMax - HudS(220f));
-            // Keep main buttons above bottom card strip + dragon strip
-            float reserveBottom = _hudCardBarHeight + _hudPhaseRibbonHeight + HudS(24f) +
-                (Game.DragonPhase != null ? HudS(200f) : 0f);
+            {
+                var dp = Game.DragonPhase;
+                bool tallDragonPanel = Game.IsAiControlled(dp.Player) ||
+                    (dp.PendingHit != null && dp.PendingEnemies != null);
+                if (tallDragonPanel)
+                    topY = Mathf.Max(topY, hp.yMax - HudS(220f));
+            }
+
+            float dragonReserveBottom = 0f;
+            if (Game.DragonPhase != null)
+            {
+                var dp = Game.DragonPhase;
+                bool tallDragonPanel = Game.IsAiControlled(dp.Player) ||
+                    (dp.PendingHit != null && dp.PendingEnemies != null);
+                dragonReserveBottom = tallDragonPanel ? HudS(200f) : HudS(40f);
+            }
+
+            float reserveBottom = _hudCardBarHeight + _hudPhaseRibbonHeight + HudS(24f) + dragonReserveBottom;
             topY = Mathf.Min(topY, Mathf.Max(hp.y + HudS(60f), hp.yMax - reserveBottom));
 
-            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || Game.IsAiControlled(player))
-                GUI.enabled = false;
-            if (GUI.Button(new Rect(hp.x + HudS(10f), topY, HudS(160f), HudS(46f)), "End Turn"))
+            var dragonPhase = Game.DragonPhase;
+            bool dragonSkipButton = dragonPhase != null && !Game.IsAiControlled(dragonPhase.Player) &&
+                dragonPhase.PendingHit == null;
+            bool blockEndTurn = Game.BattlePhaseBlockingPlay || Game.IsAiControlled(player);
+            if (dragonPhase != null && !dragonSkipButton)
+                blockEndTurn = true;
+
+            GUI.enabled = !blockEndTurn;
+            string endTurnLabel = dragonSkipButton ? "SKIP DRAGON'S BREATH" : "End Turn";
+            float endTurnBtnW = dragonSkipButton ? HudS(280f) : HudS(160f);
+            if (GUI.Button(new Rect(hp.x + HudS(10f), topY, endTurnBtnW, HudS(46f)), endTurnLabel))
             {
-                Game.EndTurn();
-                _showCenterBuyModal = false;
+                if (dragonSkipButton)
+                    Game.SkipAllDragonStrikes();
+                else
+                {
+                    Game.EndTurn();
+                    _showCenterBuyModal = false;
+                }
             }
 
             GUI.enabled = true;
@@ -1407,9 +1597,16 @@ namespace NexusGame
             EnsureCardStyles();
 
             var hp = _hudLayoutPanel;
-            float barY = Game.DragonPhase != null
-                ? hp.yMax - HudS(200f) - _hudCardBarHeight - _hudPhaseRibbonHeight - HudS(12f)
-                : hp.yMax - _hudCardBarHeight - _hudPhaseRibbonHeight - HudS(12f);
+            float dragonLift = 0f;
+            if (Game.DragonPhase != null)
+            {
+                var dp = Game.DragonPhase;
+                bool tallDragon = Game.IsAiControlled(dp.Player) ||
+                    (dp.PendingHit != null && dp.PendingEnemies != null);
+                dragonLift = tallDragon ? HudS(200f) : HudS(40f);
+            }
+
+            float barY = hp.yMax - dragonLift - _hudCardBarHeight - _hudPhaseRibbonHeight - HudS(12f);
             barY = Mathf.Max(hp.y + HudS(40f), barY);
             _lastCardBarY = barY;
 
@@ -1434,18 +1631,16 @@ namespace NexusGame
 
             float splitGap = HudS(8f);
             float minTilePanelW = HudS(120f);
-            float cardsLabelW = HudS(48f);
             float stackBtnW = HudS(52f);
             float stackBtnH = HudS(32f);
             float stackGap = HudS(3f);
             float cardsHdrH = HudS(12f);
-            float cardsColGap = HudS(6f);
 
             int bCount = player.BattleEnergize?.Count ?? 0;
             int dCount = player.DeployEnergize?.Count ?? 0;
             int sCount = player.SecretMissions?.Count ?? 0;
 
-            float stackColW = cardsLabelW + cardsColGap + stackBtnW;
+            float stackColW = stackBtnW;
             float maxLeft = Mathf.Max(HudS(80f), innerW - minTilePanelW - splitGap);
             float leftW = Mathf.Min(stackColW, maxLeft);
 
@@ -1469,9 +1664,9 @@ namespace NexusGame
 
             float stackBlockH = cardsHdrH + HudS(4f) + stackBtnH * 3f + stackGap * 2f;
             float stackTop = contentY + Mathf.Max(0f, (contentH - stackBlockH) * 0.5f);
-            GUI.Label(new Rect(innerX, stackTop, cardsLabelW, cardsHdrH + HudS(2f)), "CARDS", cardsHeadingStyle);
+            GUI.Label(new Rect(innerX, stackTop, stackBtnW, cardsHdrH + HudS(2f)), "CARDS", cardsHeadingStyle);
 
-            float bx = innerX + cardsLabelW + cardsColGap;
+            float bx = innerX;
             float by = stackTop + cardsHdrH + HudS(4f);
             var rBattle = new Rect(bx, by, stackBtnW, stackBtnH);
             var rDeploy = new Rect(bx, by + stackBtnH + stackGap, stackBtnW, stackBtnH);
@@ -1624,7 +1819,8 @@ namespace NexusGame
             float insetBottom = S(144f);
             float contentLeft = panel.x + insetX;
             float contentWidth = panel.width - insetX * 2f;
-            float closeReserve = S(54f);
+            float closeSize = S(128f);
+            float closeReserve = closeSize + S(12f);
 
             int titleFont = TileInfoScaledFont(26f, scale, 16);
             var titleHdr = new GUIStyle(GUI.skin.label)
@@ -1639,11 +1835,10 @@ namespace NexusGame
             ApplyTileInfoFont(titleHdr);
             GUI.Label(new Rect(contentLeft, panel.y + S(26f), contentWidth - closeReserve, S(56f)), "TILE INFO",
                 titleHdr);
-            float closeSize = S(54f);
-            var closeRect = new Rect(panel.xMax - insetX - S(42f), panel.y + S(24f), closeSize, closeSize);
+            var closeRect = new Rect(panel.xMax - insetX - closeSize, panel.y + S(16f), closeSize, closeSize);
             if (GUI.Button(closeRect, GUIContent.none, GUIStyle.none))
                 _showCenterBuyModal = false;
-            int closeFont = TileInfoScaledFont(38f, scale, 18);
+            int closeFont = TileInfoScaledFont(76f, scale, 30);
             var closeXLabel = new GUIStyle(GUI.skin.label)
             {
                 fontSize = closeFont,
@@ -1664,7 +1859,7 @@ namespace NexusGame
             const int shopColumns = 3;
             float rowStride = nameBoxH + costGap + iconRowH + rowGap;
             float buyH = rowStride * 2f;
-            float energizeH = S(36f) + Mathf.Max(1, deployGrp) * S(36f) + S(48f);
+            float energizeH = deployGrp > 0 ? S(34f) : 0f;
 
             float occupyingLabelH = S(50f);
             float creatureRowH = S(172f);
@@ -1686,7 +1881,7 @@ namespace NexusGame
 
             float shopBlock = 0f;
             if (showShop)
-                shopBlock = S(20f) + S(24f) + buyH + S(22f) + energizeH + S(12f);
+                shopBlock = S(20f) + S(24f) + buyH + S(10f) + energizeH + S(12f);
 
             float sepAfterFixed = S(4f);
             float minScrollBody = S(100f);
@@ -1791,35 +1986,28 @@ namespace NexusGame
                 DrawBuyUnitGrid(gridR.x, gridR.y, gridR.width, shopColumns, nameBoxH, shopIconSz, iconRowH, costGap,
                     rowGap, depCardFont, true, drawCardChrome: false, uiScale: scale);
 
-                GUILayout.Space(S(12f));
-                int depBoxFont = TileInfoScaledFont(14f, scale, 9);
-                var depEnergizeHdr = new GUIStyle(GUI.skin.box)
+                if (deployGrp > 0)
                 {
-                    fontSize = depBoxFont,
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleLeft
-                };
-                ApplyTileInfoFont(depEnergizeHdr);
-                GUILayout.Label("Deployment Energize", depEnergizeHdr);
-                if (Game.AnyMovementOccurredThisTurn)
-                    GUILayout.Label("(Deployment locked after any movement this turn)");
-                foreach (var g in player.DeployEnergize.GroupBy(x => x).OrderBy(x => x.Key.ToString()))
-                {
-                    var id = g.Key;
-                    int n = g.Count();
-                    string note = id == EnergizeDeploymentId.FreeHuman &&
-                                  !Game.CanDeployToStartingHomeTile(player, sel)
-                        ? " [select home hex]"
-                        : "";
+                    GUILayout.Space(S(10f));
+                    int depBoxFont = TileInfoScaledFont(13f, scale, 9);
+                    bool hasFreeHuman = player.DeployEnergize != null &&
+                        player.DeployEnergize.Contains(EnergizeDeploymentId.FreeHuman);
+                    string deployText = hasFreeHuman
+                        ? "Deployment Energize: FREE Human available (highlighted in shop)"
+                        : $"Deployment Energize in hand: {deployGrp}";
                     if (Game.AnyMovementOccurredThisTurn)
-                        GUI.enabled = false;
-                    if (GUILayout.Button(EnergizeDeploymentCatalog.GetName(id) + " x" + n + note))
-                        Game.TryPlayDeploymentEnergize(id, sel);
-                    GUI.enabled = true;
+                        deployText += "  •  Deployment locked after movement";
+                    var depInfo = new GUIStyle(GUI.skin.label)
+                    {
+                        fontSize = depBoxFont,
+                        fontStyle = FontStyle.Bold,
+                        alignment = TextAnchor.MiddleCenter,
+                        wordWrap = true,
+                        normal = { textColor = new Color(0.88f, 0.94f, 1f, 0.96f) }
+                    };
+                    ApplyTileInfoFont(depInfo);
+                    GUILayout.Label(deployText, depInfo, GUILayout.MaxWidth(cw));
                 }
-
-                if (player.DeployEnergize == null || player.DeployEnergize.Count == 0)
-                    GUILayout.Label("(No deployment cards)");
             }
 
             GUILayout.Space(scrollBottomPad);
@@ -1985,7 +2173,7 @@ namespace NexusGame
             ApplyTileInfoFont(rubHeadStyle);
             ApplyTileInfoFont(rubYieldStyle);
 
-            int yield = tile.ExtraMineYield;
+            int yield = DisplayRubiumPerTurn(tile);
             string yieldText = yield > 0 ? yield.ToString() : "—";
             var rubGui = GetRubiumGui();
 
@@ -2050,6 +2238,16 @@ namespace NexusGame
                 TileType.Monolith => "Monolith",
                 _ => t.ToString()
             };
+        }
+
+        static int DisplayRubiumPerTurn(BoardTile tile)
+        {
+            if (tile == null)
+                return 0;
+            int y = Mathf.Max(0, tile.ExtraMineYield);
+            if (tile.Type == TileType.HomeBase)
+                return Mathf.Max(2, y);
+            return y;
         }
 
         void DrawModalHexPreview(Rect r, Color fill)
@@ -3647,14 +3845,13 @@ namespace NexusGame
                 return;
             }
 
-            GUI.Box(panelRect, "Rubium Dragon (end of movement)");
-
-            if (!string.IsNullOrEmpty(dp.LastLog))
-                GUI.Label(new Rect(hp.x + HudS(30f), hp.yMax - HudS(175f), hp.width - HudS(60f), HudS(22f)),
-                    dp.LastLog);
-
             if (dp.PendingHit != null && dp.PendingEnemies != null)
             {
+                GUI.Box(panelRect, "Rubium Dragon — remove casualty");
+                if (!string.IsNullOrEmpty(dp.LastLog))
+                    GUI.Label(new Rect(hp.x + HudS(30f), hp.yMax - HudS(175f), hp.width - HudS(60f), HudS(22f)),
+                        dp.LastLog);
+
                 float labelW = Mathf.Min(HudS(400f), hp.width - HudS(40f));
                 GUI.Label(new Rect(hp.x + HudS(30f), hp.yMax - HudS(150f), labelW, HudS(20f)),
                     "Hit! Roll " + dp.PendingHit.LastRoll + ". Remove one enemy:");
@@ -3681,53 +3878,20 @@ namespace NexusGame
                 return;
             }
 
-            float y = hp.yMax - HudS(150f);
-            int optionNum = 1;
-            float optLeft = hp.x + HudS(30f);
-            float optH = HudS(24f);
-            float skipW = HudS(120f);
-            float skipX = hp.xMax - HudS(160f);
-            float rowGap = HudS(28f);
-            foreach (var opt in dp.Options.ToList())
+            // Hex targets: orange rings on the board + End Turn becomes "SKIP DRAGON'S BREATH". Optional hint.
+            if (dp.Options != null && dp.Options.Count > 0)
             {
-                string label = "Dragon strike option #" + optionNum;
-                float mainW = Mathf.Max(HudS(80f), skipX - optLeft - HudS(8f));
-                if (GUI.Button(new Rect(optLeft, y, mainW, optH), label))
-                    Game.ExecuteDragonStrike(opt);
-                if (GUI.Button(new Rect(skipX, y, skipW, optH), "Skip"))
-                    Game.SkipDragonStrikeOption(opt);
-
-                DrawDragonTargetMarker(opt, optionNum);
-                y += rowGap;
-                optionNum++;
+                var hint = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale)),
+                    alignment = TextAnchor.MiddleCenter,
+                    wordWrap = true,
+                    normal = { textColor = new Color(0.92f, 0.93f, 0.96f, 0.9f) }
+                };
+                float hintH = HudS(36f);
+                GUI.Label(new Rect(hp.x + HudS(12f), hp.yMax - HudS(44f), hp.width - HudS(24f), hintH),
+                    "Tap an orange-highlighted hex to fire. Skip with the top-left button.", hint);
             }
-
-            if (GUI.Button(new Rect(optLeft, y, HudS(220f), HudS(26f)), "Skip all dragon strikes"))
-                Game.SkipAllDragonStrikes();
-        }
-
-        void DrawDragonTargetMarker(DragonStrikeOption opt, int optionNum)
-        {
-            if (opt == null || opt.TargetHex == null || opt.TargetHex.View == null)
-                return;
-            var cam = Camera.main;
-            if (cam == null)
-                return;
-
-            var sp = cam.WorldToScreenPoint(opt.TargetHex.View.transform.position);
-            if (sp.z <= 0f)
-                return;
-
-            float off = HudS(12f);
-            float x = sp.x - off;
-            float y = Screen.height - sp.y - off;
-            float sz = HudS(24f);
-            var r = new Rect(x, y, sz, sz);
-
-            Color prev = GUI.color;
-            GUI.color = new Color(1f, 0.9f, 0.1f, 0.9f);
-            GUI.Box(r, optionNum.ToString());
-            GUI.color = prev;
         }
 
         void DrawBuyUnitGrid(float x0, float y0, float width, int columns, float nameBoxH, float shopIconSize,
@@ -3770,17 +3934,21 @@ namespace NexusGame
             bool drawCardChrome = true, float uiScale = 1f)
         {
             var player = Game.CurrentPlayer;
+            var selectedHome = InputController != null ? InputController.SelectedTile : null;
+            bool canPlayFreeHuman = type == UnitType.Human &&
+                player.DeployEnergize != null &&
+                player.DeployEnergize.Contains(EnergizeDeploymentId.FreeHuman) &&
+                !Game.AnyMovementOccurredThisTurn &&
+                Game.CanDeployToStartingHomeTile(player, selectedHome);
             int maxOff = Mathf.Max(0, baseCost - 1);
             int use = Mathf.Min(maxOff, player.DeploymentPurchaseDiscountRubium);
             int pay = baseCost - use;
-            bool canAfford = player.Rubium >= pay;
+            int effectivePay = canPlayFreeHuman ? 0 : pay;
+            bool canAfford = canPlayFreeHuman || player.Rubium >= pay;
 
             if (largeShopCard)
             {
-                Color prevC = GUI.color;
-                if (!canAfford)
-                    GUI.color = new Color(0.55f, 0.55f, 0.58f);
-                Texture2D shopArt = GetDeployShopTexture(type);
+                Texture2D shopArt = canAfford ? GetDeployShopTexture(type) : GetDeployShopTextureGreyscale(type);
                 if (shopArt != null)
                     GUI.DrawTexture(cardRect, shopArt, ScaleMode.ScaleToFit, true);
                 else
@@ -3791,14 +3959,26 @@ namespace NexusGame
                         cardRect.x + (cardRect.width - s) * 0.5f,
                         cardRect.y + (cardRect.height - s) * 0.5f,
                         s, s);
-                    DrawUnitMiniIcon(fallback, type, TintedIconOwnerForUnitOnSide(type, player));
+                    if (canAfford)
+                        DrawUnitMiniIcon(fallback, type, TintedIconOwnerForUnitOnSide(type, player));
+                    else
+                        DrawUnitMiniIconGreyscaleLuminance(fallback, type, TintedIconOwnerForUnitOnSide(type, player));
                 }
 
                 if (drawCardChrome)
-                    DrawOutlineRect(cardRect, new Color(0.88f, 0.78f, 0.28f, 0.55f), 1.5f);
+                {
+                    var chrome = canPlayFreeHuman
+                        ? new Color(0.34f, 1f, 0.82f, 0.95f)
+                        : new Color(0.88f, 0.78f, 0.28f, 0.55f);
+                    DrawOutlineRect(cardRect, chrome, 1.5f);
+                }
                 if (GUI.Button(cardRect, GUIContent.none, GUIStyle.none) && canAfford)
-                    TryBuyUnit(type, player, use, pay);
-                GUI.color = prevC;
+                {
+                    if (canPlayFreeHuman)
+                        Game.TryPlayDeploymentEnergize(EnergizeDeploymentId.FreeHuman, selectedHome);
+                    else
+                        TryBuyUnit(type, player, use, pay);
+                }
                 return;
             }
 
@@ -3851,10 +4031,6 @@ namespace NexusGame
                 nameH = Mathf.Max(16f, nameMaxBottom - nameTop - costGap);
             }
 
-            Color prev = GUI.color;
-            if (!canAfford)
-                GUI.color = new Color(0.55f, 0.55f, 0.58f);
-
             if (largeShopCard)
             {
                 DrawTintedRect(cardRect, new Color(0.09f, 0.1f, 0.14f, 0.96f));
@@ -3871,24 +4047,32 @@ namespace NexusGame
                 iconTop,
                 iconUse,
                 iconUse);
-            DrawUnitMiniIcon(shopIconRect, type, TintedIconOwnerForUnitOnSide(type, player));
+            if (canAfford)
+                DrawUnitMiniIcon(shopIconRect, type, TintedIconOwnerForUnitOnSide(type, player));
+            else
+                DrawUnitMiniIconGreyscaleLuminance(shopIconRect, type, TintedIconOwnerForUnitOnSide(type, player));
 
             var nameLabelRect = new Rect(cardRect.x + pad, nameTop, cardRect.width - pad * 2f, nameH);
             GUI.Label(nameLabelRect, displayName, nameStyle);
 
             if (GUI.Button(cardRect, GUIContent.none, GUIStyle.none) && canAfford)
-                TryBuyUnit(type, player, use, pay);
+            {
+                if (canPlayFreeHuman)
+                    Game.TryPlayDeploymentEnergize(EnergizeDeploymentId.FreeHuman, selectedHome);
+                else
+                    TryBuyUnit(type, player, use, pay);
+            }
 
-            GUI.color = prev;
+            Color prev = GUI.color;
 
             var rub = GetRubiumGui();
             float rubH = largeShopCard ? Mathf.Min(14f, barH - 8f) : 18f;
-            float iconW = rub.IsEmpty ? 0f : rubH * rub.AspectRatio;
-            float textW = largeShopCard ? 44f : 36f;
+            float iconW = canPlayFreeHuman || rub.IsEmpty ? 0f : rubH * rub.AspectRatio;
+            float textW = canPlayFreeHuman ? (largeShopCard ? 86f : 58f) : (largeShopCard ? 44f : 36f);
             float rowW = iconW + 6f + textW;
             float startX = cardRect.x + (cardRect.width - rowW) * 0.5f;
             float costLineY = costY + (barH - 1f - rubH) * 0.5f;
-            if (!rub.IsEmpty)
+            if (!rub.IsEmpty && !canPlayFreeHuman)
                 rub.Draw(startX, costLineY, rubH);
             var costStyle = new GUIStyle(GUI.skin.label)
             {
@@ -3900,7 +4084,10 @@ namespace NexusGame
                 ApplyTileInfoFont(costStyle);
             if (!canAfford)
                 GUI.color = new Color(0.55f, 0.55f, 0.58f);
-            GUI.Label(new Rect(startX + iconW + 6f, costLineY, textW, rubH), pay.ToString(), costStyle);
+            if (canPlayFreeHuman)
+                costStyle.normal.textColor = new Color(0.34f, 1f, 0.82f, 1f);
+            GUI.Label(new Rect(startX + iconW + 6f, costLineY, textW, rubH),
+                canPlayFreeHuman ? "FREE" : effectivePay.ToString(), costStyle);
             GUI.color = prev;
         }
 
@@ -3977,7 +4164,7 @@ namespace NexusGame
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Mine", tiny, GUILayout.Width(30f));
-            int my = popupTile.ExtraMineYield;
+            int my = DisplayRubiumPerTurn(popupTile);
             var chipGui = GetOreChipGui(my);
             if (chipGui.IsEmpty && my > 0)
                 chipGui = GetRubiumGui();
@@ -4205,6 +4392,47 @@ namespace NexusGame
 
         static PlayerState TintedIconOwnerForBattleSide(UnitType t, PlayerState rollingPlayer) =>
             UsesPerPlayerTint(t) ? rollingPlayer : null;
+
+        void DrawNexusGuiImageGreyscaleLuminance(Rect r, NexusGuiImage img)
+        {
+            if (img.IsEmpty || r.height <= 0f)
+                return;
+            if (img.Texture != null)
+            {
+                Texture2D g = GetOrCreateGreyscaleFullTexture(img.Texture);
+                if (g != null)
+                    GUI.DrawTexture(r, g, ScaleMode.ScaleToFit, true);
+                return;
+            }
+
+            if (img.Sprite != null)
+            {
+                Texture2D g = GetOrCreateGreyscaleSpritePixels(img.Sprite);
+                if (g != null)
+                    GUI.DrawTexture(r, g, ScaleMode.ScaleToFit, true);
+            }
+        }
+
+        void DrawUnitMiniIconGreyscaleLuminance(Rect r, UnitType type, PlayerState ownerForTint)
+        {
+            NexusGuiImage icon = UsesPerPlayerTint(type) && ownerForTint != null
+                ? IconForUnitWithOwner(type, ownerForTint)
+                : GetUnitIcon(type);
+            if (!icon.IsEmpty)
+            {
+                DrawNexusGuiImageGreyscaleLuminance(r, icon);
+                return;
+            }
+
+            DrawTintedRect(r, new Color(0.22f, 0.22f, 0.26f));
+            var letterStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
+                clipping = TextClipping.Clip
+            };
+            GUI.Label(r, UnitUiName(type).Substring(0, 1), letterStyle);
+        }
 
         void DrawUnitMiniIcon(Rect r, UnitType type, PlayerState ownerForTint = null, bool useGraySprite = false)
         {

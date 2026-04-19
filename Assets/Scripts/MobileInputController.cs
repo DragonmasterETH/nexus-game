@@ -24,6 +24,11 @@ namespace NexusGame
                 new System.Collections.Generic.HashSet<UnitType>();
             readonly System.Collections.Generic.HashSet<BoardTile> _activeMoveDestinationHighlights =
                 new System.Collections.Generic.HashSet<BoardTile>();
+            readonly System.Collections.Generic.HashSet<BoardTile> _activeDragonStrikeHighlights =
+                new System.Collections.Generic.HashSet<BoardTile>();
+
+            static readonly Color DragonStrikeRingColor = new Color(1f, 0.52f, 0.08f, 1f);
+            static readonly Color MoveDestinationRingColor = new Color(0.2f, 0.95f, 0.25f, 1f);
 
             // Drag-to-move support:
             // - If user presses on a movable unit, dragging selects all movable units of that unit type on the source hex.
@@ -60,6 +65,11 @@ namespace NexusGame
                 _boardCam = FindObjectOfType<BoardCameraPanZoom>();
             if (Hud == null)
                 Hud = FindObjectOfType<DemoHUD>();
+        }
+
+        void LateUpdate()
+        {
+            RefreshDragonStrikeHighlights();
         }
 
         void Update()
@@ -212,6 +222,8 @@ namespace NexusGame
         void PrepareDragFromPointer(Vector2 screenPos)
         {
             if (Game == null || Game.CurrentPlayer == null || Game.IsAiControlled(Game.CurrentPlayer))
+                return;
+            if (Game.DragonPhase != null)
                 return;
             if (IsBattleOverlayBlockingBoardInput())
                 return;
@@ -382,6 +394,22 @@ namespace NexusGame
 
             if (DebugClicks)
                 Debug.Log($"CLICK RESOLVED: tile=({clickedTile.Q},{clickedTile.R}) type={clickedTile.Type}");
+
+            if (Game != null && Game.DragonPhase != null && !Game.IsAiControlled(Game.DragonPhase.Player) &&
+                Game.DragonPhase.PendingHit == null && Game.DragonPhase.Options != null)
+            {
+                foreach (var opt in Game.DragonPhase.Options)
+                {
+                    if (opt == null || opt.TargetHex != clickedTile)
+                        continue;
+                    Game.ExecuteDragonStrike(opt);
+                    RecordLastTapForDoubleTap(clickedTile, screenPos);
+                    return;
+                }
+
+                RecordLastTapForDoubleTap(clickedTile, screenPos);
+                return;
+            }
 
             bool isDoubleTap = _lastTapValid &&
                                _lastTapQ == clickedTile.Q &&
@@ -887,12 +915,63 @@ namespace NexusGame
             var tf = tile.View.transform.Find("MoveHighlight");
             if (tf == null)
                 return;
+            var lr = tf.GetComponent<LineRenderer>();
+            if (lr != null && on)
+                lr.startColor = lr.endColor = MoveDestinationRingColor;
 
             tf.gameObject.SetActive(on);
             if (on)
                 _activeMoveDestinationHighlights.Add(tile);
             else
                 _activeMoveDestinationHighlights.Remove(tile);
+        }
+
+        void RefreshDragonStrikeHighlights()
+        {
+            ClearDragonStrikeHighlights();
+            if (Game == null || Game.Board == null)
+                return;
+            var dp = Game.DragonPhase;
+            if (dp == null || dp.Player == null)
+                return;
+            if (Game.IsAiControlled(dp.Player))
+                return;
+            if (dp.PendingHit != null)
+                return;
+            if (dp.Options == null || dp.Options.Count == 0)
+                return;
+
+            foreach (var opt in dp.Options)
+            {
+                if (opt?.TargetHex != null)
+                    SetDragonStrikeHighlight(opt.TargetHex, true);
+            }
+        }
+
+        void ClearDragonStrikeHighlights()
+        {
+            var toClear = new System.Collections.Generic.List<BoardTile>(_activeDragonStrikeHighlights);
+            foreach (var tile in toClear)
+                SetDragonStrikeHighlight(tile, false);
+            _activeDragonStrikeHighlights.Clear();
+        }
+
+        void SetDragonStrikeHighlight(BoardTile tile, bool on)
+        {
+            if (tile == null || tile.View == null)
+                return;
+            var tf = tile.View.transform.Find("MoveHighlight");
+            if (tf == null)
+                return;
+            var lr = tf.GetComponent<LineRenderer>();
+            if (lr != null)
+                lr.startColor = lr.endColor = on ? DragonStrikeRingColor : MoveDestinationRingColor;
+
+            tf.gameObject.SetActive(on);
+            if (on)
+                _activeDragonStrikeHighlights.Add(tile);
+            else
+                _activeDragonStrikeHighlights.Remove(tile);
         }
 
         bool IsBattleOverlayBlockingBoardInput()
