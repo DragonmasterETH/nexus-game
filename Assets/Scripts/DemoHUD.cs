@@ -1820,8 +1820,6 @@ namespace NexusGame
             float contentLeft = panel.x + insetX;
             float contentWidth = panel.width - insetX * 2f;
             float closeSize = S(128f);
-            float closeReserve = closeSize + S(12f);
-
             int titleFont = TileInfoScaledFont(26f, scale, 16);
             var titleHdr = new GUIStyle(GUI.skin.label)
             {
@@ -1833,7 +1831,7 @@ namespace NexusGame
                 normal = { textColor = new Color(0.96f, 0.98f, 1f, 1f) }
             };
             ApplyTileInfoFont(titleHdr);
-            GUI.Label(new Rect(contentLeft, panel.y + S(26f), contentWidth - closeReserve, S(56f)), "TILE INFO",
+            GUI.Label(new Rect(contentLeft, panel.y + S(26f), contentWidth, S(56f)), "TILE INFO",
                 titleHdr);
             var closeRect = new Rect(panel.xMax - insetX - closeSize, panel.y + S(16f), closeSize, closeSize);
             if (GUI.Button(closeRect, GUIContent.none, GUIStyle.none))
@@ -1848,6 +1846,14 @@ namespace NexusGame
                 normal = { textColor = new Color(0.92f, 0.22f, 0.22f, 1f) }
             };
             ApplyTileInfoFont(closeXLabel);
+            // Faux-bold stroke so the glyph reads heavier on all device DPIs.
+            Color prevCloseColor = closeXLabel.normal.textColor;
+            closeXLabel.normal.textColor = new Color(0.48f, 0.08f, 0.08f, 1f);
+            GUI.Label(new Rect(closeRect.x - S(1.8f), closeRect.y, closeRect.width, closeRect.height), "×", closeXLabel);
+            GUI.Label(new Rect(closeRect.x + S(1.8f), closeRect.y, closeRect.width, closeRect.height), "×", closeXLabel);
+            GUI.Label(new Rect(closeRect.x, closeRect.y - S(1.8f), closeRect.width, closeRect.height), "×", closeXLabel);
+            GUI.Label(new Rect(closeRect.x, closeRect.y + S(1.8f), closeRect.width, closeRect.height), "×", closeXLabel);
+            closeXLabel.normal.textColor = prevCloseColor;
             GUI.Label(closeRect, "×", closeXLabel);
 
             int deployGrp = player.DeployEnergize == null ? 0 : player.DeployEnergize.GroupBy(x => x).Count();
@@ -2450,22 +2456,24 @@ namespace NexusGame
         {
             float padX = 3f * scale;
             float padY = 3f * scale;
-            float maxInCell = Mathf.Min(cell.height - padY * 2f, cell.width * 0.74f);
-            float iconSz = Mathf.Clamp(Mathf.Max(56f * scale, maxInCell * 0.97f), 24f * scale, maxInCell);
-            var iconR = new Rect(cell.x + padX, cell.y + (cell.height - iconSz) * 0.5f, iconSz, iconSz);
-            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, tintOwner), useGraySprite: count <= 0);
-
             int countFont = TileInfoScaledFont(27f, scale, 16);
             var countStyle = new GUIStyle(GUI.skin.label)
             {
                 fontSize = countFont,
                 fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft,
+                alignment = TextAnchor.MiddleCenter,
                 clipping = TextClipping.Overflow
             };
             ApplyTileInfoFont(countStyle);
-            float countX = iconR.xMax + 6f * scale;
-            var countRect = new Rect(countX, cell.y + padY, cell.xMax - countX - padX, cell.height - padY * 2f);
+            float countH = Mathf.Max(18f * scale, countStyle.CalcHeight(new GUIContent("×00"), cell.width));
+            float iconAreaH = Mathf.Max(12f * scale, cell.height - padY * 2f - countH - 2f * scale);
+            float maxInCell = Mathf.Min(iconAreaH, cell.width - padX * 2f);
+            float iconSz = Mathf.Clamp(Mathf.Max(56f * scale, maxInCell * 0.95f), 24f * scale, maxInCell);
+            var iconR = new Rect(cell.x + (cell.width - iconSz) * 0.5f, cell.y + padY + (iconAreaH - iconSz) * 0.5f, iconSz,
+                iconSz);
+            DrawUnitMiniIcon(iconR, type, TintedIconOwnerForUnitOnSide(type, tintOwner), useGraySprite: count <= 0);
+
+            var countRect = new Rect(cell.x + padX, cell.yMax - padY - countH, cell.width - padX * 2f, countH);
             Color p = GUI.color;
             if (count <= 0)
                 GUI.color = new Color(0.42f, 0.42f, 0.46f);
