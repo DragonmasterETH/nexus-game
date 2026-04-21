@@ -107,7 +107,7 @@ namespace NexusGame
                 }
 
                 if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting &&
-                    !Game.IsAiControlled(Game.SecretMissionOffer.Attacker))
+                    !Game.IsAiControlled(Game.SecretMissionOffer.Player))
                 {
                     yield return tick;
                     continue;
@@ -125,7 +125,7 @@ namespace NexusGame
                 else if (Game.CasualtyPick != null && Game.IsAiControlled(Game.CasualtyPick.Owner))
                     SubmitAiCasualties();
                 else if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting &&
-                         Game.IsAiControlled(Game.SecretMissionOffer.Attacker))
+                         Game.IsAiControlled(Game.SecretMissionOffer.Player))
                     PlayBestSecretOrSkip();
 
                 yield return tick;
@@ -154,7 +154,7 @@ namespace NexusGame
             if (Game.CasualtyPick != null && Game.IsAiControlled(Game.CasualtyPick.Owner))
                 return true;
             if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting &&
-                Game.IsAiControlled(Game.SecretMissionOffer.Attacker))
+                Game.IsAiControlled(Game.SecretMissionOffer.Player))
                 return true;
             return false;
         }
@@ -247,7 +247,7 @@ namespace NexusGame
                 return;
             }
 
-            var p = offer.Attacker;
+            var p = offer.Player;
             int bestIdx = -1;
             var bestVp = -1;
             foreach (var i in offer.EligibleIndices)

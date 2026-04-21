@@ -451,8 +451,10 @@ namespace NexusGame
                 if (!AutoResolveBattlesQuick)
                     yield return StartCoroutine(EnergizePassCoroutine(attacker, defender, hex));
 
+                int attStart = CountParticipants(hex, attacker);
                 int defStart = CountParticipants(hex, defender);
                 bool defLostDragon = false;
+                bool attLostDragon = false;
 
                 var battleLines = new List<string>();
                 _liveBattleLines = battleLines;
@@ -461,16 +463,19 @@ namespace NexusGame
                     hex, attacker, defender, _battleRng,
                     (a, d, line) => AppendBattleLog(line),
                     _ => { },
-                    () => { defLostDragon = true; }));
+                    () => { defLostDragon = true; },
+                    () => { attLostDragon = true; }));
 
                 foreach (var l in battleLines)
                     log.AppendLine(l);
 
                 _liveBattleLines = null;
 
-                RefreshPoolsLocal(hex, attacker, defender, out _, out var dLeft);
+                RefreshPoolsLocal(hex, attacker, defender, out var aLeft, out var dLeft);
+                int attEnd = aLeft.Count;
                 int defEnd = dLeft.Count;
                 int defCasualties = defStart - defEnd;
+                int attCasualties = attStart - attEnd;
                 bool attackerWin = defEnd == 0;
 
                 if (attackerWin)
@@ -502,7 +507,21 @@ namespace NexusGame
                     }
                 }
                 else
+                {
                     log.AppendLine("Defender holds the hex.");
+                    if (!AutoResolveBattlesQuick)
+                    {
+                        SecretMissionOffer = BuildSecretOffer(defender, attCasualties, attStart, attLostDragon);
+                        while (SecretMissionOffer != null && SecretMissionOffer.Waiting)
+                            yield return null;
+                        SecretMissionOffer = null;
+                        if (IsGameOver)
+                        {
+                            log.AppendLine("---");
+                            break;
+                        }
+                    }
+                }
 
                 log.AppendLine("---");
             }
@@ -518,15 +537,20 @@ namespace NexusGame
             Debug.Log("[Battle] --- Phase complete ---");
         }
 
-        SecretMissionOfferState BuildSecretOffer(PlayerState attacker, int casualtiesInflicted, int defStartCount, bool dragonKilled)
+        /// <param name="winner">Player who won the battle (attacker if they cleared the hex, else defender).</param>
+        /// <param name="enemyCasualties">Casualties inflicted on the opponent (for kill-count missions).</param>
+        /// <param name="enemyStartCount">Enemy pieces at battle start (reserved for mission rules).</param>
+        /// <param name="enemyDragonKilled">True if the opponent lost a Rubium Dragon this battle.</param>
+        SecretMissionOfferState BuildSecretOffer(PlayerState winner, int enemyCasualties, int enemyStartCount,
+            bool enemyDragonKilled)
         {
             var eligible = new List<int>();
-            for (int i = 0; i < attacker.SecretMissions.Count; i++)
+            for (int i = 0; i < winner.SecretMissions.Count; i++)
             {
-                var s = attacker.SecretMissions[i];
+                var s = winner.SecretMissions[i];
                 if (s.Kind != SecretMissionKind.Battle)
                     continue;
-                if (MeetsBattleMission(s, casualtiesInflicted, defStartCount, dragonKilled))
+                if (MeetsBattleMission(s, enemyCasualties, enemyStartCount, enemyDragonKilled))
                     eligible.Add(i);
             }
 
@@ -535,22 +559,22 @@ namespace NexusGame
 
             return new SecretMissionOfferState
             {
-                Attacker = attacker,
+                Player = winner,
                 EligibleIndices = eligible,
                 Waiting = true
             };
         }
 
-        static bool MeetsBattleMission(SecretMissionInHand s, int defenderCasualties, int _, bool dragonKilled)
+        static bool MeetsBattleMission(SecretMissionInHand s, int enemyCasualties, int _, bool enemyDragonKilled)
         {
             switch (s.MissionTypeId)
             {
                 case SecretMissionTypes.WinAnyBattle:
                     return true;
                 case SecretMissionTypes.WinBattleKillTwoPlus:
-                    return defenderCasualties >= 2;
+                    return enemyCasualties >= 2;
                 case SecretMissionTypes.WinBattleEnemyLostDragon:
-                    return dragonKilled;
+                    return enemyDragonKilled;
                 default:
                     return false;
             }
@@ -563,7 +587,7 @@ namespace NexusGame
             if (!SecretMissionOffer.EligibleIndices.Contains(indexInHand))
                 return;
 
-            var p = SecretMissionOffer.Attacker;
+            var p = SecretMissionOffer.Player;
             var s = p.SecretMissions[indexInHand];
             p.VictoryPoints += s.VictoryPoints;
             QueueVictoryPointHudFlight(p, s.VictoryPoints);
@@ -578,7 +602,7 @@ namespace NexusGame
             if (SecretMissionOffer != null)
             {
                 Debug.Log(
-                    $"[Battle] Secret mission: P{SecretMissionOffer.Attacker.PlayerIndex + 1} skipped optional play");
+                    $"[Battle] Secret mission: P{SecretMissionOffer.Player.PlayerIndex + 1} skipped optional play");
                 SecretMissionOffer.Waiting = false;
             }
         }
@@ -737,7 +761,8 @@ namespace NexusGame
             System.Random rng,
             Action<PlayerState, PlayerState, string> logLine,
             Action<int> onDefenderCasualty,
-            Action onDefenderDragonKilled)
+            Action onDefenderDragonKilled,
+            Action onAttackerDragonKilled)
         {
             void Log(string s)
             {
@@ -851,6 +876,8 @@ namespace NexusGame
                         foreach (var v in BattleResolver.PickCasualtiesWeakestFirst(aliveAtt, capAtt))
                         {
                             Log($"    → P{attacker.PlayerIndex + 1} dies: {v.Definition.Type}");
+                            if (v.Definition.Type == UnitType.RubiumDragon)
+                                onAttackerDragonKilled();
                             RemoveUnit(v);
                         }
                     }
@@ -871,7 +898,12 @@ namespace NexusGame
                             Owner = attacker,
                             Pool = validPool,
                             Required = required,
-                            Selected = new List<UnitInstance>()
+                            Selected = new List<UnitInstance>(),
+                            OnEachRemove = u =>
+                            {
+                                if (u != null && u.Definition.Type == UnitType.RubiumDragon)
+                                    onAttackerDragonKilled();
+                            }
                         };
                         while (CasualtyPick != null)
                             yield return null;
@@ -1241,7 +1273,8 @@ namespace NexusGame
 
     public class SecretMissionOfferState
     {
-        public PlayerState Attacker;
+        /// <summary>Battle winner who may play one eligible secret (was only the attacker; now attacker or defender).</summary>
+        public PlayerState Player;
         public List<int> EligibleIndices;
         public bool Waiting;
     }
