@@ -163,10 +163,6 @@ namespace NexusGame
             _cardBadgeStyle.fontSize = Mathf.Max(12, Mathf.RoundToInt(12f * s));
             _cardColumnLabelStyle.fontSize = Mathf.Max(12, Mathf.RoundToInt(12f * s));
 
-            EnsureTopIconButtonStyle();
-            _topIconButtonStyle.fontSize = Mathf.Max(18, Mathf.RoundToInt(24f * s));
-            ApplyTileInfoFont(_topIconButtonStyle);
-
             if (_flyRubiumAmountStyle != null)
                 _flyRubiumAmountStyle.fontSize = Mathf.Max(14, Mathf.RoundToInt(14f * s));
             if (_flyVpAmountStyle != null)
@@ -381,6 +377,8 @@ namespace NexusGame
             // Any overlay/modal captures board input.
             if (_showCenterBuyModal || _showQuickRef || _showSettingsMenu || _showMyEnergizeHelp || _showEndGameStats)
                 return true;
+            if (Game != null && Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting)
+                return true;
             if (_handPileViewer != HandPileViewerKind.None)
                 return true;
 
@@ -482,6 +480,8 @@ namespace NexusGame
         static Texture2D _dimTex;
         readonly Dictionary<UnitType, NexusGuiImage> _unitIconCache = new Dictionary<UnitType, NexusGuiImage>();
         readonly Dictionary<UnitType, NexusGuiImage> _grayUnitIconCache = new Dictionary<UnitType, NexusGuiImage>();
+        readonly Dictionary<UnitType, NexusGuiImage> _battleBannerNeutralIconCache =
+            new Dictionary<UnitType, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _dragonIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _striderIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
         readonly Dictionary<int, NexusGuiImage> _fungoidIconByPlayerIndex = new Dictionary<int, NexusGuiImage>();
@@ -502,9 +502,18 @@ namespace NexusGame
         GUIStyle _battlePrimaryButtonStyleCached;
         GUIStyle _battleSecondaryButtonStyleCached;
         bool _battleHudStylesReady;
+        Texture2D _endTurnBattleButtonTex;
+        Texture2D _endTurnFireballButtonTex;
+        Texture2D _endTurnNextTurnButtonTex;
+        bool _endTurnAdvanceButtonTexTried;
+        GUIStyle _endTurnAdvanceOverlayLabelStyle;
+        float _endTurnAdvanceOverlayLabelStyleScale;
         GUIStyle _battlePanelBoxStyle;
         Texture2D _battlePanelBoxTex;
-        GUIStyle _topIconButtonStyle;
+        GUIStyle _mainBoardTopIconHitStyle;
+        bool _mainHudTopBarIconsTried;
+        NexusGuiImage _mainHudTopBarInfoIcon;
+        NexusGuiImage _mainHudTopBarSettingsIcon;
         GUIStyle _flyRubiumAmountStyle;
         GUIStyle _flyVpAmountStyle;
         GUIStyle _flyVpFallbackStyle;
@@ -1193,13 +1202,52 @@ namespace NexusGame
             bool prevEnabled = GUI.enabled;
             if (blockTopIcons)
                 GUI.enabled = false;
-            if (GUI.Button(new Rect(iconRight, iconY, iconBtn, iconBtn), "\u2139", _topIconButtonStyle))
+
+            var infoIconRect = new Rect(iconRight, iconY, iconBtn, iconBtn);
+            var settingsIconRect = new Rect(iconRight + iconBtn + HudS(10f), iconY, iconBtn, iconBtn);
+            if (!_mainHudTopBarIconsTried)
+            {
+                _mainHudTopBarIconsTried = true;
+                _mainHudTopBarInfoIcon = NexusGuiArt.LoadMainHudInfoIcon();
+                _mainHudTopBarSettingsIcon = NexusGuiArt.LoadMainHudSettingsIcon();
+            }
+
+            if (Event.current.type == EventType.Repaint)
+            {
+                if (!_mainHudTopBarInfoIcon.IsEmpty)
+                    _mainHudTopBarInfoIcon.DrawAspectFit(infoIconRect);
+                else
+                {
+                    var fb = new GUIStyle(GUI.skin.label)
+                    {
+                        fontSize = Mathf.Max(18, Mathf.RoundToInt(22f * _hudFontScale)),
+                        alignment = TextAnchor.MiddleCenter
+                    };
+                    ApplyTileInfoFont(fb);
+                    GUI.Label(infoIconRect, "\u2139", fb);
+                }
+
+                if (!_mainHudTopBarSettingsIcon.IsEmpty)
+                    _mainHudTopBarSettingsIcon.DrawAspectFit(settingsIconRect);
+                else
+                {
+                    var fb = new GUIStyle(GUI.skin.label)
+                    {
+                        fontSize = Mathf.Max(18, Mathf.RoundToInt(22f * _hudFontScale)),
+                        alignment = TextAnchor.MiddleCenter
+                    };
+                    ApplyTileInfoFont(fb);
+                    GUI.Label(settingsIconRect, "\u2699", fb);
+                }
+            }
+
+            if (GUI.Button(infoIconRect, GUIContent.none, MainBoardTopIconHitStyle()))
             {
                 _showSettingsMenu = false;
                 _showQuickRef = true;
             }
 
-            if (GUI.Button(new Rect(iconRight + iconBtn + 10f, iconY, iconBtn, iconBtn), "\u2699", _topIconButtonStyle))
+            if (GUI.Button(settingsIconRect, GUIContent.none, MainBoardTopIconHitStyle()))
             {
                 _showQuickRef = false;
                 _showSettingsMenu = true;
@@ -1302,9 +1350,53 @@ namespace NexusGame
                 blockEndTurn = true;
 
             GUI.enabled = !blockEndTurn;
-            string endTurnLabel = dragonSkipButton ? "SKIP DRAGON'S BREATH" : "End Turn";
-            float endTurnBtnW = dragonSkipButton ? HudS(280f) : HudS(160f);
-            if (GUI.Button(new Rect(hp.x + HudS(10f), topY, endTurnBtnW, HudS(46f)), endTurnLabel))
+            string endTurnLabel = dragonSkipButton ? "SKIP DRAGON'S BREATH" : EndTurnAdvanceLabel(player);
+            EnsureEndTurnAdvanceButtonTextures();
+            var endTurnVisual = GetEndTurnButtonVisualKind(player, dragonSkipButton);
+            Texture2D endTurnBg = GetEndTurnAdvanceButtonTexture(endTurnVisual);
+
+            float btnH = HudS(112f);
+            float btnW;
+            if (endTurnBg != null)
+            {
+                // Square hit area and framing; art scales inside via ScaleToFit.
+                btnW = btnH;
+            }
+            else if (dragonSkipButton)
+                btnW = HudS(560f);
+            else
+                btnW = HudS(endTurnLabel.Length >= 11 ? 440f : 340f);
+
+            var endTurnRect = new Rect(hp.x + HudS(10f), topY, btnW, btnH);
+
+            Color endTurnGuiPrev = GUI.color;
+            bool breatheIdleEndTurn =
+                !dragonSkipButton &&
+                !blockEndTurn &&
+                !Game.HasOptionalPreEndTurnActions(player);
+            if (breatheIdleEndTurn)
+            {
+                float a = 0.75f + 0.06f * Mathf.Sin(Time.realtimeSinceStartup * 5.8f);
+                GUI.color = new Color(endTurnGuiPrev.r, endTurnGuiPrev.g, endTurnGuiPrev.b, endTurnGuiPrev.a * a);
+            }
+
+            if (endTurnBg != null)
+            {
+                GUI.DrawTexture(endTurnRect, endTurnBg, ScaleMode.ScaleToFit, true);
+                var overlayStyle = EndTurnAdvanceOverlayLabelStyle();
+                GuiLabelWithOutline(endTurnRect, endTurnLabel, overlayStyle);
+                if (GUI.Button(endTurnRect, GUIContent.none, GUIStyle.none))
+                {
+                    if (dragonSkipButton)
+                        Game.SkipAllDragonStrikes();
+                    else
+                    {
+                        Game.EndTurn();
+                        _showCenterBuyModal = false;
+                    }
+                }
+            }
+            else if (GUI.Button(endTurnRect, endTurnLabel))
             {
                 if (dragonSkipButton)
                     Game.SkipAllDragonStrikes();
@@ -1315,6 +1407,7 @@ namespace NexusGame
                 }
             }
 
+            GUI.color = endTurnGuiPrev;
             GUI.enabled = true;
 
             bool canOpenHexDetailModal = InputController != null && InputController.SelectedTile != null;
@@ -1382,17 +1475,26 @@ namespace NexusGame
                 "(Sword clash animation — art TBD)", sub);
         }
 
-        void EnsureTopIconButtonStyle()
+        /// <summary>Transparent hit target over top-bar sprite buttons (no box chrome).</summary>
+        GUIStyle MainBoardTopIconHitStyle()
         {
-            if (_topIconButtonStyle != null)
-                return;
-            _topIconButtonStyle = new GUIStyle(GUI.skin.button)
+            if (_mainBoardTopIconHitStyle != null)
+                return _mainBoardTopIconHitStyle;
+            _mainBoardTopIconHitStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 22,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter
+                normal = { background = null },
+                hover = { background = null },
+                active = { background = null },
+                focused = { background = null },
+                onNormal = { background = null },
+                onHover = { background = null },
+                onActive = { background = null },
+                border = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0),
+                padding = new RectOffset(0, 0, 0, 0),
+                overflow = new RectOffset(0, 0, 0, 0)
             };
-            ApplyTileInfoFont(_topIconButtonStyle);
+            return _mainBoardTopIconHitStyle;
         }
 
         void DrawSettingsOverlay()
@@ -1748,6 +1850,13 @@ namespace NexusGame
 
         void DrawHandPileViewerOverlay(PlayerState player)
         {
+            bool forcingSecretOverdraw = Game != null &&
+                                         Game.SecretMissionOverdraw != null &&
+                                         Game.SecretMissionOverdraw.Waiting &&
+                                         Game.SecretMissionOverdraw.Player == player;
+            if (forcingSecretOverdraw)
+                _handPileViewer = HandPileViewerKind.Secret;
+
             if (_handPileViewer == HandPileViewerKind.None || player == null)
                 return;
 
@@ -1779,9 +1888,12 @@ namespace NexusGame
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
-            if (GUI.Button(new Rect(win.xMax - HudS(96f), win.y + HudS(6f), HudS(84f), HudS(44f)), "Close",
-                    closePileStyle))
-                _handPileViewer = HandPileViewerKind.None;
+            if (!forcingSecretOverdraw)
+            {
+                if (GUI.Button(new Rect(win.xMax - HudS(96f), win.y + HudS(6f), HudS(84f), HudS(44f)), "Close",
+                        closePileStyle))
+                    _handPileViewer = HandPileViewerKind.None;
+            }
 
             var content = new Rect(win.x + HudS(10f), win.y + HudS(38f), win.width - HudS(20f), win.height - HudS(48f));
             if (_handPileViewer == HandPileViewerKind.Battle)
@@ -1789,7 +1901,7 @@ namespace NexusGame
             else if (_handPileViewer == HandPileViewerKind.Deploy)
                 DrawHandPileModalDeploy(content, player);
             else if (_handPileViewer == HandPileViewerKind.Secret)
-                DrawHandPileModalSecret(content, player);
+                DrawHandPileModalSecret(content, player, forcingSecretOverdraw);
         }
 
         void DrawCenterBuyDeployModal(PlayerState player)
@@ -2662,13 +2774,13 @@ namespace NexusGame
             GUI.EndScrollView();
         }
 
-        void DrawHandPileModalSecret(Rect content, PlayerState player)
+        void DrawHandPileModalSecret(Rect content, PlayerState player, bool forcingOverdrawDiscard = false)
         {
             float tw = HudCardTileW();
             float th = HudCardTileH();
             float g = HudS(8f);
             float pad = HudS(4f);
-            float extraV = HudS(16f);
+            float extraV = forcingOverdrawDiscard ? HudS(62f) : HudS(16f);
 
             if (player.SecretMissions == null || player.SecretMissions.Count == 0)
             {
@@ -2683,13 +2795,34 @@ namespace NexusGame
             cw = Mathf.Max(cw, content.width);
             float ch = th + extraV;
             _scrollHandSecret = GUI.BeginScrollView(content, _scrollHandSecret, new Rect(0, 0, cw, ch));
+            if (forcingOverdrawDiscard)
+            {
+                var msgStyle = new GUIStyle(_cardBodyStyle)
+                {
+                    alignment = TextAnchor.UpperLeft,
+                    fontStyle = FontStyle.Bold,
+                    wordWrap = true,
+                    fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale))
+                };
+                GUI.Label(new Rect(pad, pad, cw - pad * 2f, HudS(16f)),
+                    "Hand limit reached (5). Choose one card to discard, then draw the pending secret.",
+                    msgStyle);
+            }
+
             float x = pad;
+            float cardY = forcingOverdrawDiscard ? pad + HudS(18f) : pad;
             for (int i = 0; i < player.SecretMissions.Count; i++)
             {
                 var s = player.SecretMissions[i];
                 string full = SecretMissionLabel(s) + " (+" + s.VictoryPoints + " VP)";
-                DrawPlayingCard(new Rect(x, pad, tw, th), new Color(0.42f, 0.15f, 0.5f),
+                DrawPlayingCard(new Rect(x, cardY, tw, th), new Color(0.42f, 0.15f, 0.5f),
                     "#" + i + " " + CardShortTitle(full), CardDetailFromName(full), 1);
+                if (forcingOverdrawDiscard)
+                {
+                    var discardRect = new Rect(x, cardY + th + HudS(4f), tw, HudS(24f));
+                    if (GUI.Button(discardRect, "Discard"))
+                        Game.DiscardSecretMissionForPendingDraw(i);
+                }
                 x += tw + g;
             }
 
@@ -2746,6 +2879,165 @@ namespace NexusGame
             if (player != null && !Game.IsAiControlled(player))
                 return "Movement";
             return "Draw";
+        }
+
+        string EndTurnAdvanceLabel(PlayerState player)
+        {
+            if (Game == null || player == null)
+                return "End Turn";
+            if (Game.IsGameOver)
+                return "End Turn";
+            if (WillEnterCombatAfterEndTurn(player))
+                return "To Combat";
+            if (WillEnterDragonAfterEndTurn(player))
+                return "To Dragon";
+            return "To Next Turn";
+        }
+
+        bool WillEnterCombatAfterEndTurn(PlayerState player)
+        {
+            if (player == null || Game == null || Game.RunBattlePhaseAtTurnStart)
+                return false;
+            return BattleResolver.FindContestedHexesForAttacker(player).Count > 0;
+        }
+
+        bool WillEnterDragonAfterEndTurn(PlayerState player)
+        {
+            if (player == null || Game == null || Game.Board == null)
+                return false;
+
+            var allUnits = FindObjectsOfType<UnitInstance>();
+            foreach (var u in allUnits)
+            {
+                if (u == null || u.Owner != player || u.Definition == null || u.Definition.Type != UnitType.RubiumDragon ||
+                    u.Tile == null)
+                    continue;
+
+                if (!HexSoleControlledByPlayer(u.Tile, player, allUnits))
+                    continue;
+
+                foreach (var n in Game.Board.GetNeighbors(u.Tile))
+                {
+                    if (n == null || Game.IsTileContested(n))
+                        continue;
+
+                    foreach (var other in allUnits)
+                    {
+                        if (other != null && other.Tile == n && other.Owner != player)
+                            return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        static bool HexSoleControlledByPlayer(BoardTile hex, PlayerState player, UnitInstance[] allUnits)
+        {
+            if (hex == null || player == null || allUnits == null)
+                return false;
+
+            PlayerState sole = null;
+            foreach (var u in allUnits)
+            {
+                if (u == null || u.Tile != hex)
+                    continue;
+                if (sole == null)
+                    sole = u.Owner;
+                else if (sole != u.Owner)
+                    return false;
+            }
+
+            return sole == player;
+        }
+
+        enum EndTurnAdvanceVisualKind
+        {
+            NextTurn,
+            Battle,
+            Dragon
+        }
+
+        void EnsureEndTurnAdvanceButtonTextures()
+        {
+            if (_endTurnAdvanceButtonTexTried)
+                return;
+            _endTurnAdvanceButtonTexTried = true;
+            _endTurnBattleButtonTex = Resources.Load<Texture2D>("Sprites/battle button") ??
+                                      Resources.Load<Texture2D>("Sprites/Battle button");
+            _endTurnFireballButtonTex = Resources.Load<Texture2D>("Sprites/fireball button") ??
+                                        Resources.Load<Texture2D>("Sprites/Fireball button");
+            _endTurnNextTurnButtonTex = Resources.Load<Texture2D>("Sprites/next turn button") ??
+                                        Resources.Load<Texture2D>("Sprites/Next turn button");
+        }
+
+        EndTurnAdvanceVisualKind GetEndTurnButtonVisualKind(PlayerState player, bool dragonSkipButton)
+        {
+            if (dragonSkipButton)
+                return EndTurnAdvanceVisualKind.Dragon;
+            if (WillEnterCombatAfterEndTurn(player))
+                return EndTurnAdvanceVisualKind.Battle;
+            if (WillEnterDragonAfterEndTurn(player))
+                return EndTurnAdvanceVisualKind.Dragon;
+            return EndTurnAdvanceVisualKind.NextTurn;
+        }
+
+        Texture2D GetEndTurnAdvanceButtonTexture(EndTurnAdvanceVisualKind kind)
+        {
+            return kind switch
+            {
+                EndTurnAdvanceVisualKind.Battle => _endTurnBattleButtonTex,
+                EndTurnAdvanceVisualKind.Dragon => _endTurnFireballButtonTex,
+                EndTurnAdvanceVisualKind.NextTurn => _endTurnNextTurnButtonTex
+            };
+        }
+
+        /// <summary>
+        /// IMGUI cannot render TMP SDF assets; uses the same Bemora <see cref="Font"/> as tile UI (paired with TMP Bemora SDF in Resources).
+        /// </summary>
+        GUIStyle EndTurnAdvanceOverlayLabelStyle()
+        {
+            float s = _hudFontScale;
+            if (_endTurnAdvanceOverlayLabelStyle != null &&
+                Mathf.Abs(_endTurnAdvanceOverlayLabelStyleScale - s) < 0.002f)
+                return _endTurnAdvanceOverlayLabelStyle;
+
+            _endTurnAdvanceOverlayLabelStyleScale = s;
+            var f = TileInfoUiFont();
+            _endTurnAdvanceOverlayLabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                font = f,
+                fontSize = Mathf.Max(11, Mathf.RoundToInt(14f * s)),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                clipping = TextClipping.Overflow,
+                normal = { textColor = Color.white }
+            };
+            return _endTurnAdvanceOverlayLabelStyle;
+        }
+
+        static void GuiLabelWithOutline(Rect r, string text, GUIStyle style)
+        {
+            if (string.IsNullOrEmpty(text))
+                return;
+
+            float a = GUI.color.a;
+            var outline = new Color(0.06f, 0.05f, 0.1f, 0.94f * a);
+            for (int ox = -1; ox <= 1; ox++)
+            {
+                for (int oy = -1; oy <= 1; oy++)
+                {
+                    if (ox == 0 && oy == 0)
+                        continue;
+                    Color prev = GUI.color;
+                    GUI.color = outline;
+                    GUI.Label(new Rect(r.x + ox, r.y + oy, r.width, r.height), text, style);
+                    GUI.color = prev;
+                }
+            }
+
+            GUI.Label(r, text, style);
         }
 
         void DrawPlaceholderCard(Rect r, string text)
@@ -3439,9 +3731,7 @@ namespace NexusGame
 
             var ir = GUILayoutUtility.GetRect(BattleS(28f), BattleS(28f), GUILayout.Width(BattleS(32f)),
                 GUILayout.Height(BattleS(30f)));
-            DrawUnitMiniIcon(ir, d.UnitType,
-                TintedIconOwnerForBattleSide(d.UnitType,
-                    d.AttackerRolling ? Game.ActiveBattleAttacker : Game.ActiveBattleDefender));
+            DrawBattleBannerUnitIcon(ir, d.UnitType);
 
             int dieCount = 0;
             if (d.Rolls != null && d.Rolls.Length > 0)
@@ -3656,8 +3946,7 @@ namespace NexusGame
                 float ix = face.x + (face.width - iconL) * 0.5f;
                 float iy = face.y + (face.height - iconL) * 0.5f;
                 var ir = new Rect(ix, iy, iconL, iconL);
-                DrawUnitMiniIcon(ir, t, TintedIconOwnerForUnitOnSide(t, sampleOnHex),
-                    useGraySprite: sampleOnHex == null);
+                DrawBattleBannerUnitIcon(ir, t, sampleOnHex == null ? 0.4f : 1f);
                 GUILayout.EndVertical();
             }
 
@@ -3943,7 +4232,6 @@ namespace NexusGame
             {
                 GUILayout.Space(BattleS(10f));
                 var d = dOpt.Value;
-                PlayerState roller = d.AttackerRolling ? Game.ActiveBattleAttacker : Game.ActiveBattleDefender;
 
                 // Larger than side-grid tiles so the active roller is easy to read.
                 float iconBox = Mathf.Clamp(colW - BattleS(2f), BattleS(96f), BattleS(152f));
@@ -3956,7 +4244,7 @@ namespace NexusGame
                 float pad = BattleS(2f);
                 var ir = new Rect(iconOuter.x + pad, iconOuter.y + pad, iconOuter.width - pad * 2f,
                     iconOuter.height - pad * 2f);
-                DrawUnitMiniIcon(ir, d.UnitType, TintedIconOwnerForUnitOnSide(d.UnitType, roller));
+                DrawBattleBannerUnitIcon(ir, d.UnitType);
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
 
@@ -4128,6 +4416,44 @@ namespace NexusGame
             GUILayout.Space(8);
             if (GUILayout.Button("SKIP", _battleSecondaryButtonStyleCached, GUILayout.ExpandWidth(true)))
                 Game.SkipSecretMissionPlay();
+        }
+
+        void SecretMissionOverdrawWindow()
+        {
+            EnsureBattleHudStyles();
+            var state = Game.SecretMissionOverdraw;
+            if (state == null || !state.Waiting || state.Player == null)
+                return;
+
+            var bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                wordWrap = true,
+                fontSize = Mathf.Max(12, Mathf.RoundToInt(13f * _hudFontScale)),
+                normal = { textColor = new Color(0.92f, 0.94f, 0.98f, 1f) }
+            };
+            ApplyTileInfoFont(bodyStyle);
+
+            var p = state.Player;
+            int pendingCount = state.PendingDraws?.Count ?? 0;
+            GUILayout.Label(
+                $"Secret hand limit reached (5). P{p.PlayerIndex + 1}: discard one mission to draw the new one.",
+                bodyStyle);
+            if (pendingCount > 1)
+                GUILayout.Label($"Pending secret draws: {pendingCount}", bodyStyle);
+
+            if (p.SecretMissions == null || p.SecretMissions.Count == 0)
+            {
+                GUILayout.Label("No mission available to discard.", bodyStyle);
+                return;
+            }
+
+            for (int i = 0; i < p.SecretMissions.Count; i++)
+            {
+                var s = p.SecretMissions[i];
+                string label = $"Discard: {SecretMissionLabel(s)} +{s.VictoryPoints} VP [i{i}]";
+                if (GUILayout.Button(label, _battleSecondaryButtonStyleCached, GUILayout.ExpandWidth(true)))
+                    Game.DiscardSecretMissionForPendingDraw(i);
+            }
         }
 
         static string SecretMissionLabel(SecretMissionInHand s)
@@ -4699,6 +5025,48 @@ namespace NexusGame
                 if (g != null)
                     GUI.DrawTexture(r, g, ScaleMode.ScaleToFit, true);
             }
+        }
+
+        NexusGuiImage GetBattleBannerNeutralIcon(UnitType type)
+        {
+            if (_battleBannerNeutralIconCache.TryGetValue(type, out var cached))
+                return cached;
+            var loaded = NexusGuiArt.LoadBattleBannerNeutralIcon(type);
+            _battleBannerNeutralIconCache[type] = loaded;
+            return loaded;
+        }
+
+        /// <summary>
+        /// Generic <c>Sprites/Units/*.png</c> art for battle initiative ribbon and dice row — no seat tint, no Gray assets.
+        /// </summary>
+        void DrawBattleBannerUnitIcon(Rect r, UnitType type, float alphaMultiplier = 1f)
+        {
+            NexusGuiImage icon = GetBattleBannerNeutralIcon(type);
+            if (!icon.IsEmpty)
+            {
+                Color prev = GUI.color;
+                Color c = prev;
+                c.a *= alphaMultiplier;
+                GUI.color = c;
+                icon.DrawAspectFit(r);
+                GUI.color = prev;
+                return;
+            }
+
+            DrawTintedRect(r,
+                alphaMultiplier < 0.95f
+                    ? new Color(0.22f, 0.22f, 0.26f, 0.55f * Mathf.Clamp01(alphaMultiplier))
+                    : new Color(0.22f, 0.22f, 0.26f));
+            var letterStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
+                clipping = TextClipping.Clip
+            };
+            Color prevL = GUI.color;
+            GUI.color = new Color(0.88f, 0.9f, 0.96f, prevL.a * Mathf.Clamp01(alphaMultiplier));
+            GUI.Label(r, UnitUiName(type).Substring(0, 1), letterStyle);
+            GUI.color = prevL;
         }
 
         void DrawUnitMiniIconGreyscaleLuminance(Rect r, UnitType type, PlayerState ownerForTint)

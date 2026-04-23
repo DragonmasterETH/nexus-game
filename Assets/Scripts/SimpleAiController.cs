@@ -112,6 +112,12 @@ namespace NexusGame
                     yield return tick;
                     continue;
                 }
+                if (Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting &&
+                    !Game.IsAiControlled(Game.SecretMissionOverdraw.Player))
+                {
+                    yield return tick;
+                    continue;
+                }
 
                 if (Game.FocusFirePicker != null && Game.IsAiControlled(Game.FocusFirePicker))
                 {
@@ -127,6 +133,9 @@ namespace NexusGame
                 else if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting &&
                          Game.IsAiControlled(Game.SecretMissionOffer.Player))
                     PlayBestSecretOrSkip();
+                else if (Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting &&
+                         Game.IsAiControlled(Game.SecretMissionOverdraw.Player))
+                    Game.ResolveAiSecretMissionOverdraw();
 
                 yield return tick;
             }
@@ -155,6 +164,9 @@ namespace NexusGame
                 return true;
             if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting &&
                 Game.IsAiControlled(Game.SecretMissionOffer.Player))
+                return true;
+            if (Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting &&
+                Game.IsAiControlled(Game.SecretMissionOverdraw.Player))
                 return true;
             return false;
         }

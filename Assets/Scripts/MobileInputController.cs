@@ -984,7 +984,9 @@ namespace NexusGame
                 return true;
             if (Game.EnergizePromptPlayer != null || Game.FocusFirePicker != null || Game.CasualtyPick != null)
                 return true;
-            return Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting;
+            if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
+                return true;
+            return Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting;
         }
 
         public bool CanUnitMoveTo(UnitInstance unit, BoardTile target)

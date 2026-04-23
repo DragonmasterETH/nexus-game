@@ -79,12 +79,13 @@ namespace NexusGame
             // True top-down so board sprites/quads read without perspective skew.
             const float initialHeight = 12f;
             mainCam.transform.position = new Vector3(0f, initialHeight, 0f);
-            mainCam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             mainCam.clearFlags = CameraClearFlags.SolidColor;
             mainCam.backgroundColor = new Color(0.02f, 0.02f, 0.05f);
 
             if (mainCam.GetComponent<BoardCameraPanZoom>() == null)
                 mainCam.gameObject.AddComponent<BoardCameraPanZoom>();
+            var boardCam = mainCam.GetComponent<BoardCameraPanZoom>();
+            mainCam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
         }
 
         /// <summary>Reloads the scene so the main menu shows (same as a fresh launch).</summary>

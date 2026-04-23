@@ -42,6 +42,7 @@ namespace NexusGame
 
         Queue<UnifiedEnergizeDraw> _unifiedEnergizeDeck;
         Queue<SecretMissionInHand> _secretDeck;
+        const int MaxSecretMissionsInHand = 5;
         System.Random _cardRng;
         int _nextSecretInstanceId = 1;
         /// <summary>Round index: 1 until play returns to the first player, then 2, etc. (not per seat turn).</summary>
@@ -70,8 +71,11 @@ namespace NexusGame
         public BoardTile FocusFireBattleHex => _focusFireHex;
 
         public SecretMissionOfferState SecretMissionOffer { get; private set; }
+        public SecretMissionOverdrawState SecretMissionOverdraw { get; private set; }
 
         public DragonPhaseState DragonPhase { get; private set; }
+        Sprite _dragonFireballSprite;
+        bool _dragonFireballSpriteTried;
 
         PlayerState _battleAttacker;
         PlayerState _battleDefender;
@@ -102,6 +106,10 @@ namespace NexusGame
         public const float BattleDiceRollHoldSeconds = 0.5f;
 
         const float BattleClashIntroSeconds = 0.55f;
+        const float DragonImpactShakeSeconds = 0.25f;
+        const float DragonImpactShakeDistance = 0.14f;
+        const float DragonImpactShakeFrequencyHz = 20f;
+        const float DragonPostImpactPauseSeconds = 0.5f;
 
         void SetBattleUiDiceRoll(BattleResolver.DiceRollResult roll, UnitType unitType, bool attackerRolling)
         {
@@ -166,6 +174,7 @@ namespace NexusGame
             CasualtyPick = null;
             FocusFirePicker = null;
             SecretMissionOffer = null;
+            SecretMissionOverdraw = null;
             DragonPhase = null;
             _liveBattleLines = null;
             _lastEnergizePlayed = EnergizeBattleId.None;
@@ -236,8 +245,107 @@ namespace NexusGame
             {
                 if (_secretDeck.Count == 0)
                     _secretDeck = CardDecks.BuildSecretDeck(_cardRng, ref _nextSecretInstanceId);
-                if (_secretDeck.Count > 0)
-                    p.SecretMissions.Add(_secretDeck.Dequeue());
+                if (_secretDeck.Count == 0)
+                    break;
+
+                var drawn = _secretDeck.Dequeue();
+                if (p.SecretMissions.Count < MaxSecretMissionsInHand)
+                {
+                    p.SecretMissions.Add(drawn);
+                    continue;
+                }
+
+                QueueSecretMissionOverdrawPrompt(p, drawn);
+            }
+        }
+
+        void QueueSecretMissionOverdrawPrompt(PlayerState player, SecretMissionInHand pendingDraw)
+        {
+            if (player == null || pendingDraw == null)
+                return;
+
+            if (SecretMissionOverdraw == null || SecretMissionOverdraw.Player != player || !SecretMissionOverdraw.Waiting)
+            {
+                SecretMissionOverdraw = new SecretMissionOverdrawState
+                {
+                    Player = player,
+                    Waiting = true
+                };
+            }
+
+            if (SecretMissionOverdraw.PendingDraws == null)
+                SecretMissionOverdraw.PendingDraws = new List<SecretMissionInHand>();
+            SecretMissionOverdraw.PendingDraws.Add(pendingDraw);
+
+            if (IsAiControlled(player))
+                ResolveAiSecretMissionOverdraw();
+        }
+
+        void ConsumeOnePendingSecretMissionAfterDiscard()
+        {
+            if (SecretMissionOverdraw == null || !SecretMissionOverdraw.Waiting || SecretMissionOverdraw.Player == null)
+                return;
+
+            var p = SecretMissionOverdraw.Player;
+            if (SecretMissionOverdraw.PendingDraws == null || SecretMissionOverdraw.PendingDraws.Count == 0)
+            {
+                SecretMissionOverdraw.Waiting = false;
+                return;
+            }
+
+            if (p.SecretMissions.Count >= MaxSecretMissionsInHand)
+                return;
+
+            p.SecretMissions.Add(SecretMissionOverdraw.PendingDraws[0]);
+            SecretMissionOverdraw.PendingDraws.RemoveAt(0);
+            if (SecretMissionOverdraw.PendingDraws.Count == 0)
+                SecretMissionOverdraw.Waiting = false;
+        }
+
+        public void DiscardSecretMissionForPendingDraw(int discardIndexInHand)
+        {
+            if (SecretMissionOverdraw == null || !SecretMissionOverdraw.Waiting || SecretMissionOverdraw.Player == null)
+                return;
+
+            var p = SecretMissionOverdraw.Player;
+            if (p.SecretMissions == null || discardIndexInHand < 0 || discardIndexInHand >= p.SecretMissions.Count)
+                return;
+
+            p.SecretMissions.RemoveAt(discardIndexInHand);
+            ConsumeOnePendingSecretMissionAfterDiscard();
+        }
+
+        public void ResolveAiSecretMissionOverdraw()
+        {
+            if (SecretMissionOverdraw == null || !SecretMissionOverdraw.Waiting || SecretMissionOverdraw.Player == null)
+                return;
+            if (!IsAiControlled(SecretMissionOverdraw.Player))
+                return;
+
+            var p = SecretMissionOverdraw.Player;
+            while (SecretMissionOverdraw.Waiting &&
+                   SecretMissionOverdraw.PendingDraws != null &&
+                   SecretMissionOverdraw.PendingDraws.Count > 0)
+            {
+                if (p.SecretMissions.Count < MaxSecretMissionsInHand)
+                {
+                    ConsumeOnePendingSecretMissionAfterDiscard();
+                    continue;
+                }
+
+                int discardIdx = 0;
+                int worstVp = int.MaxValue;
+                for (int i = 0; i < p.SecretMissions.Count; i++)
+                {
+                    int vp = p.SecretMissions[i].VictoryPoints;
+                    if (vp < worstVp)
+                    {
+                        worstVp = vp;
+                        discardIdx = i;
+                    }
+                }
+
+                DiscardSecretMissionForPendingDraw(discardIdx);
             }
         }
 
@@ -806,6 +914,7 @@ namespace NexusGame
                 HasActiveBattleStep = true;
                 ActiveBattleStepUnitType = unitType;
 
+                // --- Defender strikes first for this unit type; resolve attacker casualties before attacker rolls ---
                 int hitsOnAttacker = 0;
                 foreach (var u in defOfType)
                 {
@@ -829,32 +938,6 @@ namespace NexusGame
                     else
                     {
                         Log($"  {unitType} (def): {roll.Dice} dice => 0 hit(s)");
-                    }
-                }
-
-                int hitsOnDefender = 0;
-                foreach (var u in attOfType)
-                {
-                    int extra = _mods.AttackerDiceBonus;
-                    if (_mods.AttackerFocusFireType == unitType)
-                        extra += _mods.AttackerFocusFireExtraDice;
-                    int shift = _mods.HitThresholdBonusWhenAttackingDefender - _mods.AttackerHitThresholdReduction;
-                    var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
-                    hitsOnDefender += roll.Hits;
-                    SetBattleUiDiceRoll(roll, unitType, true);
-                    if (!AutoResolveBattlesQuick)
-                        yield return new WaitForSeconds(BattleDiceRollSpinSeconds + BattleDiceRollHoldSeconds);
-                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
-                    {
-                        Log($"  {unitType} (atk): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
-                    }
-                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
-                    {
-                        Log($"  {unitType} (atk): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
-                    }
-                    else
-                    {
-                        Log($"  {unitType} (atk): {roll.Dice} dice => 0 hit(s)");
                     }
                 }
 
@@ -890,23 +973,63 @@ namespace NexusGame
                                 validPool.Add(u);
                         }
                         int required = Mathf.Min(capAtt, validPool.Count);
-                        if (required <= 0)
-                            continue;
-
-                        CasualtyPick = new CasualtyPickState
+                        if (required > 0)
                         {
-                            Owner = attacker,
-                            Pool = validPool,
-                            Required = required,
-                            Selected = new List<UnitInstance>(),
-                            OnEachRemove = u =>
+                            CasualtyPick = new CasualtyPickState
                             {
-                                if (u != null && u.Definition.Type == UnitType.RubiumDragon)
-                                    onAttackerDragonKilled();
-                            }
-                        };
-                        while (CasualtyPick != null)
-                            yield return null;
+                                Owner = attacker,
+                                Pool = validPool,
+                                Required = required,
+                                Selected = new List<UnitInstance>(),
+                                OnEachRemove = u =>
+                                {
+                                    if (u != null && u.Definition.Type == UnitType.RubiumDragon)
+                                        onAttackerDragonKilled();
+                                }
+                            };
+                            while (CasualtyPick != null)
+                                yield return null;
+                        }
+                    }
+                }
+
+                RefreshPoolsLocal(hex, attacker, defender, out aliveAtt, out aliveDef);
+                if (aliveAtt.Count == 0)
+                {
+                    HasActiveBattleStep = false;
+                    ActiveBattleHitsOnAttacker = 0;
+                    ActiveBattleHitsOnDefender = 0;
+                    Log("Attacker eliminated from hex.");
+                    yield break;
+                }
+
+                // Survivors of this type only — eliminated sides do not roll for this type.
+                attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
+                attOfType.RemoveAll(u => u == null || u.Tile != hex || u.Owner != attacker);
+
+                int hitsOnDefender = 0;
+                foreach (var u in attOfType)
+                {
+                    int extra = _mods.AttackerDiceBonus;
+                    if (_mods.AttackerFocusFireType == unitType)
+                        extra += _mods.AttackerFocusFireExtraDice;
+                    int shift = _mods.HitThresholdBonusWhenAttackingDefender - _mods.AttackerHitThresholdReduction;
+                    var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
+                    hitsOnDefender += roll.Hits;
+                    SetBattleUiDiceRoll(roll, unitType, true);
+                    if (!AutoResolveBattlesQuick)
+                        yield return new WaitForSeconds(BattleDiceRollSpinSeconds + BattleDiceRollHoldSeconds);
+                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
+                    {
+                        Log($"  {unitType} (atk): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
+                    }
+                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
+                    {
+                        Log($"  {unitType} (atk): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
+                    }
+                    else
+                    {
+                        Log($"  {unitType} (atk): {roll.Dice} dice => 0 hit(s)");
                     }
                 }
 
@@ -942,24 +1065,24 @@ namespace NexusGame
                                 validPool.Add(u);
                         }
                         int required = Mathf.Min(capDef, validPool.Count);
-                        if (required <= 0)
-                            continue;
-
-                        CasualtyPick = new CasualtyPickState
+                        if (required > 0)
                         {
-                            Owner = defender,
-                            Pool = validPool,
-                            Required = required,
-                            Selected = new List<UnitInstance>(),
-                            OnEachRemove = u =>
+                            CasualtyPick = new CasualtyPickState
                             {
-                                onDefenderCasualty(1);
-                                if (u.Definition.Type == UnitType.RubiumDragon)
-                                    onDefenderDragonKilled();
-                            }
-                        };
-                        while (CasualtyPick != null)
-                            yield return null;
+                                Owner = defender,
+                                Pool = validPool,
+                                Required = required,
+                                Selected = new List<UnitInstance>(),
+                                OnEachRemove = u =>
+                                {
+                                    onDefenderCasualty(1);
+                                    if (u.Definition.Type == UnitType.RubiumDragon)
+                                        onDefenderDragonKilled();
+                                }
+                            };
+                            while (CasualtyPick != null)
+                                yield return null;
+                        }
                     }
                 }
             }
@@ -1159,14 +1282,184 @@ namespace NexusGame
                 DragonPhase.LastLog = $"Dragon ranged: roll {roll} — miss.";
                 Debug.Log(
                     $"[Battle] Dragon: P{DragonPhase.Player.PlayerIndex + 1} at ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} miss (need 4+)");
-                RemoveAllDragonOptions(opt.Dragon);
+                StartCoroutine(ResolveDragonMissAfterImpact(opt));
                 return;
             }
 
             Debug.Log(
                 $"[Battle] Dragon: P{DragonPhase.Player.PlayerIndex + 1} at ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} hit — pick target");
+            StartCoroutine(ResolveDragonHitAfterImpact(opt, enemies));
+        }
+
+        IEnumerator ResolveDragonMissAfterImpact(DragonStrikeOption opt)
+        {
+            if (DragonPhase == null || opt == null || opt.Dragon == null)
+                yield break;
+
+            // Lock further dragon input while the projectile + impact resolve.
+            DragonPhase.PendingHit = opt;
+            DragonPhase.PendingEnemies = null;
+
+            yield return PlayDragonImpactSequence(opt.Dragon, opt.TargetHex);
+
+            if (DragonPhase == null)
+                yield break;
+            DragonPhase.PendingHit = null;
+            DragonPhase.PendingEnemies = null;
+            RemoveAllDragonOptions(opt.Dragon);
+        }
+
+        IEnumerator ResolveDragonHitAfterImpact(DragonStrikeOption opt, List<UnitInstance> enemies)
+        {
+            if (DragonPhase == null || opt == null || opt.Dragon == null || enemies == null || enemies.Count == 0)
+                yield break;
+
+            // Lock further dragon-target taps while the projectile resolves.
+            DragonPhase.PendingHit = opt;
+            DragonPhase.PendingEnemies = null;
+
+            yield return PlayDragonImpactSequence(opt.Dragon, opt.TargetHex);
+
+            if (DragonPhase == null)
+                yield break;
             DragonPhase.PendingHit = opt;
             DragonPhase.PendingEnemies = enemies;
+        }
+
+        IEnumerator PlayDragonImpactSequence(UnitInstance dragon, BoardTile targetHex)
+        {
+            var fireball = PlayDragonFireballVfx(dragon, targetHex);
+            if (fireball != null)
+                yield return fireball;
+
+            yield return ShakeMainCameraRoutine(DragonImpactShakeSeconds, DragonImpactShakeDistance);
+            yield return new WaitForSeconds(DragonPostImpactPauseSeconds);
+        }
+
+        Coroutine PlayDragonFireballVfx(UnitInstance dragon, BoardTile targetHex)
+        {
+            if (dragon == null || dragon.Tile == null || targetHex == null)
+                return null;
+            if (!TryGetDragonFireballSprite(out var fireballSprite) || fireballSprite == null)
+                return null;
+            return StartCoroutine(PlayDragonFireballVfxRoutine(dragon, dragon.Tile, targetHex, fireballSprite));
+        }
+
+        bool TryGetDragonFireballSprite(out Sprite sprite)
+        {
+            if (!_dragonFireballSpriteTried)
+            {
+                _dragonFireballSpriteTried = true;
+                _dragonFireballSprite = Resources.Load<Sprite>("Sprites/fireball") ??
+                                       Resources.Load<Sprite>("Sprites/Fireball");
+            }
+
+            sprite = _dragonFireballSprite;
+            return sprite != null;
+        }
+
+        float GetBoardUnitSpriteScale(UnitInstance unit)
+        {
+            if (unit == null)
+                return 0.8f;
+
+            var unitSprite = unit.GetComponentInChildren<SpriteRenderer>();
+            if (unitSprite != null)
+            {
+                Vector3 s = unitSprite.transform.lossyScale;
+                return Mathf.Max(0.01f, Mathf.Max(Mathf.Abs(s.x), Mathf.Abs(s.y)));
+            }
+
+            Vector3 us = unit.transform.lossyScale;
+            return Mathf.Max(0.01f, Mathf.Max(Mathf.Abs(us.x), Mathf.Abs(us.z)));
+        }
+
+        float GetDragonFireballScale(UnitInstance dragon, Sprite fireballSprite)
+        {
+            float fallback = GetBoardUnitSpriteScale(dragon) * 0.28f;
+            if (dragon == null || fireballSprite == null)
+                return fallback;
+
+            var dragonSprite = dragon.GetComponentInChildren<SpriteRenderer>();
+            if (dragonSprite == null || dragonSprite.sprite == null)
+                return fallback;
+
+            float dragonWidth = Mathf.Max(0.001f, dragonSprite.bounds.size.x);
+            float fireballBaseWidth = Mathf.Max(0.001f, fireballSprite.bounds.size.x);
+            return Mathf.Max(0.01f, (dragonWidth / fireballBaseWidth) * 0.5f);
+        }
+
+        IEnumerator PlayDragonFireballVfxRoutine(UnitInstance dragon, BoardTile fromHex, BoardTile toHex, Sprite fireballSprite)
+        {
+            if (fromHex == null || toHex == null || fireballSprite == null)
+                yield break;
+
+            Vector3 start = fromHex.View != null ? fromHex.View.transform.position : Board.AxialToWorld(fromHex.Q, fromHex.R);
+            Vector3 end = toHex.View != null ? toHex.View.transform.position : Board.AxialToWorld(toHex.Q, toHex.R);
+            Vector3 dir = end - start;
+            dir.y = 0f;
+
+            if (dir.sqrMagnitude <= 1e-6f)
+                yield break;
+
+            Vector3 dirN = dir.normalized;
+            var fireballGo = new GameObject("DragonFireballVfx");
+            var sr = fireballGo.AddComponent<SpriteRenderer>();
+            sr.sprite = fireballSprite;
+            sr.sortingOrder = 600;
+
+            fireballGo.transform.position = start + Vector3.up * 0.2f;
+            // Keep sprite flat on the board (normal = +Y), while its local +X (art points right)
+            // follows the travel direction.
+            Vector3 upForLook = Vector3.Cross(Vector3.up, dirN);
+            fireballGo.transform.rotation = Quaternion.LookRotation(Vector3.up, upForLook);
+            float fireballScale = GetDragonFireballScale(dragon, fireballSprite);
+            fireballGo.transform.localScale = Vector3.one * fireballScale;
+
+            const float travelSeconds = 0.28f;
+            float t = 0f;
+            while (t < travelSeconds)
+            {
+                t += Time.deltaTime;
+                float u = Mathf.Clamp01(t / travelSeconds);
+                Vector3 p = Vector3.Lerp(start, end, u);
+                p.y += 0.2f;
+                fireballGo.transform.position = p;
+                yield return null;
+            }
+
+            Destroy(fireballGo);
+        }
+
+        IEnumerator ShakeMainCameraRoutine(float durationSeconds, float distance)
+        {
+            if (durationSeconds <= 0f || distance <= 0f)
+                yield break;
+
+            var cam = Camera.main;
+            if (cam == null)
+            {
+                yield return new WaitForSeconds(durationSeconds);
+                yield break;
+            }
+
+            var t = cam.transform;
+            Vector3 basePos = t.position;
+            float elapsed = 0f;
+            float phase = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            while (elapsed < durationSeconds)
+            {
+                elapsed += Time.deltaTime;
+                float alpha = 1f - Mathf.Clamp01(elapsed / durationSeconds);
+                float w = elapsed * DragonImpactShakeFrequencyHz * Mathf.PI * 2f;
+                Vector2 jitter = new Vector2(
+                    Mathf.Sin(w + phase),
+                    Mathf.Cos(w * 1.17f + phase * 1.9f)) * (distance * alpha);
+                t.position = basePos + new Vector3(jitter.x, 0f, jitter.y);
+                yield return null;
+            }
+
+            t.position = basePos;
         }
 
         void RemoveAllDragonOptions(UnitInstance dragon)
@@ -1276,6 +1569,13 @@ namespace NexusGame
         /// <summary>Battle winner who may play one eligible secret (was only the attacker; now attacker or defender).</summary>
         public PlayerState Player;
         public List<int> EligibleIndices;
+        public bool Waiting;
+    }
+
+    public class SecretMissionOverdrawState
+    {
+        public PlayerState Player;
+        public List<SecretMissionInHand> PendingDraws = new List<SecretMissionInHand>();
         public bool Waiting;
     }
 

@@ -166,6 +166,26 @@ namespace NexusGame
 
     public static class NexusGuiArt
     {
+        /// <summary>Main HUD quick-reference button (Resources <c>Sprites/Info.png</c>).</summary>
+        public static NexusGuiImage LoadMainHudInfoIcon()
+        {
+            return Load(
+                "Sprites/Info",
+                "Sprites/UI/Info",
+                "Sprites/Icons/Info",
+                "Sprites/icons/Info");
+        }
+
+        /// <summary>Main HUD settings button (Resources <c>Sprites/Settings.png</c>).</summary>
+        public static NexusGuiImage LoadMainHudSettingsIcon()
+        {
+            return Load(
+                "Sprites/Settings",
+                "Sprites/UI/Settings",
+                "Sprites/Icons/Settings",
+                "Sprites/icons/Settings");
+        }
+
         /// <summary>Full-screen / modal frame art (Resources, e.g. &quot;Sprites/Tile info screen&quot;).</summary>
         public static NexusGuiImage LoadTileInfoScreenBackground()
         {
@@ -379,6 +399,23 @@ namespace NexusGame
                 "Sprites/Units/Crystal_Blue",
                 "Sprites/Units/Crystal",
                 "Sprites/Units/Crystalline");
+        }
+
+        /// <summary>
+        /// Uncolored generic unit art for battle initiative ribbon / banners (<c>Human.png</c>, <c>Crystal.png</c>, … under <c>Resources/Sprites/Units</c>).
+        /// </summary>
+        public static NexusGuiImage LoadBattleBannerNeutralIcon(UnitType type)
+        {
+            return type switch
+            {
+                UnitType.Human => Load("Sprites/Units/Human", "Sprites/units/Human"),
+                UnitType.Fungoid => Load("Sprites/Units/Fungus", "Sprites/units/Fungus"),
+                UnitType.Crystalline => Load("Sprites/Units/Crystal", "Sprites/units/Crystal"),
+                UnitType.RockStrider => Load("Sprites/Units/Strider", "Sprites/units/Strider"),
+                UnitType.LavaLeaper => Load("Sprites/Units/Leaper", "Sprites/units/Leaper"),
+                UnitType.RubiumDragon => Load("Sprites/Units/Dragon", "Sprites/units/Dragon"),
+                _ => default
+            };
         }
 
         /// <summary>Desaturated / empty-slot HUD art (e.g. &quot;Human Gray&quot;, &quot;Leaper Gray&quot;).</summary>

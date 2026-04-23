@@ -32,8 +32,8 @@ namespace NexusGame
             Players.Clear();
             InitPlayers();
             InitCardDecks();
-            BeginTurn();
             SpawnStartingUnits();
+            BeginTurn();
         }
     }
 }

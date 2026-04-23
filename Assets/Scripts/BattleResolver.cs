@@ -271,6 +271,27 @@ namespace NexusGame
                         log.AppendLine($"  {unitType} (def P{defender.PlayerIndex + 1}): {roll.Dice} dice => 0 hit(s)");
                 }
 
+                RefreshPools();
+                int capAtt = Mathf.Min(hitsOnAttacker, aliveAtt.Count);
+                if (capAtt > 0)
+                {
+                    var victims = PickCasualtiesWeakestFirst(aliveAtt, capAtt);
+                    foreach (var v in victims)
+                    {
+                        log.AppendLine($"    → P{attacker.PlayerIndex + 1} dies: {v.Definition.Type}");
+                        destroyUnit(v);
+                    }
+                }
+
+                RefreshPools();
+                if (aliveAtt.Count == 0)
+                {
+                    log.AppendLine("Attacker has no units left — battle lost.");
+                    break;
+                }
+
+                attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
+
                 int hitsOnDefender = 0;
                 foreach (var u in attOfType)
                 {
@@ -282,19 +303,6 @@ namespace NexusGame
                         log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
                     else
                         log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice} dice => 0 hit(s)");
-                }
-
-                // Attacker removes casualties first (defender's successful rolls), then defender.
-                RefreshPools();
-                int capAtt = Mathf.Min(hitsOnAttacker, aliveAtt.Count);
-                if (capAtt > 0)
-                {
-                    var victims = PickCasualtiesWeakestFirst(aliveAtt, capAtt);
-                    foreach (var v in victims)
-                    {
-                        log.AppendLine($"    → P{attacker.PlayerIndex + 1} dies: {v.Definition.Type}");
-                        destroyUnit(v);
-                    }
                 }
 
                 RefreshPools();

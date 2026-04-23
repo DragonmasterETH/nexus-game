@@ -127,8 +127,8 @@ namespace NexusGame
 
             InitPlayers();
             InitCardDecks();
-            BeginTurn();
             SpawnStartingUnits();
+            BeginTurn();
         }
 
         void InitPlayers()
@@ -184,21 +184,29 @@ namespace NexusGame
                 var p1 = Players[0];
                 var p2 = Players[1];
 
+                // Seat player 1 (blue) on whichever home reads as top-left on screen for the current camera framing.
+                Vector3 leftPos = Board.AxialToWorld(leftHome.Q, leftHome.R);
+                Vector3 rightPos = Board.AxialToWorld(rightHome.Q, rightHome.R);
+                bool leftIsP1 = ScreenTopLeftPrefersAOverB(leftPos, rightPos);
+                BoardTile homeP1 = leftIsP1 ? leftHome : rightHome;
+                BoardTile homeP2 = leftIsP1 ? rightHome : leftHome;
+
                 leftHome.Type = TileType.HomeBase;
-                leftHome.Owner = p1;
-                leftHome.HomeBaseStartingOwnerIndex = p1.PlayerIndex;
                 rightHome.Type = TileType.HomeBase;
-                rightHome.Owner = p2;
-                rightHome.HomeBaseStartingOwnerIndex = p2.PlayerIndex;
+
+                homeP1.Owner = p1;
+                homeP1.HomeBaseStartingOwnerIndex = p1.PlayerIndex;
+                homeP2.Owner = p2;
+                homeP2.HomeBaseStartingOwnerIndex = p2.PlayerIndex;
 
                 // Pre-seeded varied armies for immediate one-step move into center battle.
                 UnitType[] p1Start = { UnitType.Human, UnitType.Fungoid, UnitType.Crystalline, UnitType.RockStrider };
                 UnitType[] p2Start = { UnitType.Human, UnitType.Fungoid, UnitType.LavaLeaper, UnitType.RubiumDragon };
 
                 foreach (var t in p1Start)
-                    CreateUnit(p1, t, leftHome, hasAlreadyMovedThisTurn: false);
+                    CreateUnit(p1, t, homeP1, hasAlreadyMovedThisTurn: false);
                 foreach (var t in p2Start)
-                    CreateUnit(p2, t, rightHome, hasAlreadyMovedThisTurn: false);
+                    CreateUnit(p2, t, homeP2, hasAlreadyMovedThisTurn: false);
 
                 GrantBattleTestStartingBattleEnergize(p1, 6);
                 GrantBattleTestStartingBattleEnergize(p2, 6);
@@ -253,6 +261,8 @@ namespace NexusGame
                 if (homesBottom.Count == 3) baseStrips.Add(homesBottom);
             }
 
+            SortHomeBaseStripsForTopLeftScreen(baseStrips);
+
             // Assign ownership and printed mines (2,3,2) for as many players as we have strips and PlayerStates.
             int stripsToAssign = Mathf.Min(baseStrips.Count, Players.Count);
             for (int i = 0; i < stripsToAssign; i++)
@@ -277,6 +287,93 @@ namespace NexusGame
             }
 
             // No starting units; players must purchase and deploy during their turns.
+        }
+
+        /// <summary>
+        /// Order home strips so <see cref="PlayerState.PlayerIndex"/> 0 gets the cluster that sits in the top-left
+        /// of the screen for <see cref="BoardCameraPanZoom"/> (uses main camera right/up projected on XZ).
+        /// </summary>
+        void SortHomeBaseStripsForTopLeftScreen(List<List<BoardTile>> strips)
+        {
+            if (strips == null || strips.Count <= 1 || Board == null)
+                return;
+
+            var cam = Camera.main;
+            if (cam == null)
+                return;
+
+            Vector3 boardCenter = Board.AxialToWorld(0, 0);
+
+            Vector3 up = cam.transform.up;
+            up.y = 0f;
+            if (up.sqrMagnitude > 1e-8f)
+                up.Normalize();
+            else
+                up = Vector3.forward;
+
+            Vector3 right = cam.transform.right;
+            right.y = 0f;
+            if (right.sqrMagnitude > 1e-8f)
+                right.Normalize();
+            else
+                right = Vector3.right;
+
+            Vector3 topLeftDir = (up - right).normalized;
+
+            strips.Sort((a, b) =>
+            {
+                float da = Vector3.Dot(StripCentroidWorld(a) - boardCenter, topLeftDir);
+                float db = Vector3.Dot(StripCentroidWorld(b) - boardCenter, topLeftDir);
+                int cmp = db.CompareTo(da);
+                if (cmp != 0)
+                    return cmp;
+                long ka = StripSortKey(a);
+                long kb = StripSortKey(b);
+                return ka.CompareTo(kb);
+            });
+        }
+
+        Vector3 StripCentroidWorld(List<BoardTile> strip)
+        {
+            Vector3 s = Vector3.zero;
+            foreach (var t in strip)
+                s += t.View != null ? t.View.transform.position : Board.AxialToWorld(t.Q, t.R);
+            return s / Mathf.Max(1, strip.Count);
+        }
+
+        static long StripSortKey(List<BoardTile> strip)
+        {
+            long k = 0;
+            foreach (var t in strip)
+                k = unchecked(k * 397 ^ t.Q ^ ((long)t.R << 16));
+            return k;
+        }
+
+        /// <summary>True if world point <paramref name="a"/> is more screen-top-left than <paramref name="b"/>.</summary>
+        bool ScreenTopLeftPrefersAOverB(Vector3 a, Vector3 b)
+        {
+            var cam = Camera.main;
+            if (cam == null || Board == null)
+                return true;
+
+            Vector3 boardCenter = Board.AxialToWorld(0, 0);
+
+            Vector3 up = cam.transform.up;
+            up.y = 0f;
+            if (up.sqrMagnitude > 1e-8f)
+                up.Normalize();
+            else
+                up = Vector3.forward;
+
+            Vector3 right = cam.transform.right;
+            right.y = 0f;
+            if (right.sqrMagnitude > 1e-8f)
+                right.Normalize();
+            else
+                right = Vector3.right;
+
+            Vector3 topLeftDir = (up - right).normalized;
+            return Vector3.Dot(a - boardCenter, topLeftDir) >= Vector3.Dot(b - boardCenter, topLeftDir);
         }
 
         void GrantBattleTestStartingBattleEnergize(PlayerState player, int count)
@@ -737,6 +834,30 @@ namespace NexusGame
         }
 
         public PlayerState CurrentPlayer => Players[_currentPlayerIndex];
+
+        /// <summary>
+        /// HUD hint: player still has unmoved units or deployment energize to spend before voluntarily ending the turn.
+        /// </summary>
+        public bool HasOptionalPreEndTurnActions(PlayerState player)
+        {
+            if (player == null)
+                return false;
+            if (player.DeployEnergize != null && player.DeployEnergize.Count > 0)
+                return true;
+            if (_unitsByPlayer.TryGetValue(player, out var units))
+            {
+                for (int i = 0; i < units.Count; i++)
+                {
+                    var u = units[i];
+                    if (u == null || u.Tile == null)
+                        continue;
+                    if (!u.HasMovedThisTurn)
+                        return true;
+                }
+            }
+
+            return false;
+        }
 
         internal BoardTile ActiveRetreatSourceThisTurn => _activeRetreatSourceThisTurn;
         internal bool NormalMovementOccurredThisTurn => _normalMovementOccurredThisTurn;
