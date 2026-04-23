@@ -429,6 +429,9 @@ namespace NexusGame
         bool _moveAllChecked;
         BoardTile _moveAllTile;
         float _lastCardBarY;
+        int _lastContestedToastPlayerIndex = -1;
+        int _lastContestedToastTurnNumber = -1;
+        float _contestedToastUntilTime;
 
         /// <summary>Padded gameplay HUD rect — same reference frame as tile-info / battle IMGUI (<see cref="GetCenterBuyModalPanelGuiRect"/>).</summary>
         Rect _hudLayoutPanel;
@@ -1136,6 +1139,7 @@ namespace NexusGame
             _hudCardBarHeight = HudS(152f);
             _hudPhaseRibbonHeight = HudS(36f);
             ApplyMainHudScaledStyles();
+            MaybeQueueContestedRetreatToast(player);
 
             DrawDragonPhaseOverlay();
 
@@ -1148,7 +1152,7 @@ namespace NexusGame
             var vpGui = GetVPGui();
             var hudLabel = GUI.skin.label;
 
-            float iconBtn = HudS(44f);
+            float iconBtn = HudS(33f);
             float iconY = topBarY + (topBarH - iconBtn) * 0.5f;
             float iconRight = hp.xMax - HudS(12f) - iconBtn * 2f - HudS(10f);
 
@@ -1161,6 +1165,7 @@ namespace NexusGame
             GUI.color = topBarTint;
             GUI.DrawTexture(new Rect(hp.x, topBarY, hp.width, topBarH), Texture2D.whiteTexture);
             GUI.color = prevGui;
+            DrawContestedRetreatToast(hp, topBarY + topBarH + HudS(6f));
 
             float ly = topBarY + (topBarH - mainHudIconH) * 0.5f - HudS(2f);
             float resLineH = Mathf.Max(HudS(22f), mainHudIconH + HudS(2f));
@@ -1367,7 +1372,9 @@ namespace NexusGame
             else
                 btnW = HudS(endTurnLabel.Length >= 11 ? 440f : 340f);
 
-            var endTurnRect = new Rect(hp.x + HudS(10f), topY, btnW, btnH);
+            float endTurnX = hp.xMax - btnW - HudS(10f);
+            float endTurnY = hp.yMax - reserveBottom - btnH;
+            var endTurnRect = new Rect(endTurnX, endTurnY, btnW, btnH);
 
             Color endTurnGuiPrev = GUI.color;
             bool breatheIdleEndTurn =
@@ -1376,7 +1383,7 @@ namespace NexusGame
                 !Game.HasOptionalPreEndTurnActions(player);
             if (breatheIdleEndTurn)
             {
-                float a = 0.75f + 0.06f * Mathf.Sin(Time.realtimeSinceStartup * 5.8f);
+                float a = 0.8f + 0.2f * Mathf.Sin(Time.realtimeSinceStartup * 5.8f);
                 GUI.color = new Color(endTurnGuiPrev.r, endTurnGuiPrev.g, endTurnGuiPrev.b, endTurnGuiPrev.a * a);
             }
 
@@ -2780,21 +2787,25 @@ namespace NexusGame
             float th = HudCardTileH();
             float g = HudS(8f);
             float pad = HudS(4f);
-            float extraV = forcingOverdrawDiscard ? HudS(62f) : HudS(16f);
+            float extraTop = forcingOverdrawDiscard ? HudS(22f) : 0f;
+            float discardH = forcingOverdrawDiscard ? HudS(24f) : 0f;
+            float rowGap = forcingOverdrawDiscard ? HudS(30f) : HudS(10f);
 
             if (player.SecretMissions == null || player.SecretMissions.Count == 0)
             {
-                _scrollHandSecret = GUI.BeginScrollView(content, _scrollHandSecret,
-                    new Rect(0, 0, content.width, th + g));
                 DrawPlaceholderCard(new Rect(pad, pad, tw, th), "No missions");
-                GUI.EndScrollView();
                 return;
             }
 
-            float cw = player.SecretMissions.Count * (tw + g);
-            cw = Mathf.Max(cw, content.width);
-            float ch = th + extraV;
-            _scrollHandSecret = GUI.BeginScrollView(content, _scrollHandSecret, new Rect(0, 0, cw, ch));
+            int count = player.SecretMissions.Count;
+            int rows = Mathf.Min(2, count);
+            int cols = Mathf.CeilToInt(count / (float)rows);
+
+            float cardW = (content.width - pad * 2f - g * (cols - 1)) / Mathf.Max(1, cols);
+            cardW = Mathf.Clamp(cardW, HudS(90f), tw);
+            float scale = tw > 1e-5f ? cardW / tw : 1f;
+            float cardH = th * scale;
+
             if (forcingOverdrawDiscard)
             {
                 var msgStyle = new GUIStyle(_cardBodyStyle)
@@ -2804,29 +2815,43 @@ namespace NexusGame
                     wordWrap = true,
                     fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale))
                 };
-                GUI.Label(new Rect(pad, pad, cw - pad * 2f, HudS(16f)),
+                GUI.Label(new Rect(content.x + pad, content.y + pad, content.width - pad * 2f, HudS(16f)),
                     "Hand limit reached (5). Choose one card to discard, then draw the pending secret.",
                     msgStyle);
+
+                var declineStyle = new GUIStyle(GUI.skin.button)
+                {
+                    fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale)),
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleCenter
+                };
+                ApplyTileInfoFont(declineStyle);
+                float declineW = Mathf.Min(HudS(170f), content.width * 0.35f);
+                var declineRect = new Rect(content.x + content.width - declineW - pad, content.y + pad, declineW, HudS(24f));
+                if (GUI.Button(declineRect, "Decline Draw", declineStyle))
+                {
+                    Game.DeclinePendingSecretMissionDraw();
+                    _handPileViewer = HandPileViewerKind.None;
+                }
             }
 
-            float x = pad;
-            float cardY = forcingOverdrawDiscard ? pad + HudS(18f) : pad;
-            for (int i = 0; i < player.SecretMissions.Count; i++)
+            for (int i = 0; i < count; i++)
             {
+                int row = i / cols;
+                int col = i % cols;
+                float x = content.x + pad + col * (cardW + g);
+                float cardY = content.y + pad + extraTop + row * (cardH + rowGap + discardH);
                 var s = player.SecretMissions[i];
                 string full = SecretMissionLabel(s) + " (+" + s.VictoryPoints + " VP)";
-                DrawPlayingCard(new Rect(x, cardY, tw, th), new Color(0.42f, 0.15f, 0.5f),
+                DrawPlayingCard(new Rect(x, cardY, cardW, cardH), new Color(0.42f, 0.15f, 0.5f),
                     "#" + i + " " + CardShortTitle(full), CardDetailFromName(full), 1);
                 if (forcingOverdrawDiscard)
                 {
-                    var discardRect = new Rect(x, cardY + th + HudS(4f), tw, HudS(24f));
+                    var discardRect = new Rect(x, cardY + cardH + HudS(4f), cardW, discardH);
                     if (GUI.Button(discardRect, "Discard"))
                         Game.DiscardSecretMissionForPendingDraw(i);
                 }
-                x += tw + g;
             }
-
-            GUI.EndScrollView();
         }
 
         void DrawPhaseRibbon(PlayerState player)
@@ -2951,6 +2976,56 @@ namespace NexusGame
             return sole == player;
         }
 
+        void MaybeQueueContestedRetreatToast(PlayerState player)
+        {
+            if (Game == null || player == null || Game.IsAiControlled(player))
+                return;
+            if (Game.RunBattlePhaseAtTurnStart)
+                return;
+
+            int turn = Game.TurnNumber;
+            if (_lastContestedToastPlayerIndex == player.PlayerIndex && _lastContestedToastTurnNumber == turn)
+                return;
+
+            _lastContestedToastPlayerIndex = player.PlayerIndex;
+            _lastContestedToastTurnNumber = turn;
+
+            if (WillEnterCombatAfterEndTurn(player))
+                _contestedToastUntilTime = Time.unscaledTime + 3.6f;
+        }
+
+        void DrawContestedRetreatToast(Rect hudPanel, float topY)
+        {
+            if (_contestedToastUntilTime <= Time.unscaledTime || Game == null)
+                return;
+
+            float tRemain = Mathf.Clamp01((_contestedToastUntilTime - Time.unscaledTime) / 3.6f);
+            float alpha = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(tRemain * 2f)) *
+                          Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((tRemain - 0.05f) / 0.95f));
+
+            float w = Mathf.Min(HudS(560f), hudPanel.width - HudS(20f));
+            float h = HudS(54f);
+            var r = new Rect(hudPanel.x + (hudPanel.width - w) * 0.5f, topY, w, h);
+
+            Color prev = GUI.color;
+            GUI.color = new Color(0.08f, 0.10f, 0.16f, 0.90f * alpha);
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            DrawOutlineRect(r, new Color(1f, 0.80f, 0.25f, 0.85f * alpha), HudS(1.5f));
+
+            var st = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale)),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                normal = { textColor = new Color(0.97f, 0.98f, 1f, alpha) }
+            };
+            ApplyTileInfoFont(st);
+            GUI.Label(new Rect(r.x + HudS(8f), r.y + HudS(4f), r.width - HudS(16f), r.height - HudS(8f)),
+                "Contested hexes detected: you can move off them now to avoid forced battles at end turn.", st);
+            GUI.color = prev;
+        }
+
         enum EndTurnAdvanceVisualKind
         {
             NextTurn,
@@ -2974,7 +3049,7 @@ namespace NexusGame
         EndTurnAdvanceVisualKind GetEndTurnButtonVisualKind(PlayerState player, bool dragonSkipButton)
         {
             if (dragonSkipButton)
-                return EndTurnAdvanceVisualKind.Dragon;
+                return EndTurnAdvanceVisualKind.NextTurn;
             if (WillEnterCombatAfterEndTurn(player))
                 return EndTurnAdvanceVisualKind.Battle;
             if (WillEnterDragonAfterEndTurn(player))
@@ -3500,7 +3575,7 @@ namespace NexusGame
                                 new Color(1f, 0.82f, 0.2f, 0.98f), BattleS(2f));
                         }
 
-                        var badgeRect = new Rect(box.x + BattleS(2f), box.y + BattleS(2f), BattleS(44f), BattleS(18f));
+                        var badgeRect = new Rect(box.xMax - BattleS(46f), box.y + BattleS(2f), BattleS(44f), BattleS(18f));
                         DrawTintedRect(badgeRect, selected > 0
                             ? new Color(0.95f, 0.72f, 0.18f, 0.92f)
                             : new Color(0.18f, 0.22f, 0.30f, 0.9f));
@@ -3514,23 +3589,32 @@ namespace NexusGame
                             });
 
                         bool canAdd = cp.Selected.Count < cp.Required && selected < n;
+                        bool canSub = selected > 0;
                         bool prevEnabled = GUI.enabled;
-                        GUI.enabled = canAdd;
+                        // Tap once to add, tap again to remove one casualty of this type.
+                        GUI.enabled = canAdd || canSub;
                         if (GUI.Button(box, GUIContent.none, GUIStyle.none))
-                            AdjustCasualtyTypeSelection(cp, unitType, +1);
+                        {
+                            if (canSub)
+                                AdjustCasualtyTypeSelection(cp, unitType, -1);
+                            else if (canAdd)
+                                AdjustCasualtyTypeSelection(cp, unitType, +1);
+                        }
                         GUI.enabled = prevEnabled;
 
-                        var minusRect = new Rect(box.xMax - BattleS(18f), box.y + BattleS(2f), BattleS(16f), BattleS(14f));
-                        bool canSub = selected > 0;
-                        prevEnabled = GUI.enabled;
-                        var prevColor = GUI.color;
-                        GUI.enabled = canSub;
-                        if (!canSub)
-                            GUI.color = new Color(0.55f, 0.55f, 0.6f, 0.9f);
-                        if (GUI.Button(minusRect, "-"))
-                            AdjustCasualtyTypeSelection(cp, unitType, -1);
-                        GUI.enabled = prevEnabled;
-                        GUI.color = prevColor;
+                        if (n > 1)
+                        {
+                            var plusRect = new Rect(box.x + BattleS(2f), box.y + BattleS(2f), BattleS(16f), BattleS(14f));
+                            prevEnabled = GUI.enabled;
+                            var prevColor = GUI.color;
+                            GUI.enabled = canAdd;
+                            if (!canAdd)
+                                GUI.color = new Color(0.55f, 0.55f, 0.6f, 0.9f);
+                            if (GUI.Button(plusRect, "+"))
+                                AdjustCasualtyTypeSelection(cp, unitType, +1);
+                            GUI.enabled = prevEnabled;
+                            GUI.color = prevColor;
+                        }
                     }
 
                     GUILayout.EndVertical();

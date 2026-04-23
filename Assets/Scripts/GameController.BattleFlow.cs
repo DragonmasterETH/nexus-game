@@ -315,6 +315,25 @@ namespace NexusGame
             ConsumeOnePendingSecretMissionAfterDiscard();
         }
 
+        public void DeclinePendingSecretMissionDraw()
+        {
+            if (SecretMissionOverdraw == null || !SecretMissionOverdraw.Waiting)
+                return;
+            if (SecretMissionOverdraw.PendingDraws == null || SecretMissionOverdraw.PendingDraws.Count == 0)
+            {
+                SecretMissionOverdraw.Waiting = false;
+                return;
+            }
+
+            var p = SecretMissionOverdraw.Player;
+            SecretMissionOverdraw.PendingDraws.RemoveAt(0);
+            if (SecretMissionOverdraw.PendingDraws.Count == 0)
+                SecretMissionOverdraw.Waiting = false;
+
+            if (p != null)
+                Debug.Log($"[Cards] Secret draw declined: P{p.PlayerIndex + 1} kept current hand.");
+        }
+
         public void ResolveAiSecretMissionOverdraw()
         {
             if (SecretMissionOverdraw == null || !SecretMissionOverdraw.Waiting || SecretMissionOverdraw.Player == null)
@@ -584,7 +603,8 @@ namespace NexusGame
                 int defEnd = dLeft.Count;
                 int defCasualties = defStart - defEnd;
                 int attCasualties = attStart - attEnd;
-                bool attackerWin = defEnd == 0;
+                bool attackerWin = defEnd == 0 && IsHexControlledByPlayer(hex, attacker);
+                bool defenderWin = attEnd == 0 && IsHexControlledByPlayer(hex, defender);
 
                 if (attackerWin)
                 {
@@ -614,7 +634,7 @@ namespace NexusGame
                         }
                     }
                 }
-                else
+                else if (defenderWin)
                 {
                     log.AppendLine("Defender holds the hex.");
                     if (!AutoResolveBattlesQuick)
@@ -629,6 +649,10 @@ namespace NexusGame
                             break;
                         }
                     }
+                }
+                else
+                {
+                    log.AppendLine("Battle unresolved: hex remains contested.");
                 }
 
                 log.AppendLine("---");
