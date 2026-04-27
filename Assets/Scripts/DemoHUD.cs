@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -46,6 +47,8 @@ namespace NexusGame
         bool _tileInfoScreenTried;
         NexusGuiImage _battleScreenBg;
         bool _battleScreenTried;
+        NexusGuiImage _cardScreenBg;
+        bool _cardScreenTried;
         float _battlePanelContentWidth;
         float _battleHudUiScale = 1f;
         float _battlePanelScaleCached = 1f;
@@ -64,6 +67,8 @@ namespace NexusGame
         GUIStyle _tileInfoHiddenVScrollbar;
         Font _tileInfoUiFont;
         bool _tileInfoUiFontTried;
+        Font _handPileTitleFont;
+        bool _handPileTitleFontTried;
 
         /// <summary>IMGUI uses Unity <see cref="Font"/> from Resources (<c>Fonts/Bemora</c>). TextMesh Pro needs an SDF asset — generate it with the Nexus → Fonts menu in the editor.</summary>
         Font TileInfoUiFont()
@@ -76,6 +81,22 @@ namespace NexusGame
             }
 
             return _tileInfoUiFont;
+        }
+
+        /// <summary>
+        /// Hand pile modal title: underlying font from the TMP asset (<c>Resources/Fonts/Bemora SDF</c>) for IMGUI.
+        /// </summary>
+        Font HandPileTitleUiFont()
+        {
+            if (!_handPileTitleFontTried)
+            {
+                _handPileTitleFontTried = true;
+                var tmp = Resources.Load<TMP_FontAsset>("Fonts/Bemora SDF");
+                if (tmp != null && tmp.sourceFontFile != null)
+                    _handPileTitleFont = tmp.sourceFontFile;
+            }
+
+            return _handPileTitleFont != null ? _handPileTitleFont : TileInfoUiFont();
         }
 
         void ApplyTileInfoFont(GUIStyle style)
@@ -458,8 +479,6 @@ namespace NexusGame
         Vector2 _scrollBattleLogPanel;
         int _lastBattleLogLen;
         Vector2 _scrollHand;
-        Vector2 _scrollHandBattle;
-        Vector2 _scrollHandDeploy;
         Vector2 _scrollHandSecret;
         Vector2 _scrollTilePanel;
 
@@ -672,6 +691,7 @@ namespace NexusGame
             float ly = topBarY + (topBarH - iconH) * 0.5f - 2f * hs;
             float cy = ly + iconH * 0.5f;
             var player = Game.CurrentPlayer;
+            bool handPileModalOpen = _handPileViewer != HandPileViewerKind.None;
             var rub = GetRubiumGui();
             var vp = GetVPGui();
             float rxRes = hp.x + 12f * hs;
@@ -1132,6 +1152,7 @@ namespace NexusGame
             }
 
             var player = Game.CurrentPlayer;
+            bool handPileModalOpen = _handPileViewer != HandPileViewerKind.None;
 
             _hudLayoutPanel = GetCenterBuyModalPanelGuiRect();
             _mainHudUiScale = MainHudUiScale();
@@ -1203,7 +1224,7 @@ namespace NexusGame
             GUI.Label(new Rect(rxRes, ly - HudS(2f), HudS(80f), resLineH), player.VictoryPoints.ToString(), rubNumStyle);
             rxRes += vpNumW + gapMid;
             GUI.Label(new Rect(rxRes, ly - HudS(2f), rowRight - rxRes, resLineH), midText, centerMetaStyle);
-            bool blockTopIcons = _showCenterBuyModal;
+            bool blockTopIcons = _showCenterBuyModal || handPileModalOpen;
             bool prevEnabled = GUI.enabled;
             if (blockTopIcons)
                 GUI.enabled = false;
@@ -1350,7 +1371,7 @@ namespace NexusGame
             var dragonPhase = Game.DragonPhase;
             bool dragonSkipButton = dragonPhase != null && !Game.IsAiControlled(dragonPhase.Player) &&
                 dragonPhase.PendingHit == null;
-            bool blockEndTurn = Game.BattlePhaseBlockingPlay || Game.IsAiControlled(player);
+            bool blockEndTurn = Game.BattlePhaseBlockingPlay || Game.IsAiControlled(player) || handPileModalOpen;
             if (dragonPhase != null && !dragonSkipButton)
                 blockEndTurn = true;
 
@@ -1418,13 +1439,17 @@ namespace NexusGame
             GUI.enabled = true;
 
             bool canOpenHexDetailModal = InputController != null && InputController.SelectedTile != null;
-            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || Game.IsAiControlled(player))
+            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || Game.IsAiControlled(player) || handPileModalOpen)
                 canOpenHexDetailModal = false;
 
             if (_showCenterBuyModal && !canOpenHexDetailModal)
                 _showCenterBuyModal = false;
 
+            bool prevHudEnabled = GUI.enabled;
+            if (handPileModalOpen)
+                GUI.enabled = false;
             DrawBottomCardHand(player);
+            GUI.enabled = prevHudEnabled;
             DrawPhaseRibbon(player);
 
             DrawHandPileViewerOverlay(player);
@@ -1747,8 +1772,7 @@ namespace NexusGame
             float splitGap = HudS(8f);
             float minTilePanelW = HudS(120f);
             float stackBtnW = HudS(52f);
-            float stackBtnH = HudS(32f);
-            float stackGap = HudS(3f);
+            float stackBtnH = HudS(40f);
             float cardsHdrH = HudS(12f);
 
             int bCount = player.BattleEnergize?.Count ?? 0;
@@ -1777,46 +1801,24 @@ namespace NexusGame
                 wordWrap = false
             };
 
-            float stackBlockH = cardsHdrH + HudS(4f) + stackBtnH * 3f + stackGap * 2f;
+            float stackBlockH = cardsHdrH + HudS(4f) + stackBtnH;
             float stackTop = contentY + Mathf.Max(0f, (contentH - stackBlockH) * 0.5f);
             GUI.Label(new Rect(innerX, stackTop, stackBtnW, cardsHdrH + HudS(2f)), "CARDS", cardsHeadingStyle);
 
             float bx = innerX;
             float by = stackTop + cardsHdrH + HudS(4f);
-            var rBattle = new Rect(bx, by, stackBtnW, stackBtnH);
-            var rDeploy = new Rect(bx, by + stackBtnH + stackGap, stackBtnW, stackBtnH);
-            var rSecret = new Rect(bx, by + (stackBtnH + stackGap) * 2f, stackBtnW, stackBtnH);
+            var rCards = new Rect(bx, by, stackBtnW, stackBtnH);
+            int totalCards = bCount + dCount + sCount;
 
-            if (GUI.Button(rBattle, $"⚔ {bCount}", pileBtnStyle))
+            if (GUI.Button(rCards, $"🃏 {totalCards}", pileBtnStyle))
             {
                 _handPileViewer = _handPileViewer == HandPileViewerKind.Battle
                     ? HandPileViewerKind.None
                     : HandPileViewerKind.Battle;
             }
 
-            if (GUI.Button(rDeploy, $"▲ {dCount}", pileBtnStyle))
-            {
-                _handPileViewer = _handPileViewer == HandPileViewerKind.Deploy
-                    ? HandPileViewerKind.None
-                    : HandPileViewerKind.Deploy;
-            }
-
-            if (GUI.Button(rSecret, $"S {sCount}", pileBtnStyle))
-            {
-                _handPileViewer = _handPileViewer == HandPileViewerKind.Secret
-                    ? HandPileViewerKind.None
-                    : HandPileViewerKind.Secret;
-            }
-
             if (_handPileViewer != HandPileViewerKind.None)
-            {
-                if (_handPileViewer == HandPileViewerKind.Battle)
-                    DrawOutlineRect(rBattle, new Color(0.95f, 0.78f, 0.2f, 0.95f), HudS(2f));
-                if (_handPileViewer == HandPileViewerKind.Deploy)
-                    DrawOutlineRect(rDeploy, new Color(0.95f, 0.78f, 0.2f, 0.95f), HudS(2f));
-                if (_handPileViewer == HandPileViewerKind.Secret)
-                    DrawOutlineRect(rSecret, new Color(0.95f, 0.78f, 0.2f, 0.95f), HudS(2f));
-            }
+                DrawOutlineRect(rCards, new Color(0.95f, 0.78f, 0.2f, 0.95f), HudS(2f));
 
             DrawBottomTilePanel(rightX, contentY, rightW, contentH, player);
         }
@@ -1877,6 +1879,17 @@ namespace NexusGame
             float h = Mathf.Min(Screen.height - HudS(80f), HudS(420f));
             var win = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
 
+            // Consume clicks outside the modal only (a full-screen invisible button steals all hits from controls drawn after it).
+            float sw = Screen.width;
+            float sh = Screen.height;
+            GUI.Button(new Rect(0f, 0f, win.x, sh), GUIContent.none, GUIStyle.none);
+            GUI.Button(new Rect(win.xMax, 0f, Mathf.Max(0f, sw - win.xMax), sh), GUIContent.none, GUIStyle.none);
+            GUI.Button(new Rect(win.x, 0f, win.width, win.y), GUIContent.none, GUIStyle.none);
+            GUI.Button(new Rect(win.x, win.yMax, win.width, Mathf.Max(0f, sh - win.yMax)), GUIContent.none,
+                GUIStyle.none);
+
+            DrawHandPileModalPanelBackground(win);
+
             string title = _handPileViewer switch
             {
                 HandPileViewerKind.Battle => "Battle Energize",
@@ -1885,30 +1898,84 @@ namespace NexusGame
                 _ => "Hand"
             };
 
-            GUI.Box(win, "");
-            DrawOutlineRect(win, new Color(0.95f, 0.82f, 0.2f, 0.95f), HudS(2f));
-            GUI.Label(new Rect(win.x + HudS(12f), win.y + HudS(8f), win.width - HudS(100f), HudS(22f)), title,
-                _cardColumnLabelStyle);
-            var closePileStyle = new GUIStyle(GUI.skin.button)
+            float titlePadTop = HudS(8f);
+            float titleLineH = HudS(46f);
+            var titleStyle = new GUIStyle(_cardColumnLabelStyle)
             {
-                fontSize = Mathf.Max(15, Mathf.RoundToInt(17f * _hudFontScale)),
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = Mathf.Max(18, Mathf.RoundToInt(22f * _hudFontScale)),
+                fontStyle = FontStyle.Bold
+            };
+            Font titleFont = HandPileTitleUiFont();
+            if (titleFont != null)
+                titleStyle.font = titleFont;
+            GUI.Label(new Rect(win.x, win.y + titlePadTop, win.width, titleLineH), title, titleStyle);
+
+            float tabY = win.y + titlePadTop + titleLineH + HudS(14f);
+            float tabH = HudS(28f);
+            float tabGap = HudS(6f);
+            float tabWAvail = (win.width - HudS(20f) - tabGap * 2f) / 3f;
+            float tabW = Mathf.Floor(tabWAvail * 0.93f);
+            float tabsRowW = tabW * 3f + tabGap * 2f;
+            float tabLeft = win.x + (win.width - tabsRowW) * 0.5f;
+            var tabBattle = new Rect(tabLeft, tabY, tabW, tabH);
+            var tabDeploy = new Rect(tabBattle.xMax + tabGap, tabY, tabW, tabH);
+            var tabSecret = new Rect(tabDeploy.xMax + tabGap, tabY, tabW, tabH);
+
+            var tabStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = Mathf.Max(10, Mathf.RoundToInt(11f * _hudFontScale)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
+            ApplyTileInfoFont(tabStyle);
+
             if (!forcingSecretOverdraw)
             {
-                if (GUI.Button(new Rect(win.xMax - HudS(96f), win.y + HudS(6f), HudS(84f), HudS(44f)), "Close",
-                        closePileStyle))
-                    _handPileViewer = HandPileViewerKind.None;
+                if (GUI.Button(tabBattle, $"⚔ {player.BattleEnergize?.Count ?? 0}", tabStyle))
+                    _handPileViewer = HandPileViewerKind.Battle;
+                if (GUI.Button(tabDeploy, $"▲ {player.DeployEnergize?.Count ?? 0}", tabStyle))
+                    _handPileViewer = HandPileViewerKind.Deploy;
             }
+            else
+            {
+                GUI.enabled = false;
+                GUI.Button(tabBattle, $"⚔ {player.BattleEnergize?.Count ?? 0}", tabStyle);
+                GUI.Button(tabDeploy, $"▲ {player.DeployEnergize?.Count ?? 0}", tabStyle);
+                GUI.enabled = true;
+            }
+            if (GUI.Button(tabSecret, $"S {player.SecretMissions?.Count ?? 0}", tabStyle))
+                _handPileViewer = HandPileViewerKind.Secret;
 
-            var content = new Rect(win.x + HudS(10f), win.y + HudS(38f), win.width - HudS(20f), win.height - HudS(48f));
+            float closeW = HudS(132f);
+            float closeH = HudS(46f);
+            float closeBottomPad = HudS(14f);
+            float closeY = win.yMax - closeBottomPad - closeH;
+            float contentTop = tabY + tabH + HudS(10f);
+            float contentBottom = closeY - HudS(10f);
+            float contentH = Mathf.Max(HudS(48f), contentBottom - contentTop);
+            var content = new Rect(win.x + HudS(10f), contentTop, win.width - HudS(20f), contentH);
+
             if (_handPileViewer == HandPileViewerKind.Battle)
                 DrawHandPileModalBattle(content, player);
             else if (_handPileViewer == HandPileViewerKind.Deploy)
                 DrawHandPileModalDeploy(content, player);
             else if (_handPileViewer == HandPileViewerKind.Secret)
                 DrawHandPileModalSecret(content, player, forcingSecretOverdraw);
+
+            var closePileStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = Mathf.Max(15, Mathf.RoundToInt(17f * _hudFontScale)),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            ApplyTileInfoFont(closePileStyle);
+            if (!forcingSecretOverdraw)
+            {
+                if (GUI.Button(new Rect(win.x + (win.width - closeW) * 0.5f, closeY, closeW, closeH), "Close",
+                        closePileStyle))
+                    _handPileViewer = HandPileViewerKind.None;
+            }
         }
 
         void DrawCenterBuyDeployModal(PlayerState player)
@@ -2169,6 +2236,24 @@ namespace NexusGame
             DrawTintedRect(panel, new Color(0.02f, 0.03f, 0.05f, 1f));
             // Full-bleed frame art (designed for this modal aspect).
             _tileInfoScreenBg.Draw(panel);
+        }
+
+        void DrawHandPileModalPanelBackground(Rect panel)
+        {
+            if (!_cardScreenTried)
+            {
+                _cardScreenTried = true;
+                _cardScreenBg = NexusGuiArt.LoadCardScreenBackground();
+            }
+
+            if (_cardScreenBg.IsEmpty)
+            {
+                DrawTintedRect(panel, new Color(0.06f, 0.06f, 0.1f, 0.96f));
+                return;
+            }
+
+            // No underlay tint — otherwise it fills transparent regions in the frame art (solid dark slab behind cards).
+            _cardScreenBg.Draw(panel);
         }
 
         /// <summary>Full-bleed battle frame under the dim; stretched to the full display (portrait 9:16).</summary>
@@ -2725,29 +2810,42 @@ namespace NexusGame
             float th = HudCardTileH();
             float g = HudS(8f);
             float pad = HudS(4f);
+            float rowGap = HudS(10f);
 
             var battleGroups = player.BattleEnergize.GroupBy(x => x).OrderBy(gr => gr.Key.ToString()).ToList();
-            float cw = battleGroups.Count == 0
-                ? tw + g
-                : battleGroups.Count * (tw + g);
-            cw = Mathf.Max(cw, content.width);
-            _scrollHandBattle = GUI.BeginScrollView(content, _scrollHandBattle,
-                new Rect(0, 0, cw, th + g));
             if (battleGroups.Count == 0)
-                DrawPlaceholderCard(new Rect(pad, pad, tw, th), "No cards");
-            else
             {
-                float x = pad;
-                foreach (var grp in battleGroups)
-                {
-                    string full = EnergizeBattleCatalog.GetName(grp.Key);
-                    DrawPlayingCard(new Rect(x, pad, tw, th), new Color(0.15f, 0.28f, 0.55f),
-                        CardShortTitle(full), CardDetailFromName(full), grp.Count());
-                    x += tw + g;
-                }
+                float px = content.x + (content.width - tw) * 0.5f;
+                DrawPlaceholderCard(new Rect(px, content.y + pad, tw, th), "No cards");
+                return;
             }
 
-            GUI.EndScrollView();
+            int count = battleGroups.Count;
+            int rows = Mathf.Min(2, count);
+            int cols = Mathf.CeilToInt(count / (float)rows);
+
+            float cardW = (content.width - pad * 2f - g * (cols - 1)) / Mathf.Max(1, cols);
+            cardW = Mathf.Clamp(cardW, HudS(90f), tw);
+            float scale = tw > 1e-5f ? cardW / tw : 1f;
+            float cardH = th * scale;
+
+            int i = 0;
+            for (int row = 0; row < rows && i < count; row++)
+            {
+                int idx0 = row * cols;
+                int cardsInRow = Mathf.Min(cols, count - idx0);
+                float rowW = cardsInRow * cardW + (cardsInRow - 1) * g;
+                float startX = content.x + (content.width - rowW) * 0.5f;
+                float cardY = content.y + pad + row * (cardH + rowGap);
+                for (int j = 0; j < cardsInRow; j++)
+                {
+                    var grp = battleGroups[i++];
+                    float x = startX + j * (cardW + g);
+                    string full = EnergizeBattleCatalog.GetName(grp.Key);
+                    DrawPlayingCard(new Rect(x, cardY, cardW, cardH), new Color(0.15f, 0.28f, 0.55f),
+                        CardShortTitle(full), CardDetailFromName(full), grp.Count());
+                }
+            }
         }
 
         void DrawHandPileModalDeploy(Rect content, PlayerState player)
@@ -2756,29 +2854,42 @@ namespace NexusGame
             float th = HudCardTileH();
             float g = HudS(8f);
             float pad = HudS(4f);
+            float rowGap = HudS(10f);
 
             var deployGroups = player.DeployEnergize.GroupBy(x => x).OrderBy(gr => gr.Key.ToString()).ToList();
-            float cw = deployGroups.Count == 0
-                ? tw + g
-                : deployGroups.Count * (tw + g);
-            cw = Mathf.Max(cw, content.width);
-            _scrollHandDeploy = GUI.BeginScrollView(content, _scrollHandDeploy,
-                new Rect(0, 0, cw, th + g));
             if (deployGroups.Count == 0)
-                DrawPlaceholderCard(new Rect(pad, pad, tw, th), "No cards");
-            else
             {
-                float x = pad;
-                foreach (var grp in deployGroups)
-                {
-                    string full = EnergizeDeploymentCatalog.GetName(grp.Key);
-                    DrawPlayingCard(new Rect(x, pad, tw, th), new Color(0.15f, 0.45f, 0.25f),
-                        CardShortTitle(full), CardDetailFromName(full), grp.Count());
-                    x += tw + g;
-                }
+                float px = content.x + (content.width - tw) * 0.5f;
+                DrawPlaceholderCard(new Rect(px, content.y + pad, tw, th), "No cards");
+                return;
             }
 
-            GUI.EndScrollView();
+            int count = deployGroups.Count;
+            int rows = Mathf.Min(2, count);
+            int cols = Mathf.CeilToInt(count / (float)rows);
+
+            float cardW = (content.width - pad * 2f - g * (cols - 1)) / Mathf.Max(1, cols);
+            cardW = Mathf.Clamp(cardW, HudS(90f), tw);
+            float scale = tw > 1e-5f ? cardW / tw : 1f;
+            float cardH = th * scale;
+
+            int i = 0;
+            for (int row = 0; row < rows && i < count; row++)
+            {
+                int idx0 = row * cols;
+                int cardsInRow = Mathf.Min(cols, count - idx0);
+                float rowW = cardsInRow * cardW + (cardsInRow - 1) * g;
+                float startX = content.x + (content.width - rowW) * 0.5f;
+                float cardY = content.y + pad + row * (cardH + rowGap);
+                for (int j = 0; j < cardsInRow; j++)
+                {
+                    var grp = deployGroups[i++];
+                    float x = startX + j * (cardW + g);
+                    string full = EnergizeDeploymentCatalog.GetName(grp.Key);
+                    DrawPlayingCard(new Rect(x, cardY, cardW, cardH), new Color(0.15f, 0.45f, 0.25f),
+                        CardShortTitle(full), CardDetailFromName(full), grp.Count());
+                }
+            }
         }
 
         void DrawHandPileModalSecret(Rect content, PlayerState player, bool forcingOverdrawDiscard = false)
@@ -2793,7 +2904,8 @@ namespace NexusGame
 
             if (player.SecretMissions == null || player.SecretMissions.Count == 0)
             {
-                DrawPlaceholderCard(new Rect(pad, pad, tw, th), "No missions");
+                float px = content.x + (content.width - tw) * 0.5f;
+                DrawPlaceholderCard(new Rect(px, content.y + pad, tw, th), "No missions");
                 return;
             }
 
@@ -2835,21 +2947,28 @@ namespace NexusGame
                 }
             }
 
-            for (int i = 0; i < count; i++)
+            int i = 0;
+            for (int row = 0; row < rows && i < count; row++)
             {
-                int row = i / cols;
-                int col = i % cols;
-                float x = content.x + pad + col * (cardW + g);
+                int idx0 = row * cols;
+                int cardsInRow = Mathf.Min(cols, count - idx0);
+                float rowW = cardsInRow * cardW + (cardsInRow - 1) * g;
+                float startX = content.x + (content.width - rowW) * 0.5f;
                 float cardY = content.y + pad + extraTop + row * (cardH + rowGap + discardH);
-                var s = player.SecretMissions[i];
-                string full = SecretMissionLabel(s) + " (+" + s.VictoryPoints + " VP)";
-                DrawPlayingCard(new Rect(x, cardY, cardW, cardH), new Color(0.42f, 0.15f, 0.5f),
-                    "#" + i + " " + CardShortTitle(full), CardDetailFromName(full), 1);
-                if (forcingOverdrawDiscard)
+                for (int j = 0; j < cardsInRow; j++)
                 {
-                    var discardRect = new Rect(x, cardY + cardH + HudS(4f), cardW, discardH);
-                    if (GUI.Button(discardRect, "Discard"))
-                        Game.DiscardSecretMissionForPendingDraw(i);
+                    int missionIndex = i++;
+                    float x = startX + j * (cardW + g);
+                    var s = player.SecretMissions[missionIndex];
+                    string full = SecretMissionLabel(s) + " (+" + s.VictoryPoints + " VP)";
+                    DrawPlayingCard(new Rect(x, cardY, cardW, cardH), new Color(0.42f, 0.15f, 0.5f),
+                        "#" + missionIndex + " " + CardShortTitle(full), CardDetailFromName(full), 1);
+                    if (forcingOverdrawDiscard)
+                    {
+                        var discardRect = new Rect(x, cardY + cardH + HudS(4f), cardW, discardH);
+                        if (GUI.Button(discardRect, "Discard"))
+                            Game.DiscardSecretMissionForPendingDraw(missionIndex);
+                    }
                 }
             }
         }

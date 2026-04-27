@@ -207,6 +207,16 @@ namespace NexusGame
                 "Sprites/UI/BattleScreen");
         }
 
+        /// <summary>Hand / card pile modal panel frame (<c>Card screen.png</c> under Resources).</summary>
+        public static NexusGuiImage LoadCardScreenBackground()
+        {
+            return Load(
+                "Sprites/Card screen",
+                "Sprites/CardScreen",
+                "Sprites/UI/Card screen",
+                "Sprites/UI/CardScreen");
+        }
+
         public static NexusGuiImage FromFields(Texture2D icon, Sprite spr)
         {
             if (icon != null)
