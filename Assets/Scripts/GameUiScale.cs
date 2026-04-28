@@ -20,6 +20,23 @@ namespace NexusGame
         }
 
         /// <summary>
+        /// Same width as <see cref="GetPaddedModalPanelGuiRect"/>, but height is capped (~58% of screen) and the
+        /// block is centered vertically. (Centering a nearly full-screen rect only shifts Y by a few dozen px — not
+        /// enough to read as “centered”; casualty pick needs a shorter panel.)
+        /// </summary>
+        public static Rect GetBattleCasualtyModalPanelGuiRect()
+        {
+            Rect pad = GetPaddedModalPanelGuiRect();
+            float m = pad.x;
+            float w = pad.width;
+            float hCap = Screen.height * 0.58f;
+            float h = Mathf.Min(pad.height, hCap);
+            float y = (Screen.height - h) * 0.5f;
+            y = Mathf.Clamp(y, m, Mathf.Max(m, Screen.height - h - m));
+            return new Rect(m, y, w, h);
+        }
+
+        /// <summary>
         /// Uniform scale to 1920×1080 (landscape) or 1080×1920 (portrait) logical panel minus margins.
         /// </summary>
         public static float TileInfoModalPanelScale(Rect panel)

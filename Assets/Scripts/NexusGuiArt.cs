@@ -217,6 +217,16 @@ namespace NexusGame
                 "Sprites/UI/CardScreen");
         }
 
+        /// <summary>Casualty pick modals — battle + Dragon firebolt (<c>Casualty screen.png</c> under Resources).</summary>
+        public static NexusGuiImage LoadCasualtyScreenBackground()
+        {
+            return Load(
+                "Sprites/Casualty screen",
+                "Sprites/CasualtyScreen",
+                "Sprites/UI/Casualty screen",
+                "Sprites/UI/CasualtyScreen");
+        }
+
         public static NexusGuiImage FromFields(Texture2D icon, Sprite spr)
         {
             if (icon != null)
