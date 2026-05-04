@@ -31,6 +31,22 @@ namespace NexusGame
         }
     }
 
+    /// <summary>HUD: death.png pulse over the casualty&apos;s unit slot on the battle strip.</summary>
+    public readonly struct BattleCasualtyDeathFx
+    {
+        public readonly float StartTimeUnscaled;
+        /// <summary>True = attacker column (left); false = defender (right).</summary>
+        public readonly bool AttackerSide;
+        public readonly UnitType UnitType;
+
+        public BattleCasualtyDeathFx(float startTimeUnscaled, bool attackerSide, UnitType unitType)
+        {
+            StartTimeUnscaled = startTimeUnscaled;
+            AttackerSide = attackerSide;
+            UnitType = unitType;
+        }
+    }
+
     public partial class GameController
     {
         [Header("Cards & full battle")]
@@ -93,6 +109,32 @@ namespace NexusGame
 
         BattleUiDiceRoll? _lastBattleUiDiceRoll;
         bool _battleClashIntroActive;
+
+        readonly List<BattleCasualtyDeathFx> _battleCasualtyDeathFx = new List<BattleCasualtyDeathFx>();
+
+        /// <summary>Death.png opacity fades linearly to zero over this duration (seconds).</summary>
+        public const float BattleCasualtyDeathFxSeconds = 0.5f;
+
+        public IReadOnlyList<BattleCasualtyDeathFx> ActiveBattleCasualtyDeathFx => _battleCasualtyDeathFx;
+
+        public void QueueBattleCasualtyDeathFx(PlayerState victimOwner, UnitType unitType)
+        {
+            if (!UseFullBattleFlow || AutoResolveBattlesQuick || victimOwner == null || _battleHex == null)
+                return;
+            bool attackerSide = _battleAttacker != null && victimOwner == _battleAttacker;
+            _battleCasualtyDeathFx.Add(new BattleCasualtyDeathFx(Time.unscaledTime, attackerSide, unitType));
+        }
+
+        public void PruneExpiredBattleCasualtyDeathFx(float nowUnscaled)
+        {
+            float maxAge = BattleCasualtyDeathFxSeconds + 0.08f;
+            _battleCasualtyDeathFx.RemoveAll(x => nowUnscaled - x.StartTimeUnscaled > maxAge);
+        }
+
+        void ClearBattleCasualtyDeathFx()
+        {
+            _battleCasualtyDeathFx.Clear();
+        }
 
         /// <summary>Shown between battle confirmation and Energize (placeholder until sword art exists).</summary>
         public bool BattleClashIntroActive => _battleClashIntroActive;
@@ -187,6 +229,7 @@ namespace NexusGame
             LastBattlePhaseLog = "";
             _miningIncomeFlightsForHud = null;
             _victoryPointFlightsForHud = null;
+            ClearBattleCasualtyDeathFx();
         }
 
         void RunDrawPhase(PlayerState player)
@@ -662,6 +705,7 @@ namespace NexusGame
             BattlePlan.Clear();
             BattlePhaseBlockingPlay = false;
             _battleHex = null;
+            ClearBattleCasualtyDeathFx();
             HasActiveBattleStep = false;
             ActiveBattleHitsOnAttacker = 0;
             ActiveBattleHitsOnDefender = 0;
@@ -686,13 +730,12 @@ namespace NexusGame
                     eligible.Add(i);
             }
 
-            if (eligible.Count == 0)
-                return null;
-
+            bool fallbackOnly = eligible.Count == 0;
             return new SecretMissionOfferState
             {
                 Player = winner,
                 EligibleIndices = eligible,
+                OffersFallbackBattleVp = fallbackOnly,
                 Waiting = true
             };
         }
@@ -712,11 +755,26 @@ namespace NexusGame
             }
         }
 
+        public void ClaimFallbackBattleSecretVp()
+        {
+            if (SecretMissionOffer == null || !SecretMissionOffer.Waiting || !SecretMissionOffer.OffersFallbackBattleVp)
+                return;
+
+            var p = SecretMissionOffer.Player;
+            const int vp = 1;
+            p.VictoryPoints += vp;
+            QueueVictoryPointHudFlight(p, vp);
+            SecretMissionOffer.Waiting = false;
+            Debug.Log($"[Battle] Fallback battle secret: P{p.PlayerIndex + 1} +{vp} VP (no card played)");
+            CheckGameEndAfterVpChange();
+        }
+
         public void PlaySecretMissionAtIndex(int indexInHand)
         {
             if (SecretMissionOffer == null || !SecretMissionOffer.Waiting)
                 return;
-            if (!SecretMissionOffer.EligibleIndices.Contains(indexInHand))
+            if (SecretMissionOffer.EligibleIndices == null ||
+                !SecretMissionOffer.EligibleIndices.Contains(indexInHand))
                 return;
 
             var p = SecretMissionOffer.Player;
@@ -983,6 +1041,7 @@ namespace NexusGame
                         foreach (var v in BattleResolver.PickCasualtiesWeakestFirst(aliveAtt, capAtt))
                         {
                             Log($"    → P{attacker.PlayerIndex + 1} dies: {v.Definition.Type}");
+                            QueueBattleCasualtyDeathFx(attacker, v.Definition.Type);
                             if (v.Definition.Type == UnitType.RubiumDragon)
                                 onAttackerDragonKilled();
                             RemoveUnit(v);
@@ -1074,6 +1133,7 @@ namespace NexusGame
                         foreach (var v in BattleResolver.PickCasualtiesWeakestFirst(aliveDef, capDef))
                         {
                             Log($"    → P{defender.PlayerIndex + 1} dies: {v.Definition.Type}");
+                            QueueBattleCasualtyDeathFx(defender, v.Definition.Type);
                             onDefenderCasualty(1);
                             if (v.Definition.Type == UnitType.RubiumDragon)
                                 onDefenderDragonKilled();
@@ -1137,6 +1197,7 @@ namespace NexusGame
                 AppendBattleLog(
                     $"    → P{CasualtyPick.Owner.PlayerIndex + 1} dies: {v.Definition.Type}");
                 CasualtyPick.OnEachRemove?.Invoke(v);
+                QueueBattleCasualtyDeathFx(CasualtyPick.Owner, v.Definition.Type);
                 RemoveUnit(v);
             }
 
@@ -1593,6 +1654,11 @@ namespace NexusGame
         /// <summary>Battle winner who may play one eligible secret (was only the attacker; now attacker or defender).</summary>
         public PlayerState Player;
         public List<int> EligibleIndices;
+        /// <summary>
+        /// True when no battle secret in hand qualifies for this win — player may claim +1 VP without playing a card
+        /// (replaces drawn &quot;Win any battle&quot; secrets; see <see cref="GameController.ClaimFallbackBattleSecretVp"/>).
+        /// </summary>
+        public bool OffersFallbackBattleVp;
         public bool Waiting;
     }
 

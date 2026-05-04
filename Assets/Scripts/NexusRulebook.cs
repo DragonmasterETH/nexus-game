@@ -48,7 +48,8 @@ namespace NexusGame
 
             "SECRET MISSIONS\n" +
             "• One-shot cards with conditions (often battle-related). When you fulfill one after a win, you may play it for bonus VP " +
-            "or skip to keep the card.\n\n" +
+            "or skip to keep the card.\n" +
+            "• If none of your secrets match that battle result, you may still claim +1 bonus VP once (no card — the old draw-pile “win any battle” option).\n\n" +
 
             "BOTTOM CARD STRIP\n" +
             "• Shows your Battle Energize, Deployment Energize, and Secret Missions. Scroll sideways if you have many.\n\n" +

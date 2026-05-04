@@ -224,7 +224,8 @@ namespace NexusGame
                 }
             }
 
-            AddBattle(SecretMissionTypes.WinAnyBattle, 1, 8);
+            // WinAnyBattle (+1 VP / win any battle) is not in the deck — offered as a fallback after a win when
+            // no secret in hand qualifies (see GameController.BuildSecretOffer).
             AddBattle(SecretMissionTypes.WinBattleKillTwoPlus, 2, 4);
             AddBattle(SecretMissionTypes.WinBattleEnemyLostDragon, 2, 4);
             nextInstanceId = inst;

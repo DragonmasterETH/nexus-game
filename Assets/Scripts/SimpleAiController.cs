@@ -253,7 +253,16 @@ namespace NexusGame
         void PlayBestSecretOrSkip()
         {
             var offer = Game.SecretMissionOffer;
-            if (offer == null || offer.EligibleIndices == null || offer.EligibleIndices.Count == 0)
+            if (offer == null)
+                return;
+
+            if (offer.OffersFallbackBattleVp)
+            {
+                Game.ClaimFallbackBattleSecretVp();
+                return;
+            }
+
+            if (offer.EligibleIndices == null || offer.EligibleIndices.Count == 0)
             {
                 Game.SkipSecretMissionPlay();
                 return;

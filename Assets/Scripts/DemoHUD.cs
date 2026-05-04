@@ -53,6 +53,13 @@ namespace NexusGame
         bool _casualtyScreenTried;
         float _battlePanelContentWidth;
         float _battleHudUiScale = 1f;
+
+        /// <summary>Screen-space icon rects for battle strip slots (Repaint only). Used by death.png casualty FX.</summary>
+        readonly Dictionary<(bool isLeft, UnitType t), Rect> _battleUnitSlotIconRects =
+            new Dictionary<(bool, UnitType), Rect>();
+
+        Texture2D _battleDeathFxTex;
+        bool _battleDeathFxTexTried;
         float _battlePanelScaleCached = 1f;
 
         /// <summary>Scales main gameplay HUD (not tile-info modal) for narrow phones — same idea as <see cref="BattleHudUiScale"/>.</summary>
@@ -270,8 +277,20 @@ namespace NexusGame
             { UnitType.RubiumDragon, "Sprites/Units/Dragon Shop" }
         };
 
+        /// <summary>Full-card art when a deploy energize makes that row free (e.g. <see cref="EnergizeDeploymentId.FreeHuman"/>).</summary>
+        static readonly Dictionary<UnitType, string> DeployShopFreeResourcePaths = new Dictionary<UnitType, string>
+        {
+            { UnitType.Human, "Sprites/Units/Human Shop Free" },
+            { UnitType.Fungoid, "Sprites/Units/Fungus Shop Free" },
+            { UnitType.Crystalline, "Sprites/Units/Crystal Shop Free" },
+            { UnitType.RockStrider, "Sprites/Units/Strider Shop Free" },
+            { UnitType.LavaLeaper, "Sprites/Units/Leaper Shop Free" },
+            { UnitType.RubiumDragon, "Sprites/Units/Dragon Shop Free" }
+        };
+
         static readonly Dictionary<UnitType, Texture2D> DeployShopTextureCache = new Dictionary<UnitType, Texture2D>();
         static readonly Dictionary<UnitType, Texture2D> DeployShopGreyscaleCache = new Dictionary<UnitType, Texture2D>();
+        static readonly Dictionary<UnitType, Texture2D> DeployShopFreeTextureCache = new Dictionary<UnitType, Texture2D>();
         static readonly Dictionary<int, Texture2D> GreyscaleFullTextureBySourceId = new Dictionary<int, Texture2D>();
         static readonly Dictionary<int, Texture2D> GreyscaleSpriteBySpriteId = new Dictionary<int, Texture2D>();
 
@@ -382,6 +401,25 @@ namespace NexusGame
 
             if (tex != null)
                 DeployShopTextureCache[type] = tex;
+            return tex;
+        }
+
+        static Texture2D GetDeployShopFreeTexture(UnitType type)
+        {
+            if (DeployShopFreeTextureCache.TryGetValue(type, out Texture2D cached) && cached != null)
+                return cached;
+            if (!DeployShopFreeResourcePaths.TryGetValue(type, out string path))
+                return null;
+            Texture2D tex = Resources.Load<Texture2D>(path);
+            if (tex == null)
+            {
+                var sp = Resources.Load<Sprite>(path);
+                if (sp != null)
+                    tex = sp.texture;
+            }
+
+            if (tex != null)
+                DeployShopFreeTextureCache[type] = tex;
             return tex;
         }
 
@@ -3809,6 +3847,9 @@ namespace NexusGame
 
         void DrawFullBattleOverlays(PlayerState currentPlayer)
         {
+            if (Game != null)
+                Game.PruneExpiredBattleCasualtyDeathFx(Time.unscaledTime);
+
             if (!ShouldPaintFullBattleOverlay(currentPlayer, out bool submitEnergizePass))
             {
                 if (submitEnergizePass)
@@ -3825,6 +3866,53 @@ namespace NexusGame
 
             if (Game.CasualtyPick?.Owner != null)
                 DrawBattleCasualtySelectionOverlay();
+
+            // death.png casualty FX (same frame as battle strip layout — slot rects from Repaint).
+            var gameFx = Game;
+            if (gameFx != null)
+            {
+                if (gameFx.ActiveBattleCasualtyDeathFx.Count > 0)
+                {
+                    EnsureBattleDeathFxTexture();
+                    if (_battleDeathFxTex != null)
+                    {
+                        float durFx = GameController.BattleCasualtyDeathFxSeconds;
+                        int prevDepthFx = GUI.depth;
+                        Color prevFx = GUI.color;
+                        GUI.depth = -80;
+                        foreach (var fx in gameFx.ActiveBattleCasualtyDeathFx)
+                        {
+                            if (!_battleUnitSlotIconRects.TryGetValue((fx.AttackerSide, fx.UnitType),
+                                    out Rect slotFx))
+                                continue;
+                            float tf = Mathf.Clamp01((Time.unscaledTime - fx.StartTimeUnscaled) / durFx);
+                            float riseFx = -BattleS(12f) * Mathf.SmoothStep(0f, 1f, tf);
+                            var rf = new Rect(slotFx.x, slotFx.y + riseFx, slotFx.width, slotFx.height);
+                            // Linear fade over durFx (default 0.5s) — matches BattleCasualtyDeathFxSeconds.
+                            GUI.color = new Color(1f, 1f, 1f, 1f - tf);
+                            GUI.DrawTexture(rf, _battleDeathFxTex, ScaleMode.ScaleToFit, true);
+                        }
+
+                        GUI.color = prevFx;
+                        GUI.depth = prevDepthFx;
+                    }
+                }
+            }
+        }
+
+        void EnsureBattleDeathFxTexture()
+        {
+            if (_battleDeathFxTexTried)
+                return;
+            _battleDeathFxTexTried = true;
+            _battleDeathFxTex = Resources.Load<Texture2D>("Sprites/Death") ??
+                                Resources.Load<Texture2D>("Sprites/death");
+            if (_battleDeathFxTex == null)
+            {
+                var sp = Resources.Load<Sprite>("Sprites/Death") ?? Resources.Load<Sprite>("Sprites/death");
+                if (sp != null)
+                    _battleDeathFxTex = sp.texture;
+            }
         }
 
         /// <summary>
@@ -4090,6 +4178,9 @@ namespace NexusGame
 
         void BattleMainWindow(PlayerState currentPlayer, Rect panel)
         {
+            if (Event.current.type == EventType.Repaint)
+                _battleUnitSlotIconRects.Clear();
+
             _battlePanelContentWidth = panel.width;
             _battlePanelScaleCached = GameUiScale.TileInfoModalPanelScale(panel);
             _battleHudUiScale = BattleHudUiScale(panel);
@@ -4403,6 +4494,9 @@ namespace NexusGame
                 float blockY = box.y + (innerH - blockH) * 0.5f;
                 float ix = box.x + (box.width - iconSz) * 0.5f;
                 var iconR = new Rect(ix, blockY, iconSz, iconSz);
+                if (Event.current.type == EventType.Repaint)
+                    _battleUnitSlotIconRects[(isLeft, unitType)] = iconR;
+
                 DrawUnitMiniIcon(iconR, unitType, TintedIconOwnerForUnitOnSide(unitType, player),
                     useGraySprite: n <= 0);
 
@@ -4958,15 +5052,29 @@ namespace NexusGame
             EnsureBattleHudStyles();
             var offer = Game.SecretMissionOffer;
             var att = offer.Player;
-            GUILayout.Label("Battle won! P" + (att.PlayerIndex + 1) + " - play ONE secret or skip:");
-            foreach (int idx in offer.EligibleIndices)
+            if (offer.OffersFallbackBattleVp)
             {
-                if (idx < 0 || idx >= att.SecretMissions.Count)
-                    continue;
-                var s = att.SecretMissions[idx];
-                if (GUILayout.Button(SecretMissionLabel(s) + " +" + s.VictoryPoints + " VP [i" + idx + "]",
-                        _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
-                    Game.PlaySecretMissionAtIndex(idx);
+                GUILayout.Label("Battle won! P" + (att.PlayerIndex + 1) +
+                    " — no secret in hand matches this win. Claim +1 VP, or skip:");
+                if (GUILayout.Button("Battle secret +1 VP (no card)", _battlePrimaryButtonStyleCached,
+                        GUILayout.ExpandWidth(true)))
+                    Game.ClaimFallbackBattleSecretVp();
+            }
+            else
+            {
+                GUILayout.Label("Battle won! P" + (att.PlayerIndex + 1) + " - play ONE secret or skip:");
+                if (offer.EligibleIndices != null)
+                {
+                    foreach (int idx in offer.EligibleIndices)
+                    {
+                        if (idx < 0 || idx >= att.SecretMissions.Count)
+                            continue;
+                        var s = att.SecretMissions[idx];
+                        if (GUILayout.Button(SecretMissionLabel(s) + " +" + s.VictoryPoints + " VP [i" + idx + "]",
+                                _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
+                            Game.PlaySecretMissionAtIndex(idx);
+                    }
+                }
             }
 
             GUILayout.Space(8);
@@ -5118,7 +5226,11 @@ namespace NexusGame
 
             if (largeShopCard)
             {
-                Texture2D shopArt = canAfford ? GetDeployShopTexture(type) : GetDeployShopTextureGreyscale(type);
+                Texture2D shopArt;
+                if (canAfford && canPlayFreeHuman)
+                    shopArt = GetDeployShopFreeTexture(type) ?? GetDeployShopTexture(type);
+                else
+                    shopArt = canAfford ? GetDeployShopTexture(type) : GetDeployShopTextureGreyscale(type);
                 if (shopArt != null)
                     GUI.DrawTexture(cardRect, shopArt, ScaleMode.ScaleToFit, true);
                 else
