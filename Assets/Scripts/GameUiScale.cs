@@ -120,10 +120,45 @@ namespace NexusGame
             return Mathf.Lerp(0.9f, 1.04f, Mathf.InverseLerp(720f, 1600f, shortSide));
         }
 
+        /// <summary>
+        /// Extra device-driven text fit so labels visibly shrink on small resolutions and grow on large displays.
+        /// </summary>
+        static float DeviceAdaptiveTextScale()
+        {
+            float shortSide = Mathf.Min(Screen.width, Screen.height);
+            // Stronger range than the legacy multiplier so fixed min-font clamps are less likely to pin all text.
+            return Mathf.Lerp(0.76f, 1.36f, Mathf.InverseLerp(640f, 2160f, shortSide));
+        }
+
         public static int TileInfoScaledFont(float designSize, float panelScale, int minSize)
         {
-            float px = designSize * panelScale * TileInfoDeviceTextMultiplier() * GlobalImGuiFontFactor;
+            float px = designSize * panelScale * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor;
             return Mathf.Max(minSize, Mathf.RoundToInt(px));
+        }
+
+        /// <summary>
+        /// Full-bleed panels use physical <see cref="Screen.width"/> while <see cref="ImGuiCanvasScale"/> is tied to the
+        /// letterboxed <see cref="ImGuiReferenceWidth"/> frame — text would stay tiny on ultrawide displays without this boost.
+        /// </summary>
+        public static float FullBleedPanelWidthToCanvasWidthRatio(Rect panelGuiRect)
+        {
+            float canvasW = Mathf.Max(1f, GetImGuiCanvasRect().width);
+            float pw = panelGuiRect.width > 0.5f ? panelGuiRect.width : canvasW;
+            return Mathf.Clamp(pw / canvasW, 0.88f, 2.6f);
+        }
+
+        /// <summary>
+        /// IMGUI font for full-bleed overlays (e.g. battle screen): same recipe as <see cref="TileInfoScaledFont"/> plus
+        /// <see cref="FullBleedPanelWidthToCanvasWidthRatio"/> so type tracks physical panel width.
+        /// </summary>
+        public static int FullBleedImGuiScaledFont(float designSize, Rect panelGuiRect, int minSize, int maxSize = 48)
+        {
+            float ratio = FullBleedPanelWidthToCanvasWidthRatio(panelGuiRect);
+            // Dampen width-ratio gain so text scales up on larger screens without overrunning short rows.
+            float ratioDamped = Mathf.Lerp(1f, ratio, 0.6f);
+            float px = designSize * ImGuiCanvasScale() * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor * ratioDamped;
+            int n = Mathf.RoundToInt(px);
+            return Mathf.Clamp(Mathf.Max(minSize, n), minSize, maxSize);
         }
 
         /// <summary>
@@ -149,7 +184,11 @@ namespace NexusGame
         /// </summary>
         public static float ImGuiFontScale()
         {
-            return ImGuiCanvasScale() * TileInfoDeviceTextMultiplier() * GlobalImGuiFontFactor;
+            // Width-responsive bump: on wide monitors the letterboxed canvas can be narrower than the physical panel.
+            float canvasW = Mathf.Max(1f, GetImGuiCanvasRect().width);
+            float widthRatio = Mathf.Clamp(Screen.width / canvasW, 1f, 2.4f);
+            float widthBoost = Mathf.Lerp(1f, widthRatio, 0.35f);
+            return ImGuiCanvasScale() * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor * widthBoost;
         }
 
         /// <summary>
