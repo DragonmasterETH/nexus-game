@@ -392,6 +392,17 @@ namespace NexusGame
             tile.Highlight = t.Find("Highlight")?.gameObject;
         }
 
+        Sprite _refinerySprite;
+        bool _refinerySpriteTried;
+
+        void EnsureRefinerySprite()
+        {
+            if (_refinerySpriteTried)
+                return;
+            _refinerySpriteTried = true;
+            _refinerySprite = Resources.Load<Sprite>("Sprites/Refinery") ?? Resources.Load<Sprite>("Sprites/refinery");
+        }
+
         GameObject CreateHexVisual(Vector3 position, TileType type)
         {
             GameObject go;
@@ -460,6 +471,30 @@ namespace NexusGame
                 else
                 {
                     rend.material.color = Color.gray;
+                }
+            }
+
+            // Home base overlay: refinery sprite as a quick “2 Rubium/turn” reminder.
+            if (type == TileType.HomeBase)
+            {
+                EnsureRefinerySprite();
+                if (_refinerySprite != null)
+                {
+                    var icon = new GameObject("Refinery");
+                    icon.transform.SetParent(go.transform, worldPositionStays: false);
+                    icon.transform.localPosition = new Vector3(0f, 0.065f, 0f); // above outlines/highlights
+                    // SpriteRenderer is an XY plane; rotate to lie on XZ so a top-down camera can see it.
+                    icon.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
+                    var sr = icon.AddComponent<SpriteRenderer>();
+                    sr.sprite = _refinerySprite;
+                    sr.sortingOrder = 50;
+
+                    // Scale to fit inside the hex.
+                    float target = HexRadius * 1.15f * 0.75f;
+                    float w = Mathf.Max(0.001f, _refinerySprite.bounds.size.x);
+                    float s = target / w;
+                    icon.transform.localScale = new Vector3(s, s, s);
                 }
             }
 
