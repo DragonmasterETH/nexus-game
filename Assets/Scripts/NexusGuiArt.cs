@@ -223,6 +223,36 @@ namespace NexusGame
                 "Sprites/UI/CardScreen");
         }
 
+        /// <summary>Energize hand-pile card faces (<c>Battle Card.png</c>).</summary>
+        public static NexusGuiImage LoadBattleCardSprite()
+        {
+            return Load(
+                "Sprites/Battle Card",
+                "Sprites/BattleCard",
+                "Sprites/UI/Battle Card",
+                "Sprites/UI/BattleCard");
+        }
+
+        /// <summary>Energize hand-pile card faces (<c>Deployment Card.png</c>).</summary>
+        public static NexusGuiImage LoadDeploymentCardSprite()
+        {
+            return Load(
+                "Sprites/Deployment Card",
+                "Sprites/DeploymentCard",
+                "Sprites/UI/Deployment Card",
+                "Sprites/UI/DeploymentCard");
+        }
+
+        /// <summary>Secret-mission hand-pile card faces (<c>Mission Card.png</c>).</summary>
+        public static NexusGuiImage LoadMissionCardSprite()
+        {
+            return Load(
+                "Sprites/Mission Card",
+                "Sprites/MissionCard",
+                "Sprites/UI/Mission Card",
+                "Sprites/UI/MissionCard");
+        }
+
         /// <summary>Casualty pick modals — battle + Dragon firebolt (<c>Casualty screen.png</c> under Resources).</summary>
         public static NexusGuiImage LoadCasualtyScreenBackground()
         {

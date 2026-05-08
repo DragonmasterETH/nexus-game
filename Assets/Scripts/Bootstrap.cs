@@ -61,9 +61,28 @@ namespace NexusGame
                 };
             }
 
-            float s = GameUiScale.ImGuiFontScale();
-            _menuButtonStyle.fontSize = Mathf.Max(18, Mathf.RoundToInt(23f * s));
             return _menuButtonStyle;
+        }
+
+        /// <summary>
+        /// One shared menu button style must fit every label in <paramref name="labels"/> inside the same pixel size
+        /// (uses the tightest font).
+        /// </summary>
+        static void FitSharedMenuButtonFont(GUIStyle style, float buttonWidth, float buttonHeight, int minSize, int maxSize,
+            params string[] labels)
+        {
+            float iw = Mathf.Max(1f, buttonWidth - style.padding.horizontal);
+            float ih = Mathf.Max(1f, buttonHeight - style.padding.vertical);
+            var content = new GUIContent();
+            int best = maxSize;
+            foreach (var label in labels)
+            {
+                content.text = label;
+                int fit = GameUiScale.ComputeBestFitFontSize(style, content, iw, ih, minSize, maxSize, true);
+                best = Mathf.Min(best, fit);
+            }
+
+            style.fontSize = best;
         }
 
         void EnsureCamera()
@@ -248,18 +267,21 @@ namespace NexusGame
             var rect = new Rect((Screen.width - bw) / 2f, Mathf.Max(MenuS(12f), (Screen.height - h) / 2f), bw, h);
             GUI.Box(rect, "");
 
-            float s = GameUiScale.ImGuiFontScale();
             var titleStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Max(20, Mathf.RoundToInt(26f * s)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
+            titleStyle.fontSize = GameUiScale.ComputeBestFitFontSize(titleStyle, "Nexus Ops", rect.width - MenuS(16f),
+                titleH - MenuS(4f), 16, GameUiScale.ImGuiScaledFont(26f, 22, 52), false);
             GUI.Label(new Rect(rect.x, rect.y + MenuS(8f), rect.width, titleH), "Nexus Ops", titleStyle);
 
             float y = rect.y + titleH + MenuS(10f);
             float x = rect.x + padX;
             float innerW = bw - padX * 2f;
+
+            FitSharedMenuButtonFont(btnStyle, innerW, btnH, 11, GameUiScale.ImGuiScaledFont(23f, 18, 52), "Play",
+                "Play vs AI", "AI vs AI (test)", "Multiplayer", "Settings", "How to Play", "Debug");
 
             if (GUI.Button(new Rect(x, y, innerW, btnH), "Play", btnStyle))
             {
@@ -319,11 +341,9 @@ namespace NexusGame
             }
 
             float footerY = rect.yMax - footerH - MenuS(10f);
-            var creditStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = Mathf.Max(12, Mathf.RoundToInt(14f * s)),
-                alignment = TextAnchor.MiddleCenter
-            };
+            var creditStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
+            creditStyle.fontSize = GameUiScale.ComputeBestFitFontSize(creditStyle, "Made by Clanker Games Inc",
+                rect.width - MenuS(16f), footerH, 10, GameUiScale.ImGuiScaledFont(14f, 12, 26), true);
             GUI.Label(new Rect(rect.x + MenuS(8f), footerY, rect.width - MenuS(16f), footerH),
                 "Made by Clanker Games Inc", creditStyle);
         }
@@ -331,7 +351,6 @@ namespace NexusGame
         void DrawMapSelect()
         {
             var btnStyle = MenuButtonStyle();
-            float s = GameUiScale.ImGuiFontScale();
             float padX = MenuS(18f);
             float w = Mathf.Min(MenuS(460f), Screen.width - MenuS(20f));
             float x0 = (Screen.width - w) / 2f;
@@ -343,12 +362,16 @@ namespace NexusGame
 
             var hdr = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Max(18, Mathf.RoundToInt(24f * s)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
+            hdr.fontSize = GameUiScale.ComputeBestFitFontSize(hdr, "Select Map", w - MenuS(8f), MenuS(40f) - MenuS(4f),
+                16, GameUiScale.ImGuiScaledFont(24f, 18, 44), false);
             GUI.Label(new Rect(x0, y, w, MenuS(40f)), "Select Map", hdr);
             y += MenuS(44f);
+
+            FitSharedMenuButtonFont(btnStyle, bw, btnH, 10, GameUiScale.ImGuiScaledFont(23f, 16, 48), "1v1 Map (Current Board)",
+                "1v1 Battle Test (3 Hex)", "2–4 Map A (radius-3)", "2–4 Map B (12-6-1)", "Back");
 
             if (GUI.Button(new Rect(x, y, bw, btnH), "1v1 Map (Current Board)", btnStyle))
             {
@@ -368,11 +391,9 @@ namespace NexusGame
 
             y += btnH + gap;
 
-            var subHdr = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = Mathf.Max(15, Mathf.RoundToInt(19f * s)),
-                fontStyle = FontStyle.Bold
-            };
+            var subHdr = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
+            subHdr.fontSize = GameUiScale.ComputeBestFitFontSize(subHdr, "2–4 Player Maps:", bw, MenuS(28f) - MenuS(2f),
+                12, GameUiScale.ImGuiScaledFont(19f, 14, 34), false);
             GUI.Label(new Rect(x, y, bw, MenuS(28f)), "2–4 Player Maps:", subHdr);
             y += MenuS(30f);
 
@@ -429,26 +450,28 @@ namespace NexusGame
         {
             EnsureRulebookStyles();
 
-            float s = GameUiScale.ImGuiFontScale();
-            _rulebookBodyStyle.fontSize = Mathf.Max(13, Mathf.RoundToInt(15f * s));
+            _rulebookBodyStyle.fontSize = GameUiScale.ImGuiScaledFont(15f, 11, 32);
 
             float pad = MenuS(14f);
             var panel = new Rect(pad, pad, Screen.width - 2f * pad, Screen.height - 2f * pad);
             GUI.Box(panel, "");
 
+            string header = _rulebookTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
             var titleStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Max(17, Mathf.RoundToInt(20f * s)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter
             };
-            string header = _rulebookTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
+            titleStyle.fontSize = GameUiScale.ComputeBestFitFontSize(titleStyle, header, panel.width - MenuS(20f),
+                MenuS(28f) - MenuS(2f), 14, GameUiScale.ImGuiScaledFont(20f, 16, 40), true);
             GUI.Label(new Rect(panel.x, panel.y + MenuS(8f), panel.width, MenuS(28f)), header, titleStyle);
 
             var tabStyle = MenuButtonStyle();
             float tabH = MenuS(48f);
             float tabW = (panel.width - MenuS(40f)) * 0.5f;
             float tabY = panel.y + MenuS(36f);
+            FitSharedMenuButtonFont(tabStyle, tabW - MenuS(6f), tabH, 11, GameUiScale.ImGuiScaledFont(18f, 14, 40), "Rules",
+                "Units");
             if (GUI.Button(new Rect(panel.x + MenuS(14f), tabY, tabW - MenuS(6f), tabH), "Rules", tabStyle))
             {
                 if (_rulebookTab != 0)
@@ -481,9 +504,11 @@ namespace NexusGame
             GUI.EndScrollView();
 
             float backW = Mathf.Min(panel.width - MenuS(40f), MenuS(420f));
+            var backStyle = MenuButtonStyle();
+            FitSharedMenuButtonFont(backStyle, backW, backH, 11, GameUiScale.ImGuiScaledFont(20f, 14, 40), "Back to menu");
             if (GUI.Button(
                     new Rect(panel.x + (panel.width - backW) * 0.5f, panel.yMax - backH - MenuS(12f), backW, backH),
-                    "Back to menu", MenuButtonStyle()))
+                    "Back to menu", backStyle))
             {
                 BoardBackground.Remove();
                 _state = UiState.MainMenu;

@@ -11,6 +11,9 @@ namespace NexusGame
         public const float ImGuiReferenceWidth = 900f;
         public const float ImGuiReferenceHeight = 1300f;
         const float GlobalImGuiFontFactor = 0.86f;
+        /// <summary>Soft clamp only — keeps extreme DPI / simulator sizes sane without pinning phones and tablets to one size.</summary>
+        const float ImGuiFontScaleMin = 0.28f;
+        const float ImGuiFontScaleMax = 2.55f;
 
         /// <summary>
         /// Canvas-scaler style uniform scale for the IMGUI virtual reference frame (900x1300).
@@ -137,6 +140,75 @@ namespace NexusGame
         }
 
         /// <summary>
+        /// Shared IMGUI font helper for bounded "best fit to screen" sizing.
+        /// </summary>
+        public static int ImGuiScaledFont(float designSize, int minSize, int maxSize, float multiplier = 1f)
+        {
+            float px = designSize * ImGuiFontScale() * Mathf.Max(0.1f, multiplier);
+            int n = Mathf.RoundToInt(px);
+            return Mathf.Clamp(Mathf.Max(minSize, n), minSize, maxSize);
+        }
+
+        /// <summary>
+        /// Chooses the largest font size in [<paramref name="minSize"/>, <paramref name="maxSize"/>] such that
+        /// <paramref name="content"/> fits in the box. Uses a temporary copy of <paramref name="prototype"/> so the
+        /// original style is never mutated during measurement.
+        /// </summary>
+        public static int ComputeBestFitFontSize(GUIStyle prototype, GUIContent content, float maxWidth, float maxHeight,
+            int minSize, int maxSize, bool wordWrap)
+        {
+            if (content == null || string.IsNullOrEmpty(content.text))
+                return Mathf.Clamp(minSize, minSize, maxSize);
+
+            maxWidth = Mathf.Max(1f, maxWidth);
+            maxHeight = Mathf.Max(1f, maxHeight);
+            minSize = Mathf.Max(1, minSize);
+            maxSize = Mathf.Max(minSize, maxSize);
+
+            var style = new GUIStyle(prototype) { wordWrap = wordWrap };
+
+            int lo = minSize;
+            int hi = maxSize;
+            int best = minSize;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) >> 1;
+                style.fontSize = mid;
+                bool fits;
+                if (wordWrap)
+                {
+                    float h = style.CalcHeight(content, maxWidth);
+                    fits = h <= maxHeight + 1f;
+                }
+                else
+                {
+                    Vector2 sz = style.CalcSize(content);
+                    fits = sz.x <= maxWidth + 1f && sz.y <= maxHeight + 1f;
+                }
+
+                if (fits)
+                {
+                    best = mid;
+                    lo = mid + 1;
+                }
+                else
+                    hi = mid - 1;
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// Same as <see cref="ComputeBestFitFontSize"/> but builds <see cref="GUIContent"/> from <paramref name="text"/>.
+        /// </summary>
+        public static int ComputeBestFitFontSize(GUIStyle prototype, string text, float maxWidth, float maxHeight,
+            int minSize, int maxSize, bool wordWrap)
+        {
+            return ComputeBestFitFontSize(prototype, new GUIContent(text ?? ""), maxWidth, maxHeight, minSize, maxSize,
+                wordWrap);
+        }
+
+        /// <summary>
         /// Full-bleed panels use physical <see cref="Screen.width"/> while <see cref="ImGuiCanvasScale"/> is tied to the
         /// letterboxed <see cref="ImGuiReferenceWidth"/> frame — text would stay tiny on ultrawide displays without this boost.
         /// </summary>
@@ -188,7 +260,8 @@ namespace NexusGame
             float canvasW = Mathf.Max(1f, GetImGuiCanvasRect().width);
             float widthRatio = Mathf.Clamp(Screen.width / canvasW, 1f, 2.4f);
             float widthBoost = Mathf.Lerp(1f, widthRatio, 0.35f);
-            return ImGuiCanvasScale() * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor * widthBoost;
+            float raw = ImGuiCanvasScale() * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor * widthBoost;
+            return Mathf.Clamp(raw, ImGuiFontScaleMin, ImGuiFontScaleMax);
         }
 
         /// <summary>

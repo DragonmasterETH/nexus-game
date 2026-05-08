@@ -445,7 +445,16 @@ namespace NexusGame
             var tm = tile.MineLabel.GetComponentInChildren<TextMesh>();
             if (tm != null)
             {
-                tm.text = tile.ExtraMineYield.ToString();
+                string mineYield = tile.ExtraMineYield.ToString();
+                tm.text = mineYield;
+                tm.characterSize = mineYield.Length >= 3 ? 0.18f : 0.22f;
+            }
+
+            var bgTransform = tile.MineLabel.transform.Find("HomeMineBg");
+            if (bgTransform != null)
+            {
+                float widthMul = tile.ExtraMineYield >= 100 ? 1.15f : tile.ExtraMineYield >= 10 ? 1.0f : 0.85f;
+                bgTransform.localScale = new Vector3(0.6f * widthMul, 0.6f, 1f);
             }
         }
 
