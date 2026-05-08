@@ -489,6 +489,8 @@ namespace NexusGame
                     var sr = icon.AddComponent<SpriteRenderer>();
                     sr.sprite = _refinerySprite;
                     sr.sortingOrder = 50;
+                    // Subtle imprint on home bases (~25% opacity).
+                    sr.color = new Color(1f, 1f, 1f, 0.25f);
 
                     // Scale to fit inside the hex.
                     float target = HexRadius * 1.15f * 0.75f;
@@ -658,8 +660,8 @@ namespace NexusGame
             // We give some free units, some mines, some both.
             var rewards = new List<ExplorationReward>
             {
-                ExplorationReward.FreeHuman,
-                ExplorationReward.FreeHuman,
+                ExplorationReward.FreeCrystalline,
+                ExplorationReward.FreeLavaLeaper,
                 ExplorationReward.FreeFungoid,
                 ExplorationReward.FreeFungoid,
                 ExplorationReward.FreeRockStrider,
@@ -669,7 +671,7 @@ namespace NexusGame
                 ExplorationReward.Mine2,
                 ExplorationReward.Mine3,
                 ExplorationReward.Mine3,
-                ExplorationReward.FreeHumanAndMine2
+                ExplorationReward.FreeFungoidAndMine2
             };
 
             // Fill up to number of eligible tiles

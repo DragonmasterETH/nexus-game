@@ -65,6 +65,30 @@ namespace NexusGame
         /// <summary>GUI rect for battle/casualty UI — drives <see cref="GameUiScale.FullBleedImGuiScaledFont"/> (physical width vs letterboxed canvas).</summary>
         Rect _battleFontReferencePanel;
 
+        NexusGuiImage _battleStepBannerImg;
+        NexusGuiImage _battleUnitRibbonImg;
+        NexusGuiImage _battleArmyContainerImg;
+        bool _battleScreenChromeArtTried;
+
+        void EnsureBattleScreenChromeArt()
+        {
+            if (_battleScreenChromeArtTried)
+                return;
+            _battleScreenChromeArtTried = true;
+            _battleStepBannerImg = NexusGuiArt.Load(
+                "Sprites/step banner",
+                "Sprites/step_banner",
+                "Sprites/StepBanner");
+            _battleUnitRibbonImg = NexusGuiArt.Load(
+                "Sprites/unit ribbon",
+                "Sprites/unit_ribbon",
+                "Sprites/UnitRibbon");
+            _battleArmyContainerImg = NexusGuiArt.Load(
+                "Sprites/army container",
+                "Sprites/army_container",
+                "Sprites/ArmyContainer");
+        }
+
         /// <summary>Scales main gameplay HUD (not tile-info modal) for narrow phones — same idea as <see cref="BattleHudUiScale"/>.</summary>
         float _mainHudUiScale = 1f;
 
@@ -1214,7 +1238,13 @@ namespace NexusGame
             var slot = GUILayoutUtility.GetRect(1f, ribbonH, GUILayout.ExpandWidth(true), GUILayout.Height(ribbonH));
             GUILayout.EndHorizontal();
 
-            // Text only — no panel tint (frame art provides the bar).
+            if (Event.current.type == EventType.Repaint)
+            {
+                EnsureBattleScreenChromeArt();
+                if (!_battleStepBannerImg.IsEmpty)
+                    _battleStepBannerImg.DrawStretchFill(slot);
+            }
+
             GUI.Label(slot, BattlePhaseStepTitle(Game), _battleRibbonLabelStyle);
         }
 
@@ -2490,7 +2520,7 @@ namespace NexusGame
             _casualtyScreenBg.Draw(panel);
         }
 
-        /// <summary>Full-bleed battle frame under the dim; stretched to the full display (portrait 9:16).</summary>
+        /// <summary>Full-bleed battle frame under the dim — stretched to exactly 100% of screen width and height.</summary>
         void DrawBattleScreenModalBackground()
         {
             if (!_battleScreenTried)
@@ -2499,7 +2529,7 @@ namespace NexusGame
                 _battleScreenBg = NexusGuiArt.LoadBattleScreenBackground();
             }
 
-            var full = new Rect(0f, 0f, Screen.width, Screen.height);
+            var full = GameUiScale.GetFullBleedScreenGuiRect();
             if (_battleScreenBg.IsEmpty)
             {
                 DrawTintedRect(full, new Color(0.04f, 0.05f, 0.09f, 0.98f));
@@ -4459,15 +4489,40 @@ namespace NexusGame
                 else if (player == Game.ActiveBattleDefender)
                     pendingHits = Game.ActiveBattleHitsOnDefender;
             }
-            var prev = GUI.color;
-            if (player == Game.ActiveBattleAttacker)
-                GUI.color = new Color(0.2f, 0.38f, 0.8f, 0.95f);
-            else if (player == Game.ActiveBattleDefender)
-                GUI.color = new Color(0.78f, 0.26f, 0.2f, 0.95f);
             float sidePanelW = panelWidth;
             float fs = _hudFontScale;
-            GUILayout.BeginVertical(BattlePanelBoxStyle(), GUILayout.Width(sidePanelW), GUILayout.MinHeight(BattleS(140f)));
-            GUI.color = prev;
+
+            float innerPad = BattleS(2f);
+            const int unitsPerRow = 2;
+            float cellOuterW = Mathf.Floor((sidePanelW - innerPad * 2f) / unitsPerRow) - BattleS(2f);
+            cellOuterW = Mathf.Clamp(cellOuterW, BattleS(72f), BattleS(168f));
+            float boxW = cellOuterW - BattleS(2f);
+            float boxH = Mathf.Clamp(boxW * 0.72f, BattleS(56f), BattleS(104f));
+            float rowStripH = boxH + BattleS(8f);
+            bool hasGrid = player != null && hex != null;
+            float gridH = hasGrid ? 3f * rowStripH : BattleS(52f);
+            float gapTitleToUnits = BattleS(12f);
+            float colH = Mathf.Max(BattleS(140f), BattleS(24f) + gapTitleToUnits + gridH + BattleS(10f));
+
+            var colRect = GUILayoutUtility.GetRect(sidePanelW, colH, GUILayout.Width(sidePanelW),
+                GUILayout.Height(colH), GUILayout.ExpandWidth(false));
+            if (Event.current.type == EventType.Repaint)
+            {
+                EnsureBattleScreenChromeArt();
+                if (!_battleArmyContainerImg.IsEmpty)
+                {
+                    if (isLeft)
+                        _battleArmyContainerImg.DrawStretchFillFlippedH(colRect);
+                    else
+                        _battleArmyContainerImg.DrawStretchFill(colRect);
+                }
+            }
+
+            // BeginGroup + local BeginArea avoids GUILayout.BeginArea(absolute rect) swallowing sibling layout in strips.
+            GUI.BeginGroup(colRect);
+            GUILayout.BeginArea(new Rect(0f, 0f, colRect.width, colRect.height));
+            GUILayout.BeginVertical(GUILayout.Width(sidePanelW));
+
             var titleStyle = new GUIStyle(GUI.skin.label)
             {
                 fontStyle = FontStyle.Bold,
@@ -4480,14 +4535,16 @@ namespace NexusGame
             if (player == Game.ActiveBattleAttacker || player == Game.ActiveBattleDefender)
                 hdr += $" ☠{pendingHits}";
             GUILayout.Label(hdr, titleStyle);
-            if (player == null || hex == null)
+            if (!hasGrid)
             {
                 GUILayout.Label("(—)");
                 GUILayout.EndVertical();
+                GUILayout.EndArea();
+                GUI.EndGroup();
                 return;
             }
 
-            GUILayout.Space(BattleS(46f));
+            GUILayout.Space(gapTitleToUnits);
 
             var counts = new Dictionary<UnitType, int>();
             foreach (var u in FindObjectsOfType<UnitInstance>())
@@ -4502,13 +4559,6 @@ namespace NexusGame
             var dRollOpt = Game.LastBattleUiDiceRoll;
 
             // 2 columns × 3 rows — always six unit slots (gray art when count is 0).
-            const int unitsPerRow = 2;
-            float innerPad = BattleS(2f);
-            float cellOuterW = Mathf.Floor((sidePanelW - innerPad * 2f) / unitsPerRow) - BattleS(2f);
-            cellOuterW = Mathf.Clamp(cellOuterW, BattleS(72f), BattleS(168f));
-            float boxW = cellOuterW - BattleS(2f);
-            float boxH = Mathf.Clamp(boxW * 0.72f, BattleS(56f), BattleS(104f));
-
             var unitOrder = BattleResolver.BattleOrder;
             for (int row = 0; row < 3; row++)
             {
@@ -4542,7 +4592,11 @@ namespace NexusGame
                 float ix = box.x + (box.width - iconSz) * 0.5f;
                 var iconR = new Rect(ix, blockY, iconSz, iconSz);
                 if (Event.current.type == EventType.Repaint)
-                    _battleUnitSlotIconRects[(isLeft, unitType)] = iconR;
+                {
+                    // Parent battle strip uses coords inside BeginArea(0,0,panel.size); offsets by column rect.
+                    _battleUnitSlotIconRects[(isLeft, unitType)] =
+                        new Rect(colRect.x + iconR.x, colRect.y + iconR.y, iconR.width, iconR.height);
+                }
 
                 DrawUnitMiniIcon(iconR, unitType, TintedIconOwnerForUnitOnSide(unitType, player),
                     useGraySprite: n <= 0);
@@ -4577,6 +4631,8 @@ namespace NexusGame
                 }
 
             GUILayout.EndVertical();
+            GUILayout.EndArea();
+            GUI.EndGroup();
         }
 
         /// <param name="drawRibbonInnerFrame">When false (battle panel merged with cards), outer panel supplies the frame.</param>
@@ -4588,18 +4644,35 @@ namespace NexusGame
                 GUILayout.BeginHorizontal(BattlePanelBoxStyle(), GUILayout.ExpandWidth(false));
             else
                 GUILayout.BeginHorizontal(GUILayout.ExpandWidth(false));
-            GUILayout.BeginVertical();
-            GUILayout.Space(BattleS(8f));
-            GUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
+
             int n = BattleResolver.BattleOrder.Length;
             float ribbonW = _battlePanelContentWidth > 8f
                 ? _battlePanelContentWidth
                 : Mathf.Max(100f, GameUiScale.GetPaddedModalPanelGuiRect().width - 16f);
-            float usableW = ribbonW - BattleS(28f);
-            float sq = Mathf.Floor((usableW - BattleS(6f)) / Mathf.Max(1, n)) - BattleS(3f);
+            float usableW = ribbonW - BattleS(24f);
+            float gap = BattleS(6f);
+            float sq = n > 0 ? Mathf.Floor((usableW - gap * (n - 1)) / n) : BattleS(52f);
             sq = Mathf.Clamp(sq, BattleS(52f), BattleS(96f));
+            float rowH = sq + BattleS(16f);
+
+            GUILayout.BeginVertical(GUILayout.Width(ribbonW));
+            GUILayout.Space(BattleS(8f));
+
+            var rowRect = GUILayoutUtility.GetRect(ribbonW, rowH, GUILayout.Width(ribbonW));
+            if (Event.current.type == EventType.Repaint)
+            {
+                EnsureBattleScreenChromeArt();
+                if (!_battleUnitRibbonImg.IsEmpty)
+                    _battleUnitRibbonImg.DrawStretchFill(rowRect);
+            }
+
             var hex = Game.ActiveBattleHex;
+            GUI.BeginGroup(rowRect);
+            float totalIconsW = n * sq + Mathf.Max(0, n - 1) * gap;
+            float x0 = Mathf.Max(0f, (rowRect.width - totalIconsW) * 0.5f);
+            float y0 = (rowRect.height - sq) * 0.5f;
+
+            int idx = 0;
             foreach (var t in BattleResolver.BattleOrder)
             {
                 PlayerState sampleOnHex = null;
@@ -4615,8 +4688,7 @@ namespace NexusGame
                 }
 
                 bool active = Game.HasActiveBattleStep && Game.ActiveBattleStepUnitType == t;
-                GUILayout.BeginVertical(GUILayout.Width(sq + 2f));
-                var face = GUILayoutUtility.GetRect(sq, sq, GUILayout.Width(sq), GUILayout.Height(sq));
+                var face = new Rect(x0 + idx * (sq + gap), y0, sq, sq);
                 DrawTintedRect(face, new Color(0.07f, 0.09f, 0.14f, 0.96f));
                 DrawOutlineRect(face, active
                     ? new Color(1f, 0.55f, 0.22f, 0.95f)
@@ -4627,13 +4699,14 @@ namespace NexusGame
                 float iy = face.y + (face.height - iconL) * 0.5f;
                 var ir = new Rect(ix, iy, iconL, iconL);
                 DrawBattleBannerUnitIcon(ir, t, sampleOnHex == null ? 0.4f : 1f);
-                GUILayout.EndVertical();
+                idx++;
             }
 
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
+            GUI.EndGroup();
+
             GUILayout.Space(BattleS(12f));
             GUILayout.EndVertical();
+
             GUILayout.EndHorizontal();
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
@@ -4926,7 +4999,7 @@ namespace NexusGame
 
         void DrawBattleCenterClashAndDice(float colW)
         {
-            GUILayout.BeginVertical(GUILayout.Width(colW));
+            GUILayout.BeginVertical(GUILayout.Width(colW), GUILayout.MaxWidth(colW), GUILayout.ExpandWidth(false));
             GUILayout.Space(BattleS(46f));
 
             DrawBattleCenterClashSwords(colW);

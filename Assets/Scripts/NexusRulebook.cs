@@ -27,7 +27,7 @@ namespace NexusGame
             "You can also drag from a unit to a hex to move that piece.\n" +
             "• Units move 1 hex (Rock Strider: up to 2). Terrain must be legal for that unit (lava, crystal, forest, etc.).\n" +
             "• You normally cannot move through enemy-occupied hexes (Rock Strider is an exception for multi-step moves).\n" +
-            "• Stepping on unexplored hexes can reveal bonuses: free units, mine income, or both.\n\n" +
+            "• Stepping on unexplored hexes can reveal bonuses: free non-Human units, mine income, or both.\n\n" +
 
             "BUYING UNITS & DEPLOYMENT ENERGIZE\n" +
             "• Select one of your home-base hexes, then press $ to open the buy menu. Costs are paid in Rubium.\n" +
@@ -44,7 +44,8 @@ namespace NexusGame
             "• The defender's hits are applied to your units first (you choose casualties among legal targets); then your hits to theirs. " +
             "Weakest units are a good default when choosing losses.\n" +
             "• If all defender units in that battle are eliminated, you win the battle and gain 1 VP. The defender draws an Energize card. " +
-            "You may be able to score a Secret Mission that matches the battle.\n\n" +
+            "You may be able to score a Secret Mission that matches the battle.\n" +
+            "• If you are defending and wipe the attacker's units from the hex, you keep the hex but you do not gain battle VP and you do not resolve battle Secret Missions from that fight (only the attacker can when they eliminate your units from the hex).\n\n" +
 
             "SECRET MISSIONS\n" +
             "• One-shot cards with conditions (often battle-related). When you fulfill one after a win, you may play it for bonus VP " +

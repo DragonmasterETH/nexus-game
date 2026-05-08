@@ -118,6 +118,12 @@ namespace NexusGame
             }
         }
 
+        /// <summary>Same as <see cref="DrawStretchFill"/> mirrored horizontally (e.g. left-side army chrome).</summary>
+        public void DrawStretchFillFlippedH(Rect container)
+        {
+            DrawFlippedH(container);
+        }
+
         public void DrawFlippedHAspectFit(Rect container)
         {
             DrawFlippedH(RectAspectFit(container));

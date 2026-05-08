@@ -34,7 +34,11 @@ namespace NexusGame
         Mine1,
         Mine2,
         Mine3,
-        FreeHumanAndMine2
+        FreeHumanAndMine2,
+        /// <summary>Exploration bonuses never grant Humans — use Crystalline / Lava Leaper / combo without Human.</summary>
+        FreeCrystalline,
+        FreeLavaLeaper,
+        FreeFungoidAndMine2
     }
 
     [Serializable]

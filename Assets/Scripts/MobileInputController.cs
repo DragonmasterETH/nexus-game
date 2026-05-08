@@ -569,20 +569,18 @@ namespace NexusGame
             switch (tile.ExplorationReward)
             {
                 case ExplorationReward.FreeHuman:
-                {
-                    var spawn = Game.ResolveExplorationUnitSpawnTile(UnitType.Human, tile, Game.CurrentPlayer);
-                    if (spawn != null)
-                    {
-                        Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, spawn);
-                        debugMessage += spawn != tile
-                            ? "Free Human (placed on home — lava hex cannot hold Humans)"
-                            : "Free Human";
-                    }
-                    else
-                        debugMessage += "Free Human (skipped — no valid spawn for lava reward)";
-
+                    // Legacy token — exploration never grants Humans now; treat as Fungoid on this hex.
+                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.Fungoid, tile);
+                    debugMessage += "Legacy FreeHuman token → Free Fungoid";
                     break;
-                }
+                case ExplorationReward.FreeCrystalline:
+                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.Crystalline, tile);
+                    debugMessage += "Free Crystalline";
+                    break;
+                case ExplorationReward.FreeLavaLeaper:
+                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.LavaLeaper, tile);
+                    debugMessage += "Free Lava Leaper";
+                    break;
                 case ExplorationReward.FreeFungoid:
                     Game.SpawnUnit(Game.CurrentPlayer, UnitType.Fungoid, tile);
                     debugMessage += "Free Fungoid";
@@ -607,22 +605,18 @@ namespace NexusGame
                     debugMessage += "Mine bonus +3";
                     break;
                 case ExplorationReward.FreeHumanAndMine2:
-                {
-                    var spawn = Game.ResolveExplorationUnitSpawnTile(UnitType.Human, tile, Game.CurrentPlayer);
-                    if (spawn != null)
-                    {
-                        Game.SpawnUnit(Game.CurrentPlayer, UnitType.Human, spawn);
-                        debugMessage += spawn != tile
-                            ? "Free Human (on home) + Mine +2 on hex"
-                            : "Free Human + Mine bonus +2";
-                    }
-                    else
-                        debugMessage += "Human skipped (no home for lava) + Mine bonus +2";
-
+                    // Legacy combo token — grant non-human unit + mine (same mine bonus as before).
+                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.Fungoid, tile);
+                    debugMessage += "Legacy FreeHumanAndMine2 → Free Fungoid + Mine bonus +2";
                     tile.ExtraMineYield = 2;
                     UpdateMineLabel(tile);
                     break;
-                }
+                case ExplorationReward.FreeFungoidAndMine2:
+                    Game.SpawnUnit(Game.CurrentPlayer, UnitType.Fungoid, tile);
+                    tile.ExtraMineYield = 2;
+                    UpdateMineLabel(tile);
+                    debugMessage += "Free Fungoid + Mine bonus +2";
+                    break;
                 default:
                     debugMessage += "No reward (None)";
                     break;

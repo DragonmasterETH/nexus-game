@@ -679,19 +679,9 @@ namespace NexusGame
                 }
                 else if (defenderWin)
                 {
+                    // Defender repels the attack but does not score battle VP or claim battle secret missions —
+                    // only the attacker may earn those when they wipe the defender from the hex.
                     log.AppendLine("Defender holds the hex.");
-                    if (!AutoResolveBattlesQuick)
-                    {
-                        SecretMissionOffer = BuildSecretOffer(defender, attCasualties, attStart, attLostDragon);
-                        while (SecretMissionOffer != null && SecretMissionOffer.Waiting)
-                            yield return null;
-                        SecretMissionOffer = null;
-                        if (IsGameOver)
-                        {
-                            log.AppendLine("---");
-                            break;
-                        }
-                    }
                 }
                 else
                 {
@@ -713,7 +703,7 @@ namespace NexusGame
             Debug.Log("[Battle] --- Phase complete ---");
         }
 
-        /// <param name="winner">Player who won the battle (attacker if they cleared the hex, else defender).</param>
+        /// <param name="winner">Battle winner eligible for secret-mission payout — always the attacker in current rules (cleared defender from hex).</param>
         /// <param name="enemyCasualties">Casualties inflicted on the opponent (for kill-count missions).</param>
         /// <param name="enemyStartCount">Enemy pieces at battle start (reserved for mission rules).</param>
         /// <param name="enemyDragonKilled">True if the opponent lost a Rubium Dragon this battle.</param>
