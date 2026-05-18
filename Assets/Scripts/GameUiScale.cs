@@ -265,11 +265,17 @@ namespace NexusGame
         }
 
         /// <summary>
-        /// Battle overlay layout scale — panel uniform scale with the same readability floor as the main HUD.
+        /// Battle overlay layout scale — canvas scale plus a bump on tall/narrow phones so battle controls stay tappable.
         /// </summary>
         public static float BattleHudUiScale(Rect panel)
         {
-            return ImGuiCanvasScale();
+            float canvas = ImGuiCanvasScale();
+            float shortSide = Mathf.Min(Screen.width, Screen.height);
+            float phoneBoost = Mathf.Lerp(1f, 1.32f, Mathf.InverseLerp(680f, 1200f, shortSide));
+            float heightBoost = panel.height > 1f
+                ? Mathf.Clamp(panel.height / Mathf.Max(1f, ImGuiReferenceHeight * canvas), 0.92f, 1.28f)
+                : 1f;
+            return canvas * phoneBoost * heightBoost;
         }
     }
 }

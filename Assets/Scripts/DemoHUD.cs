@@ -239,12 +239,12 @@ namespace NexusGame
             float wR = GameUiScale.FullBleedPanelWidthToCanvasWidthRatio(_battleFontReferencePanel);
             _battleRibbonLabelStyle.fontSize = GameUiScale.FullBleedImGuiScaledFont(20f, _battleFontReferencePanel, 12, 36);
             _battlePrimaryButtonStyleCached.fontSize = GameUiScale.ImGuiScaledFont(18f, 16, 34, wR);
-            _battlePrimaryButtonStyleCached.fixedHeight = Mathf.Max(44f, 50f * s);
-            int pad = Mathf.Max(8, Mathf.RoundToInt(14f * s));
-            int pady = Mathf.Max(8, Mathf.RoundToInt(12f * s));
+            _battlePrimaryButtonStyleCached.fixedHeight = Mathf.Max(48f, 56f * s);
+            int pad = Mathf.Max(10, Mathf.RoundToInt(16f * s));
+            int pady = Mathf.Max(10, Mathf.RoundToInt(14f * s));
             _battlePrimaryButtonStyleCached.padding = new RectOffset(pad, pad, pady, pady);
             _battleSecondaryButtonStyleCached.fontSize = GameUiScale.ImGuiScaledFont(17f, 15, 30, wR);
-            _battleSecondaryButtonStyleCached.fixedHeight = Mathf.Max(42f, 48f * s);
+            _battleSecondaryButtonStyleCached.fixedHeight = Mathf.Max(46f, 52f * s);
             _battleSecondaryButtonStyleCached.padding = new RectOffset(pad, pad, pady, pady);
         }
 
@@ -4437,58 +4437,49 @@ namespace NexusGame
             // BeginGroup clips but does not always give GUILayout a height budget; BeginArea fixes FlexibleSpace.
             GUILayout.BeginArea(new Rect(0f, 0f, panel.width, panel.height));
             GUILayout.BeginVertical(GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-            GUILayout.Space(BattleS(44f));
+            GUILayout.Space(BattleS(20f));
 
-            // Top band: tile name + unit battlefield (natural height, top-anchored — not part of centered step/ribbon).
-            GUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+            float centerColW = Mathf.Clamp(panel.width - BattleS(24f), BattleS(280f), panel.width - BattleS(12f));
+            float savedPanelContentW = _battlePanelContentWidth;
+            _battlePanelContentWidth = centerColW;
+
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            GUILayout.BeginVertical(GUILayout.Width(centerColW));
+
             GUILayout.BeginVertical(BattlePanelBoxStyle());
             DrawBattleContextBar(hex);
             GUILayout.EndVertical();
-            GUILayout.Space(BattleS(28f));
+            GUILayout.Space(BattleS(14f));
 
+            // Army strip: wide left/right columns, narrow clash swords between.
             GUILayout.BeginVertical(BattlePanelBoxStyle());
             SyncBattleDiceAnimState();
-            // Fit strip inside battle panel (same width reference as tile-info scaling).
-            float battleWinW = panel.width;
-            float stripBudget = Mathf.Max(BattleS(260f), battleWinW - BattleS(20f));
-            float clashColW = Mathf.Clamp(stripBudget * 0.24f, BattleS(96f), BattleS(168f));
-            float battleColW = (stripBudget - clashColW) * 0.5f - BattleS(4f);
-            battleColW = Mathf.Clamp(battleColW, BattleS(120f), BattleS(480f));
-            float battleStripInnerW = battleColW * 2f + clashColW;
-            if (battleStripInnerW > stripBudget)
-                battleColW = Mathf.Max(BattleS(110f), (stripBudget - clashColW) * 0.5f - BattleS(3f));
-            battleStripInnerW = battleColW * 2f + clashColW;
+            float stripBudget = centerColW - BattleS(16f);
+            float clashColW = Mathf.Clamp(BattleS(64f), BattleS(52f), BattleS(88f));
+            float battleColW = (stripBudget - clashColW - BattleS(8f)) * 0.5f;
+            battleColW = Mathf.Clamp(battleColW, BattleS(140f), stripBudget * 0.48f);
+            float battleStripInnerW = battleColW * 2f + clashColW + BattleS(8f);
 
             GUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal(GUILayout.Width(battleStripInnerW));
             DrawBattleSideColumn(left, hex, true, Game.ActiveBattleAttacker, battleColW);
-            DrawBattleCenterClashAndDice(clashColW);
+            DrawBattleCenterClashOnly(clashColW);
             DrawBattleSideColumn(right, hex, false, Game.ActiveBattleDefender, battleColW);
             GUILayout.EndHorizontal();
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
             GUILayout.EndVertical();
-            GUILayout.EndVertical();
 
-            GUILayout.Space(BattleS(26f));
+            GUILayout.Space(BattleS(12f));
+            DrawBattleActiveRollRow(centerColW);
 
-            float centerColW = Mathf.Clamp(panel.width - BattleS(40f), BattleS(280f), panel.width - BattleS(16f));
-            float savedPanelContentW = _battlePanelContentWidth;
-            _battlePanelContentWidth = centerColW;
-
-            // Bottom band: horizontally centered column. Step + initiative ribbon + dice sit below a modest top
-            // spacer (not vertically centered) so they sit higher; a small gap keeps cards/log tight under the dice.
-            GUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-            GUILayout.BeginVertical(GUILayout.Width(centerColW));
-
-            GUILayout.Space(BattleS(18f));
-
+            GUILayout.Space(BattleS(14f));
             DrawBattlePhaseRibbon();
-            GUILayout.Space(BattleS(20f));
+            GUILayout.Space(BattleS(14f));
             DrawBattleOrderRibbonIcons(drawRibbonInnerFrame: false);
-            DrawBattleDiceRollBanner();
+            DrawBattleDiceRollBannerWhenIdle();
 
             GUILayout.Space(BattleS(10f));
 
@@ -4525,7 +4516,7 @@ namespace NexusGame
                     _lastBattleLogLen = safe.Length;
                     _scrollBattleMainLog.y = 100000f;
                 }
-                float logH = Mathf.Clamp(windowHeight * 0.2f, BattleS(56f), Mathf.Min(BattleS(140f), windowHeight * 0.28f));
+                float logH = Mathf.Clamp(windowHeight * 0.22f, BattleS(64f), Mathf.Min(BattleS(160f), windowHeight * 0.32f));
                 _scrollBattleMainLog = GUILayout.BeginScrollView(_scrollBattleMainLog, GUILayout.Height(logH));
                 int logBodyFs = GameUiScale.FullBleedImGuiScaledFont(11f, _battleFontReferencePanel, 9, 22);
                 var logBody = new GUIStyle(GUI.skin.label)
@@ -4544,8 +4535,6 @@ namespace NexusGame
             GUILayout.EndHorizontal();
 
             _battlePanelContentWidth = savedPanelContentW;
-
-            GUILayout.FlexibleSpace();
 
             GUILayout.EndVertical();
             GUILayout.EndArea();
@@ -4571,6 +4560,114 @@ namespace NexusGame
             };
             ApplyTileInfoFont(style);
             GUILayout.Label(ctx, style, GUILayout.ExpandWidth(true));
+        }
+
+        /// <summary>Legacy dice row when not in an active battle step (roll row handles the live step).</summary>
+        void DrawBattleDiceRollBannerWhenIdle()
+        {
+            if (Game.HasActiveBattleStep)
+                return;
+            DrawBattleDiceRollBanner();
+        }
+
+        /// <summary>Active roller unit (left) and dice + result text (right), full width under the army strip.</summary>
+        void DrawBattleActiveRollRow(float rowW)
+        {
+            SyncBattleDiceAnimState();
+            var dOpt = Game.LastBattleUiDiceRoll;
+            bool showRow = Game.HasActiveBattleStep || dOpt.HasValue;
+            if (!showRow)
+                return;
+
+            float rowMinH = BattleS(92f);
+            GUILayout.BeginHorizontal(GUILayout.Width(rowW), GUILayout.MinHeight(rowMinH));
+            GUILayout.FlexibleSpace();
+            GUILayout.BeginHorizontal(GUILayout.ExpandWidth(false));
+
+            UnitType unitType = Game.HasActiveBattleStep
+                ? Game.ActiveBattleStepUnitType
+                : (dOpt.HasValue ? dOpt.Value.UnitType : UnitType.Human);
+            float iconBox = Mathf.Clamp(BattleS(80f), BattleS(68f), BattleS(108f));
+            var iconOuter = GUILayoutUtility.GetRect(iconBox, iconBox, GUILayout.Width(iconBox),
+                GUILayout.Height(iconBox));
+            DrawTintedRect(iconOuter, new Color(0.08f, 0.1f, 0.16f, 0.97f));
+            DrawOutlineRect(iconOuter, new Color(1f, 0.55f, 0.22f, 0.95f), BattleS(3f));
+            float pad = BattleS(4f);
+            var ir = new Rect(iconOuter.x + pad, iconOuter.y + pad, iconOuter.width - pad * 2f,
+                iconOuter.height - pad * 2f);
+            DrawBattleBannerUnitIcon(ir, unitType);
+
+            if (dOpt.HasValue)
+            {
+                var d = dOpt.Value;
+                bool revealFinal = (Time.realtimeSinceStartup - _battleDiceAnimStartRealtime) >=
+                                   GameController.BattleDiceRollSpinSeconds;
+                float rt = Time.realtimeSinceStartup;
+                int bannerFont = GameUiScale.FullBleedImGuiScaledFont(17f, _battleFontReferencePanel, 12, 32);
+                var bannerLabel = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = bannerFont,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleLeft,
+                    wordWrap = false
+                };
+                ApplyTileInfoFont(bannerLabel);
+
+                GUILayout.Space(BattleS(12f));
+                string side = d.AttackerRolling ? "ATK" : "DEF";
+                var sideC = d.AttackerRolling ? new Color(0.35f, 0.55f, 1f) : new Color(1f, 0.45f, 0.35f);
+                var prev = GUI.color;
+                GUI.color = sideC;
+                GUILayout.Label(side, bannerLabel, GUILayout.Width(BattleS(48f)));
+                GUI.color = prev;
+
+                int dieCount = 0;
+                if (d.Rolls != null && d.Rolls.Length > 0)
+                    dieCount = d.Rolls.Length;
+                else if (d.Dice > 0 && d.Impossible)
+                    dieCount = d.Dice;
+
+                var faceBgImpossible = new Color(0.93f, 0.94f, 0.97f, 1f);
+                if (dieCount > 0)
+                {
+                    int show = Mathf.Min(dieCount, 6);
+                    float gap = BattleS(6f);
+                    float dieSz = Mathf.Clamp(BattleS(52f),
+                        BattleS(44f),
+                        (rowW * 0.55f - BattleS(120f) - (show - 1) * gap) / Mathf.Max(1, show));
+                    for (int i = 0; i < show; i++)
+                    {
+                        var dr = GUILayoutUtility.GetRect(dieSz, dieSz, GUILayout.Width(dieSz),
+                            GUILayout.Height(dieSz));
+                        if (d.Rolls != null && i < d.Rolls.Length)
+                        {
+                            int pip = revealFinal ? d.Rolls[i] : SpinningPipValue(i, rt);
+                            DrawBattleDieFace(dr, pip);
+                        }
+                        else if (d.Impossible)
+                        {
+                            if (revealFinal)
+                                DrawBattleDieImpossibleFace(dr, faceBgImpossible);
+                            else
+                                DrawBattleDieFace(dr, SpinningPipValue(i, rt));
+                        }
+                    }
+                }
+                else if (d.Dice <= 0)
+                {
+                    GUILayout.Label("0🎲", bannerLabel, GUILayout.Width(BattleS(52f)));
+                }
+
+                GUILayout.Space(BattleS(8f));
+                if (d.Impossible && d.Dice > 0)
+                    GUILayout.Label($"need ≥{d.Need} (—)", bannerLabel, GUILayout.ExpandWidth(false));
+                else if (d.Dice > 0)
+                    GUILayout.Label($"need ≥{d.Need}  →  {d.Hits} hit(s)", bannerLabel, GUILayout.ExpandWidth(false));
+            }
+
+            GUILayout.EndHorizontal();
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
         }
 
         void DrawBattleDiceRollBanner()
@@ -4677,9 +4774,9 @@ namespace NexusGame
             float innerPad = BattleS(2f);
             const int unitsPerRow = 2;
             float cellOuterW = Mathf.Floor((sidePanelW - innerPad * 2f) / unitsPerRow) - BattleS(2f);
-            cellOuterW = Mathf.Clamp(cellOuterW, BattleS(72f), BattleS(168f));
+            cellOuterW = Mathf.Clamp(cellOuterW, BattleS(88f), BattleS(220f));
             float boxW = cellOuterW - BattleS(2f);
-            float boxH = Mathf.Clamp(boxW * 0.72f, BattleS(56f), BattleS(104f));
+            float boxH = Mathf.Clamp(boxW * 0.72f, BattleS(68f), BattleS(128f));
             float rowStripH = boxH + BattleS(8f);
             bool hasGrid = player != null && hex != null;
             float gridH = hasGrid ? 3f * rowStripH : BattleS(52f);
@@ -4768,7 +4865,7 @@ namespace NexusGame
                 float countH = n > 1 ? BattleS(14f) : 0f;
                 float innerH = box.height - labelH;
                 float maxIcon = Mathf.Min(boxW * 0.92f, innerH - countH - BattleS(4f));
-                float iconSz = Mathf.Clamp(maxIcon, BattleS(26f), Mathf.Min(boxW * 0.95f, innerH));
+                float iconSz = Mathf.Clamp(maxIcon, BattleS(32f), Mathf.Min(boxW * 0.95f, innerH));
                 float blockH = iconSz + countH;
                 float blockY = box.y + (innerH - blockH) * 0.5f;
                 float ix = box.x + (box.width - iconSz) * 0.5f;
@@ -4833,8 +4930,8 @@ namespace NexusGame
                 : Mathf.Max(100f, GameUiScale.GetPaddedModalPanelGuiRect().width - 16f);
             float usableW = ribbonW - BattleS(24f);
             float gap = BattleS(6f);
-            float sq = n > 0 ? Mathf.Floor((usableW - gap * (n - 1)) / n) : BattleS(52f);
-            sq = Mathf.Clamp(sq, BattleS(52f), BattleS(96f));
+            float sq = n > 0 ? Mathf.Floor((usableW - gap * (n - 1)) / n) : BattleS(56f);
+            sq = Mathf.Clamp(sq, BattleS(56f), BattleS(112f));
             float rowH = sq + BattleS(16f);
 
             GUILayout.BeginVertical(GUILayout.Width(ribbonW));
@@ -5173,92 +5270,17 @@ namespace NexusGame
             GUI.enabled = true;
         }
 
-        void DrawBattleCenterClashAndDice(float colW)
+        void DrawBattleCenterClashOnly(float colW)
         {
             GUILayout.BeginVertical(GUILayout.Width(colW), GUILayout.MaxWidth(colW), GUILayout.ExpandWidth(false));
-            GUILayout.Space(BattleS(46f));
-
+            GUILayout.Space(BattleS(26f));
             DrawBattleCenterClashSwords(colW);
-
-            var dOpt = Game.LastBattleUiDiceRoll;
-            if (Game.HasActiveBattleStep && dOpt.HasValue)
-            {
-                GUILayout.Space(BattleS(10f));
-                var d = dOpt.Value;
-
-                // Larger than side-grid tiles so the active roller is easy to read.
-                float iconBox = Mathf.Clamp(colW - BattleS(2f), BattleS(96f), BattleS(152f));
-                GUILayout.BeginHorizontal();
-                GUILayout.FlexibleSpace();
-                var iconOuter = GUILayoutUtility.GetRect(iconBox, iconBox, GUILayout.Width(iconBox),
-                    GUILayout.Height(iconBox));
-                DrawTintedRect(iconOuter, new Color(0.08f, 0.1f, 0.16f, 0.97f));
-                DrawOutlineRect(iconOuter, new Color(1f, 0.55f, 0.22f, 0.95f), BattleS(2f));
-                float pad = BattleS(2f);
-                var ir = new Rect(iconOuter.x + pad, iconOuter.y + pad, iconOuter.width - pad * 2f,
-                    iconOuter.height - pad * 2f);
-                DrawBattleBannerUnitIcon(ir, d.UnitType);
-                GUILayout.FlexibleSpace();
-                GUILayout.EndHorizontal();
-
-                bool revealFinal = (Time.realtimeSinceStartup - _battleDiceAnimStartRealtime) >=
-                                     GameController.BattleDiceRollSpinSeconds;
-                float rt = Time.realtimeSinceStartup;
-
-                int dieCount = 0;
-                if (d.Rolls != null && d.Rolls.Length > 0)
-                    dieCount = d.Rolls.Length;
-                else if (d.Dice > 0 && d.Impossible)
-                    dieCount = d.Dice;
-
-                if (dieCount > 0)
-                {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    var faceBgImpossible = new Color(0.93f, 0.94f, 0.97f, 1f);
-                    int show = Mathf.Min(dieCount, 6);
-                    float gap = BattleS(4f);
-                    float dieSz = Mathf.Min(BattleS(46f),
-                        (colW - BattleS(8f) - (show - 1) * gap) / Mathf.Max(1, show));
-                    dieSz = Mathf.Max(BattleS(34f), dieSz * 1.08f);
-                    for (int i = 0; i < show; i++)
-                    {
-                        var dr = GUILayoutUtility.GetRect(dieSz, dieSz, GUILayout.Width(dieSz),
-                            GUILayout.Height(dieSz));
-                        if (d.Rolls != null && i < d.Rolls.Length)
-                        {
-                            int pip = revealFinal ? d.Rolls[i] : SpinningPipValue(i, rt);
-                            DrawBattleDieFace(dr, pip);
-                        }
-                        else if (d.Impossible)
-                        {
-                            if (revealFinal)
-                                DrawBattleDieImpossibleFace(dr, faceBgImpossible);
-                            else
-                                DrawBattleDieFace(dr, SpinningPipValue(i, rt));
-                        }
-                    }
-
-                    GUILayout.FlexibleSpace();
-                    GUILayout.EndHorizontal();
-                }
-                else if (d.Dice <= 0)
-                {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    GUILayout.Label("0🎲", GUILayout.Width(BattleS(36f)));
-                    GUILayout.FlexibleSpace();
-                    GUILayout.EndHorizontal();
-                }
-            }
-
-            GUILayout.Space(BattleS(12f));
             GUILayout.EndVertical();
         }
 
         void DrawBattleCenterClashSwords(float colW)
         {
-            float rowH = Mathf.Clamp(colW * 0.62f, BattleS(56f), BattleS(104f));
+            float rowH = Mathf.Clamp(colW * 0.72f, BattleS(64f), BattleS(120f));
             var row = GUILayoutUtility.GetRect(colW, rowH, GUILayout.Width(colW), GUILayout.Height(rowH));
 
             var att = Game.ActiveBattleAttacker;
