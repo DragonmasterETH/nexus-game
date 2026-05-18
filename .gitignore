@@ -66,6 +66,9 @@ sysinfo.txt
 # Mono auto generated files
 mono_crash.*
 
+# Android signing (do not commit)
+dev.keystore
+
 # Builds
 *.apk
 *.aab
