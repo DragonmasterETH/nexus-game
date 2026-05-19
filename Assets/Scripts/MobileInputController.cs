@@ -76,7 +76,7 @@ namespace NexusGame
         {
             if (Game != null && Game.IsGameOver)
                 return;
-            if (Game != null && Game.IsAiControlled(Game.CurrentPlayer))
+            if (Game != null && !Game.CanLocalPlayerActNow())
                 return;
             if (IsBattleOverlayBlockingBoardInput())
             {
@@ -221,7 +221,7 @@ namespace NexusGame
 
         void PrepareDragFromPointer(Vector2 screenPos)
         {
-            if (Game == null || Game.CurrentPlayer == null || Game.IsAiControlled(Game.CurrentPlayer))
+            if (Game == null || Game.CurrentPlayer == null || !Game.CanLocalPlayerActFor(Game.CurrentPlayer))
                 return;
             if (Game.DragonPhase != null)
                 return;
@@ -395,7 +395,7 @@ namespace NexusGame
             if (DebugClicks)
                 Debug.Log($"CLICK RESOLVED: tile=({clickedTile.Q},{clickedTile.R}) type={clickedTile.Type}");
 
-            if (Game != null && Game.DragonPhase != null && !Game.IsAiControlled(Game.DragonPhase.Player) &&
+            if (Game != null && Game.DragonPhase != null && Game.CanLocalPlayerActFor(Game.DragonPhase.Player) &&
                 Game.DragonPhase.PendingHit == null && Game.DragonPhase.Options != null)
             {
                 foreach (var opt in Game.DragonPhase.Options)

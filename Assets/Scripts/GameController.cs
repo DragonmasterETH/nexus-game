@@ -876,6 +876,21 @@ namespace NexusGame
         public bool IsAiControlled(PlayerState p) =>
             VsAiMode && p != null && (WatchAiVsAiMode || p.PlayerIndex == AiPlayerIndex);
 
+        /// <summary>True if the human on this device may control the given seat (online: only your seat).</summary>
+        public bool CanLocalPlayerActFor(PlayerState p)
+        {
+            if (p == null || IsGameOver)
+                return false;
+            if (IsAiControlled(p))
+                return false;
+            if (NexusSession.IsOnline && p.PlayerIndex != NexusSession.LocalPlayerIndex)
+                return false;
+            return true;
+        }
+
+        /// <summary>True if this device may act during the current turn.</summary>
+        public bool CanLocalPlayerActNow() => CanLocalPlayerActFor(CurrentPlayer);
+
         /// <summary>Find any legal starting home tile for deployment/purchase.</summary>
         public BoardTile FindHomeBaseForPlayer(PlayerState player)
         {
