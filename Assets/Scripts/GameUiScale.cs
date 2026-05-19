@@ -10,7 +10,10 @@ namespace NexusGame
     {
         public const float ImGuiReferenceWidth = 900f;
         public const float ImGuiReferenceHeight = 1300f;
-        const float GlobalImGuiFontFactor = 0.86f;
+        /// <summary>Global IMGUI text size vs design pixels (menus, HUD, tile modals, battle overlay).</summary>
+        const float GlobalImGuiFontFactor = 1.08f;
+        /// <summary>Raises minimum/maximum font clamps so small phones don't pin everything at tiny mins.</summary>
+        const float ImGuiFontClampMultiplier = 1.12f;
         /// <summary>Soft clamp only — keeps extreme DPI / simulator sizes sane without pinning phones and tablets to one size.</summary>
         const float ImGuiFontScaleMin = 0.28f;
         const float ImGuiFontScaleMax = 2.55f;
@@ -135,8 +138,9 @@ namespace NexusGame
 
         public static int TileInfoScaledFont(float designSize, float panelScale, int minSize)
         {
+            int minPx = Mathf.Max(1, Mathf.RoundToInt(minSize * ImGuiFontClampMultiplier));
             float px = designSize * panelScale * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor;
-            return Mathf.Max(minSize, Mathf.RoundToInt(px));
+            return Mathf.Max(minPx, Mathf.RoundToInt(px));
         }
 
         /// <summary>
@@ -144,9 +148,11 @@ namespace NexusGame
         /// </summary>
         public static int ImGuiScaledFont(float designSize, int minSize, int maxSize, float multiplier = 1f)
         {
+            int minPx = Mathf.Max(1, Mathf.RoundToInt(minSize * ImGuiFontClampMultiplier));
+            int maxPx = Mathf.Max(minPx, Mathf.RoundToInt(maxSize * ImGuiFontClampMultiplier));
             float px = designSize * ImGuiFontScale() * Mathf.Max(0.1f, multiplier);
             int n = Mathf.RoundToInt(px);
-            return Mathf.Clamp(Mathf.Max(minSize, n), minSize, maxSize);
+            return Mathf.Clamp(Mathf.Max(minPx, n), minPx, maxPx);
         }
 
         /// <summary>
@@ -225,12 +231,14 @@ namespace NexusGame
         /// </summary>
         public static int FullBleedImGuiScaledFont(float designSize, Rect panelGuiRect, int minSize, int maxSize = 48)
         {
+            int minPx = Mathf.Max(1, Mathf.RoundToInt(minSize * ImGuiFontClampMultiplier));
+            int maxPx = Mathf.Max(minPx, Mathf.RoundToInt(maxSize * ImGuiFontClampMultiplier));
             float ratio = FullBleedPanelWidthToCanvasWidthRatio(panelGuiRect);
             // Dampen width-ratio gain so text scales up on larger screens without overrunning short rows.
             float ratioDamped = Mathf.Lerp(1f, ratio, 0.6f);
             float px = designSize * ImGuiCanvasScale() * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor * ratioDamped;
             int n = Mathf.RoundToInt(px);
-            return Mathf.Clamp(Mathf.Max(minSize, n), minSize, maxSize);
+            return Mathf.Clamp(Mathf.Max(minPx, n), minPx, maxPx);
         }
 
         /// <summary>

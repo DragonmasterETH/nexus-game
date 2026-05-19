@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -105,46 +104,9 @@ namespace NexusGame
         GUIStyle _tileInfoScrollViewTransparent;
         GUIStyle _tileInfoHiddenHScrollbar;
         GUIStyle _tileInfoHiddenVScrollbar;
-        Font _tileInfoUiFont;
-        bool _tileInfoUiFontTried;
-        Font _handPileTitleFont;
-        bool _handPileTitleFontTried;
+        Font TileInfoUiFont() => NexusUiFonts.ImguiFont();
 
-        /// <summary>IMGUI uses Unity <see cref="Font"/> from Resources (<c>Fonts/Bemora</c>). TextMesh Pro needs an SDF asset — generate it with the Nexus → Fonts menu in the editor.</summary>
-        Font TileInfoUiFont()
-        {
-            if (!_tileInfoUiFontTried)
-            {
-                _tileInfoUiFontTried = true;
-                _tileInfoUiFont = Resources.Load<Font>("Fonts/Bemora")
-                                  ?? Resources.Load<Font>("Fonts/Bemora-Regular");
-            }
-
-            return _tileInfoUiFont;
-        }
-
-        /// <summary>
-        /// Hand pile modal title: underlying font from the TMP asset (<c>Resources/Fonts/Bemora SDF</c>) for IMGUI.
-        /// </summary>
-        Font HandPileTitleUiFont()
-        {
-            if (!_handPileTitleFontTried)
-            {
-                _handPileTitleFontTried = true;
-                var tmp = Resources.Load<TMP_FontAsset>("Fonts/Bemora SDF");
-                if (tmp != null && tmp.sourceFontFile != null)
-                    _handPileTitleFont = tmp.sourceFontFile;
-            }
-
-            return _handPileTitleFont != null ? _handPileTitleFont : TileInfoUiFont();
-        }
-
-        void ApplyTileInfoFont(GUIStyle style)
-        {
-            Font f = TileInfoUiFont();
-            if (f != null)
-                style.font = f;
-        }
+        void ApplyTileInfoFont(GUIStyle style) => NexusUiFonts.ApplyTo(style);
 
         void EnsureTileInfoHiddenScrollbars()
         {
@@ -556,6 +518,7 @@ namespace NexusGame
         BoardTile _tilePanelDetailTile;
         UnitType _tilePanelDetailUnit;
         bool _tilePanelHasDetailUnit;
+        int _tilePanelLastTurnPlayerIndex = -1;
         float _lastCardBarY;
         Rect _lastBottomHudInputBlockRect;
         Rect _lastEndTurnButtonRect;
@@ -1364,6 +1327,8 @@ namespace NexusGame
 
         void OnGUI()
         {
+            NexusUiFonts.EnsureImGuiSkinFonts();
+
             if (Game == null || Game.Players.Count == 0)
                 return;
             if (Game.IsGameOver && Game.FinalSnapshot != null)
@@ -1546,6 +1511,7 @@ namespace NexusGame
                     wordWrap = true,
                     fontSize = Mathf.Max(10, Mathf.RoundToInt(11f * _hudFontScale))
                 };
+                ApplyTileInfoFont(bodyStyle);
                 float bodyH = bodyStyle.CalcHeight(new GUIContent(sb.ToString()), lw);
                 bodyH = Mathf.Clamp(bodyH + HudS(6f), HudS(24f), HudS(220f));
                 GUI.Label(new Rect(lx, ly, lw, bodyH), sb.ToString(), bodyStyle);
@@ -1572,6 +1538,7 @@ namespace NexusGame
                     wordWrap = true,
                     fontSize = Mathf.Max(9, Mathf.RoundToInt(10f * _hudFontScale))
                 };
+                ApplyTileInfoFont(battleLogStyle);
                 float contentH = Mathf.Max(viewH, battleLogStyle.CalcHeight(new GUIContent(safe), viewW - HudS(16f)) + HudS(8f));
                 var view = new Rect(viewX, viewY, viewW, viewH);
                 var content = new Rect(0f, 0f, viewW - HudS(16f), contentH);
@@ -1952,6 +1919,7 @@ namespace NexusGame
                 wordWrap = false,
                 alignment = TextAnchor.MiddleCenter
             };
+            ApplyTileInfoFont(pileBtnFallbackStyle);
 
             EnsureCardsPileButtonTexture();
             if (_cardsPileButtonTex != null)
@@ -2166,6 +2134,7 @@ namespace NexusGame
                     normal = { textColor = new Color(0.75f, 0.75f, 0.8f) },
                     clipping = TextClipping.Overflow
                 };
+                ApplyTileInfoFont(hint);
                 GUI.Label(viewRect, "Tap the board to select a tile.", hint);
                 return;
             }
@@ -2225,9 +2194,7 @@ namespace NexusGame
                 fontSize = Mathf.Max(18, Mathf.RoundToInt(22f * _hudFontScale)),
                 fontStyle = FontStyle.Bold
             };
-            Font titleFont = HandPileTitleUiFont();
-            if (titleFont != null)
-                titleStyle.font = titleFont;
+            ApplyTileInfoFont(titleStyle);
             GUI.Label(new Rect(win.x, win.y + titlePadTop, win.width, titleLineH), title, titleStyle);
 
             float handPileTabsDrop = HudS(44f);
@@ -2389,7 +2356,7 @@ namespace NexusGame
             float factionHdrH = Mathf.Max(S(22f), S(18f));
             float factionAfterHdrPad = S(4f);
             float factionAfterGridPad = S(10f);
-            var ownersOnTile = GetPlayersWithUnitsOnTileOrdered(sel);
+            var ownersOnTile = GetPlayersWithUnitsOnTileOrdered(sel, player);
             float creatureBlock = occupyingLabelH + S(4f);
             if (ownersOnTile.Count <= 1)
                 creatureBlock += creatureRowH;
@@ -3121,8 +3088,8 @@ namespace NexusGame
             return "Unowned  ·  (" + tile.Q + "," + tile.R + ")";
         }
 
-        /// <summary>Distinct players with at least one unit on the tile, ordered by player index.</summary>
-        static List<PlayerState> GetPlayersWithUnitsOnTileOrdered(BoardTile tile)
+        /// <summary>Distinct players with at least one unit on the tile; <paramref name="prioritizeFirst"/> listed first.</summary>
+        static List<PlayerState> GetPlayersWithUnitsOnTileOrdered(BoardTile tile, PlayerState prioritizeFirst = null)
         {
             var result = new List<PlayerState>();
             if (tile == null)
@@ -3136,14 +3103,34 @@ namespace NexusGame
                     result.Add(unit.Owner);
             }
 
-            result.Sort((a, b) => a.PlayerIndex.CompareTo(b.PlayerIndex));
+            result.Sort((a, b) =>
+            {
+                if (prioritizeFirst != null)
+                {
+                    if (a.PlayerIndex == prioritizeFirst.PlayerIndex)
+                        return -1;
+                    if (b.PlayerIndex == prioritizeFirst.PlayerIndex)
+                        return 1;
+                }
+
+                return a.PlayerIndex.CompareTo(b.PlayerIndex);
+            });
             return result;
+        }
+
+        static int DefaultTilePanelViewPlayerIndex(List<PlayerState> ownersOnTile, PlayerState currentPlayer)
+        {
+            if (currentPlayer != null && ownersOnTile.Exists(o => o.PlayerIndex == currentPlayer.PlayerIndex))
+                return currentPlayer.PlayerIndex;
+            if (ownersOnTile.Count > 0)
+                return ownersOnTile[0].PlayerIndex;
+            return currentPlayer != null ? currentPlayer.PlayerIndex : 0;
         }
 
         void DrawHexModalCreatureGrid2Rows3Cols(BoardTile tile, PlayerState hudPlayer, float width, float rowH,
             float rowGap, float scale)
         {
-            var ownersOrdered = GetPlayersWithUnitsOnTileOrdered(tile);
+            var ownersOrdered = GetPlayersWithUnitsOnTileOrdered(tile, hudPlayer);
             if (ownersOrdered.Count == 0)
             {
                 DrawHexModalCreatureGrid2Rows3ColsForOwner(tile, hudPlayer, width, rowH, rowGap, null, scale);
@@ -3830,10 +3817,8 @@ namespace NexusGame
                 return _endTurnAdvanceOverlayLabelStyle;
 
             _endTurnAdvanceOverlayLabelStyleScale = s;
-            var f = TileInfoUiFont();
             _endTurnAdvanceOverlayLabelStyle = new GUIStyle(GUI.skin.label)
             {
-                font = f,
                 fontSize = wantSize,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
@@ -3841,6 +3826,7 @@ namespace NexusGame
                 clipping = TextClipping.Overflow,
                 normal = { textColor = Color.white }
             };
+            ApplyTileInfoFont(_endTurnAdvanceOverlayLabelStyle);
             return _endTurnAdvanceOverlayLabelStyle;
         }
 
@@ -5757,8 +5743,7 @@ namespace NexusGame
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft
             };
-            if (largeShopCard)
-                ApplyTileInfoFont(costStyle);
+            ApplyTileInfoFont(costStyle);
             if (!canAfford)
                 GUI.color = new Color(0.55f, 0.55f, 0.58f);
             if (canPlayFreeHuman)
@@ -5802,7 +5787,7 @@ namespace NexusGame
             };
             ApplyTileInfoFont(rowTitle);
 
-            var ownersOnTile = GetPlayersWithUnitsOnTileOrdered(popupTile);
+            var ownersOnTile = GetPlayersWithUnitsOnTileOrdered(popupTile, player);
             bool contested = ownersOnTile.Count > 1;
 
             if (_tilePanelTabTile != popupTile)
@@ -5812,12 +5797,17 @@ namespace NexusGame
                 _moveAllTile = popupTile;
                 _moveAllChecked = false;
                 _tilePanelHasDetailUnit = false;
+                _tilePanelViewPlayerIndex = DefaultTilePanelViewPlayerIndex(ownersOnTile, player);
+                _tilePanelLastTurnPlayerIndex = player.PlayerIndex;
+            }
+            else if (player != null && _tilePanelLastTurnPlayerIndex != player.PlayerIndex)
+            {
+                _tilePanelLastTurnPlayerIndex = player.PlayerIndex;
                 if (ownersOnTile.Exists(o => o.PlayerIndex == player.PlayerIndex))
+                {
                     _tilePanelViewPlayerIndex = player.PlayerIndex;
-                else if (ownersOnTile.Count > 0)
-                    _tilePanelViewPlayerIndex = ownersOnTile[0].PlayerIndex;
-                else
-                    _tilePanelViewPlayerIndex = player.PlayerIndex;
+                    _tilePanelHasDetailUnit = false;
+                }
             }
 
             if (_tilePanelDetailTile != popupTile)
@@ -5828,7 +5818,7 @@ namespace NexusGame
 
             if (ownersOnTile.Count > 0 &&
                 !ownersOnTile.Exists(o => o.PlayerIndex == _tilePanelViewPlayerIndex))
-                _tilePanelViewPlayerIndex = ownersOnTile[0].PlayerIndex;
+                _tilePanelViewPlayerIndex = DefaultTilePanelViewPlayerIndex(ownersOnTile, player);
 
             PlayerState viewOwner = null;
             if (Game != null && _tilePanelViewPlayerIndex >= 0 && _tilePanelViewPlayerIndex < Game.Players.Count)
@@ -6100,6 +6090,7 @@ namespace NexusGame
                 fontStyle = FontStyle.Bold,
                 fontSize = Mathf.Max(12, Mathf.RoundToInt(15f * _hudFontScale * bhMul))
             };
+            ApplyTileInfoFont(btnFallback);
 
             float qtyBtnSz = Mathf.Min(counterH, BottomHudS(32f));
             float countW = BottomHudS(42f);

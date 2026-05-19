@@ -63,6 +63,7 @@ namespace NexusGame
                     alignment = TextAnchor.MiddleCenter,
                     wordWrap = true
                 };
+                NexusUiFonts.ApplyTo(_menuButtonStyle);
             }
 
             return _menuButtonStyle;
@@ -255,6 +256,8 @@ namespace NexusGame
 
         void OnGUI()
         {
+            NexusUiFonts.EnsureImGuiSkinFonts();
+
             switch (_state)
             {
                 case UiState.MainMenu:
@@ -718,6 +721,7 @@ namespace NexusGame
                 wordWrap = true,
                 richText = false
             };
+            NexusUiFonts.ApplyTo(_rulebookBodyStyle);
         }
 
         void DrawRulebook()
