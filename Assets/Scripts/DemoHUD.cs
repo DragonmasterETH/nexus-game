@@ -44,6 +44,8 @@ namespace NexusGame
         Texture2D _hexModalSilhouetteMask;
         NexusGuiImage _tileInfoScreenBg;
         bool _tileInfoScreenTried;
+        NexusGuiImage _tileInfoNameBanner;
+        bool _tileInfoNameBannerTried;
         NexusGuiImage _battleScreenBg;
         bool _battleScreenTried;
         NexusGuiImage _cardScreenBg;
@@ -175,7 +177,7 @@ namespace NexusGame
         float HudS(float designPixels) => Mathf.Max(1f, designPixels * _mainHudUiScale);
 
         /// <summary>Extra scale for bottom card bar (pile button, tile panel, move-all row) so controls read larger on tall bars.</summary>
-        const float BottomHudInnerLayoutMul = 1.35f;
+        const float BottomHudInnerLayoutMul = 1.58f;
 
         /// <summary>Layout/design pixels for bottom HUD innards — <see cref="HudS"/> with <see cref="BottomHudInnerLayoutMul"/>.</summary>
         float BottomHudS(float designPixels) => HudS(designPixels * BottomHudInnerLayoutMul);
@@ -406,12 +408,31 @@ namespace NexusGame
             return tex;
         }
 
-        /// <summary>Minimum height: large hex band + meta band (name/owner on purple strip).</summary>
-        static float TileInfoFixedRowMinHeight(float contentWidth, float scale)
+        void EnsureTileInfoNameBanner()
+        {
+            if (_tileInfoNameBannerTried)
+                return;
+            _tileInfoNameBannerTried = true;
+            _tileInfoNameBanner = NexusGuiArt.LoadTileInfoNameBanner();
+        }
+
+        /// <summary>Full-width name banner height (0 if art missing).</summary>
+        float TileInfoNameBannerHeight(Rect panel, float scale)
+        {
+            EnsureTileInfoNameBanner();
+            if (_tileInfoNameBanner.IsEmpty || panel.width < 1f)
+                return 0f;
+            float S(float d) => d * scale;
+            float h = panel.width / _tileInfoNameBanner.AspectRatio;
+            return Mathf.Clamp(h, S(36f), S(96f)) + S(8f);
+        }
+
+        /// <summary>Minimum height: large hex band + meta band (name/owner on name banner).</summary>
+        float TileInfoFixedRowMinHeight(float contentWidth, Rect panel, float scale)
         {
             float S(float d) => d * scale;
             float w = contentWidth;
-            float metaBandH = Mathf.Max(S(148f), S(380f) * 0.32f);
+            float metaBandH = Mathf.Max(S(148f), S(380f) * 0.32f, TileInfoNameBannerHeight(panel, scale));
             float hexSide = Mathf.Clamp(Mathf.Min(w * 0.78f, S(400f)), S(150f), S(480f));
             float hexBandH = S(12f) + hexSide;
             return hexBandH + metaBandH;
@@ -489,9 +510,6 @@ namespace NexusGame
                     (dp.PendingHit != null && dp.PendingEnemies != null);
                 if (tallPanel &&
                     new Rect(hp.x + 20f * hs, hp.yMax - 200f * hs, hp.width - 40f * hs, 190f * hs).Contains(gui))
-                    return true;
-                if (!tallPanel && dp.Options != null && dp.Options.Count > 0 &&
-                    new Rect(hp.x + 12f * hs, hp.yMax - 44f * hs, hp.width - 24f * hs, 36f * hs).Contains(gui))
                     return true;
             }
 
@@ -1348,7 +1366,7 @@ namespace NexusGame
             _mainHudUiScale = MainHudUiScale();
             _hudFontScale = MainHudFontScale();
             _hudCardBarHeight = HudS(200f * 1.25f * 1.5f);
-            _hudPhaseRibbonHeight = HudS(34f);
+            _hudPhaseRibbonHeight = HudS(42f);
             ApplyMainHudScaledStyles();
             MaybeQueueContestedRetreatToast(player);
 
@@ -1404,8 +1422,8 @@ namespace NexusGame
             string rubStr = player.Rubium.ToString();
             string vpStr = player.VictoryPoints.ToString();
             string midText = $"T{Game.TurnNumber}  ·  P{player.PlayerIndex + 1}";
-            int statMax = GameUiScale.ImGuiScaledFont(20f, 16, 54);
-            rubNumStyle.fontSize = GameUiScale.ComputeBestFitFontSize(rubNumStyle, rubStr, rubBoxW, resLineH, 14, statMax,
+            int statMax = GameUiScale.ImGuiScaledFont(26f, 20, 68);
+            rubNumStyle.fontSize = GameUiScale.ComputeBestFitFontSize(rubNumStyle, rubStr, rubBoxW, resLineH, 18, statMax,
                 false);
             var vpNumStyle = new GUIStyle(rubNumStyle);
             vpNumStyle.fontSize =
@@ -1430,9 +1448,9 @@ namespace NexusGame
             ApplyTileInfoFont(midCenterStyle);
             midCenterStyle.normal.textColor = lightOnBar;
             midCenterStyle.fontSize =
-                GameUiScale.ComputeBestFitFontSize(midCenterStyle, midText, midW, resLineH, 12, statMax, false);
+                GameUiScale.ComputeBestFitFontSize(midCenterStyle, midText, midW, resLineH, 16, statMax, false);
             GUI.Label(new Rect(midLeft, ly - HudS(2f), midW, resLineH), midText, midCenterStyle);
-            bool blockTopIcons = _showCenterBuyModal || handPileModalOpen;
+            bool blockTopIcons = BlocksGameplayHudInteractives();
             bool prevEnabled = GUI.enabled;
             if (blockTopIcons)
                 GUI.enabled = false;
@@ -1572,7 +1590,7 @@ namespace NexusGame
             {
                 var dp = Game.DragonPhase;
                 bool tallDragonPanel = Game.IsAiControlled(dp.Player);
-                dragonReserveBottom = tallDragonPanel ? HudS(200f) : HudS(40f);
+                dragonReserveBottom = tallDragonPanel ? HudS(200f) : 0f;
             }
 
             float reserveBottom = _hudCardBarHeight + _hudPhaseRibbonHeight + HudS(24f) + dragonReserveBottom;
@@ -1593,10 +1611,18 @@ namespace NexusGame
             if (_showCenterBuyModal && !canOpenHexDetailModal)
                 _showCenterBuyModal = false;
 
+            bool blockUnderlyingHud = BlocksGameplayHudInteractives();
+            bool hudInteractivesPrevEnabled = GUI.enabled;
+            if (blockUnderlyingHud)
+                GUI.enabled = false;
+
             DrawCardsPileButtonLeft();
             DrawBottomCardHand(player);
             DrawPhaseRibbon(player);
             DrawEndTurnAdvanceButton(hp, player, reserveBottom, dragonSkipButton, blockEndTurn, handPileModalOpen);
+
+            if (blockUnderlyingHud)
+                GUI.enabled = hudInteractivesPrevEnabled;
 
             DrawHandPileViewerOverlay(player);
             DrawBattleFocusOverlay();
@@ -1691,6 +1717,7 @@ namespace NexusGame
             float w = Mathf.Min(HudS(380f), Screen.width - HudS(32f));
             float h = HudS(280f);
             var panel = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
+            DrawModalPerimeterClickBlockers(panel);
             GUI.Box(panel, "");
 
             var titleStyle = new GUIStyle(GUI.skin.label)
@@ -1756,6 +1783,7 @@ namespace NexusGame
             float s = _hudFontScale;
             float pad = HudS(16f);
             var panel = new Rect(pad, pad, Screen.width - 2f * pad, Screen.height - 2f * pad);
+            DrawModalPerimeterClickBlockers(panel);
             GUI.Box(panel, "");
 
             var titleStyle = new GUIStyle(GUI.skin.label)
@@ -1833,6 +1861,7 @@ namespace NexusGame
             var hp = _hudLayoutPanel;
             float winH = Mathf.Min(HudS(480f), hp.height - HudS(100f));
             var r = new Rect(hp.x + HudS(12f), hp.y + HudS(80f), Mathf.Min(HudS(580f), hp.width - HudS(24f)), winH);
+            DrawModalPerimeterClickBlockers(r);
             GUI.Window(953, r, _ =>
             {
                 var subject = _energizeHelpSubject != null ? _energizeHelpSubject : Game.CurrentPlayer;
@@ -1890,7 +1919,7 @@ namespace NexusGame
             {
                 var dp = Game.DragonPhase;
                 bool tallDragon = Game.IsAiControlled(dp.Player);
-                dragonLift = tallDragon ? HudS(200f) : HudS(40f);
+                dragonLift = tallDragon ? HudS(200f) : 0f;
             }
 
             float barY = hp.yMax - dragonLift - _hudCardBarHeight - _hudPhaseRibbonHeight - HudS(12f);
@@ -2033,7 +2062,7 @@ namespace NexusGame
             float bh = BottomHudInnerLayoutMul;
             var numStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Max(16, Mathf.RoundToInt(22f * _hudFontScale * bh)),
+                fontSize = Mathf.Max(18, Mathf.RoundToInt(26f * _hudFontScale * bh)),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 wordWrap = false,
@@ -2167,14 +2196,7 @@ namespace NexusGame
             float h = Mathf.Min(Screen.height - HudS(80f), HudS(840f));
             var win = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
 
-            // Consume clicks outside the modal only (a full-screen invisible button steals all hits from controls drawn after it).
-            float sw = Screen.width;
-            float sh = Screen.height;
-            GUI.Button(new Rect(0f, 0f, win.x, sh), GUIContent.none, GUIStyle.none);
-            GUI.Button(new Rect(win.xMax, 0f, Mathf.Max(0f, sw - win.xMax), sh), GUIContent.none, GUIStyle.none);
-            GUI.Button(new Rect(win.x, 0f, win.width, win.y), GUIContent.none, GUIStyle.none);
-            GUI.Button(new Rect(win.x, win.yMax, win.width, Mathf.Max(0f, sh - win.yMax)), GUIContent.none,
-                GUIStyle.none);
+            DrawModalPerimeterClickBlockers(win);
 
             DrawHandPileModalPanelBackground(win);
 
@@ -2311,13 +2333,14 @@ namespace NexusGame
             GUI.color = prev;
 
             var panel = GameUiScale.GetFullscreenModalStylePanelGuiRect();
+            DrawModalPerimeterClickBlockers(panel);
             DrawTileInfoModalBackground(panel);
 
             float scale = GameUiScale.TileInfoModalPanelScale(panel);
             float S(float designUnits) => designUnits * scale;
 
             float headerH = S(64f);
-            float topGapBelowHeader = S(4f);
+            float topGapBelowHeader = S(10f);
             float insetX = S(38f);
             float closeW = HudS(176f);
             float closeH = HudS(56f);
@@ -2375,17 +2398,17 @@ namespace NexusGame
             float minScrollBody = S(100f);
             float gapAfterScrollHeader = S(1f);
             float bodyBelowHeader = panel.height - headerH - topGapBelowHeader - bottomReserve;
-            float fixedTopH = Mathf.Max(S(220f), TileInfoFixedRowMinHeight(contentWidth, scale));
+            float fixedTopH = Mathf.Max(S(220f), TileInfoFixedRowMinHeight(contentWidth, panel, scale));
             float scrollNeed = sepAfterFixed + gapAfterScrollHeader + minScrollBody;
             if (fixedTopH + scrollNeed > bodyBelowHeader)
                 fixedTopH = Mathf.Max(S(180f), bodyBelowHeader - scrollNeed);
 
             // Nudge hex + tile meta down (clear top safe area); shrink fixed band slightly so layout still fits.
-            float fixedRowNudgeDown = S(10f);
+            float fixedRowNudgeDown = S(14f);
             fixedTopH = Mathf.Max(S(152f), fixedTopH - fixedRowNudgeDown);
             var fixedRow = new Rect(contentLeft, panel.y + headerH + topGapBelowHeader + fixedRowNudgeDown,
                 contentWidth, fixedTopH);
-            DrawHexModalTopRow(fixedRow, player, sel, scale);
+            DrawHexModalTopRow(fixedRow, panel, player, sel, scale);
 
             float scrollTop = fixedRow.yMax + sepAfterFixed + gapAfterScrollHeader;
             var scrollRect = new Rect(contentLeft, scrollTop, contentWidth, panel.yMax - bottomReserve - scrollTop);
@@ -2641,6 +2664,7 @@ namespace NexusGame
             GUI.color = prev;
 
             var panel = GameUiScale.GetBattleCasualtyModalPanelGuiRect();
+            DrawModalPerimeterClickBlockers(panel);
             DrawCasualtyModalPanelBackground(panel);
             Rect content = DrawCasualtySelectionModalHeader(dp.Player, panel, out float panelScale);
             float S(float d) => d * panelScale;
@@ -2795,19 +2819,23 @@ namespace NexusGame
             }
         }
 
-        void DrawHexModalTopRow(Rect row, PlayerState player, BoardTile tile, float scale)
+        void DrawHexModalTopRow(Rect row, Rect panel, PlayerState player, BoardTile tile, float scale)
         {
             if (tile == null)
                 return;
 
             float S(float d) => d * scale;
+            EnsureTileInfoNameBanner();
+            float bannerH = _tileInfoNameBanner.IsEmpty
+                ? 0f
+                : Mathf.Clamp(panel.width / _tileInfoNameBanner.AspectRatio, S(36f), S(96f));
 
             TileDefinition def = Game.Config != null ? Game.Config.GetTile(tile.Type) : null;
             Color fill = def != null ? def.Color : new Color(0.45f, 0.45f, 0.48f);
 
-            // Lower band: tile name + owner below hex art; meta band height follows row bottom or tucks under the hex when there is spare space in the hex band.
-            float metaBandH = Mathf.Max(S(132f), row.height * 0.30f);
-            metaBandH = Mathf.Min(metaBandH, row.height * 0.48f);
+            // Lower band: tile name + owner on full-width banner below hex art.
+            float metaBandH = Mathf.Max(S(132f), bannerH + S(16f), row.height * 0.30f);
+            metaBandH = Mathf.Min(metaBandH, row.height * 0.55f);
             float hexBandH = row.height - metaBandH;
             hexBandH = Mathf.Max(hexBandH, S(96f));
 
@@ -2825,6 +2853,7 @@ namespace NexusGame
             hexTop = Mathf.Min(hexTop, hexRowRect.yMax - hexSide - S(4f));
             var hexR = new Rect(row.x + (row.width - hexSide) * 0.5f, hexTop, hexSide, hexSide);
             DrawModalHexPreview(hexR, fill);
+            DrawTileBoardOverlayOnModalHex(hexR, tile);
 
             string tileName = TileTypeDisplayName(tile.Type);
             string meta = HexModalOwnerMetaLine(player, tile);
@@ -2869,7 +2898,7 @@ namespace NexusGame
             contestedStyle.padding = new RectOffset(0, 0, 0, 0);
 
             float hexBottom = hexTop + hexSide;
-            float gapTileToName = S(14f);
+            float gapTileToName = S(14f) * 1.1f;
             float metaYFromLayout = row.y + hexBandH;
             float metaYFromHex = hexBottom + gapTileToName;
             float metaY = Mathf.Min(metaYFromLayout, metaYFromHex);
@@ -2884,10 +2913,7 @@ namespace NexusGame
             if (nameH <= nameSizeY * 1.35f)
                 nameH = nameSizeY;
             nameH = Mathf.Min(nameH, Mathf.Max(S(22f), innerH - S(18f)));
-            var nameRect = new Rect(metaRectFull.x, metaY + metaTextTopPad, nameW, nameH);
-            GUI.Label(nameRect, tileName, tileTitleStyle);
 
-            float statusY = nameRect.yMax;
             float statusHDraw = contested
                 ? contestedStyle.CalcHeight(new GUIContent("CONTESTED"), nameW)
                 : statusStyle.CalcHeight(new GUIContent(meta), nameW);
@@ -2895,7 +2921,25 @@ namespace NexusGame
                 ? contestedStyle.CalcSize(new GUIContent("CONTESTED")).y
                 : statusStyle.CalcSize(new GUIContent(meta)).y;
             statusHDraw = Mathf.Max(statusTight, Mathf.Min(statusHDraw, statusTight * 2f));
-            var statusRect = new Rect(metaRectFull.x, statusY, nameW, statusHDraw);
+
+            float textBlockH = nameH + statusHDraw;
+            float bannerPadV = S(10f);
+            float bannerDrawH = bannerH > 0f ? Mathf.Max(bannerH, textBlockH + bannerPadV * 2f) : 0f;
+            float bannerY = bannerDrawH > 0f
+                ? metaY + Mathf.Max(S(6f), (metaBandActual - bannerDrawH) * 0.5f)
+                : metaY;
+            var bannerR = new Rect(panel.x, bannerY, panel.width, bannerDrawH);
+
+            if (bannerH > 0f && Event.current.type == EventType.Repaint)
+                _tileInfoNameBanner.DrawStretchFill(bannerR);
+
+            float textY = bannerDrawH > 0f
+                ? bannerY + (bannerDrawH - textBlockH) * 0.5f
+                : metaY + metaTextTopPad;
+            var nameRect = new Rect(metaRectFull.x, textY, nameW, nameH);
+            var statusRect = new Rect(metaRectFull.x, nameRect.yMax, nameW, statusHDraw);
+
+            GUI.Label(nameRect, tileName, tileTitleStyle);
             if (contested)
                 GUI.Label(statusRect, "CONTESTED", contestedStyle);
             else
@@ -3015,6 +3059,81 @@ namespace NexusGame
             GUI.color = fill;
             GUI.DrawTexture(r, mask, ScaleMode.StretchToFill);
             GUI.color = p;
+        }
+
+        static Sprite _tileInfoRefinerySprite;
+        static bool _tileInfoRefinerySpriteTried;
+
+        static Sprite TileInfoRefinerySprite()
+        {
+            if (!_tileInfoRefinerySpriteTried)
+            {
+                _tileInfoRefinerySpriteTried = true;
+                _tileInfoRefinerySprite = Resources.Load<Sprite>("Sprites/Refinery")
+                                        ?? Resources.Load<Sprite>("Sprites/refinery");
+            }
+
+            return _tileInfoRefinerySprite;
+        }
+
+        /// <summary>Board overlay on the hex (e.g. home-base refinery <see cref="SpriteRenderer"/>).</summary>
+        static bool TryResolveTileBoardOverlay(BoardTile tile, out Sprite sprite, out Color tint)
+        {
+            sprite = null;
+            tint = Color.white;
+            if (tile == null)
+                return false;
+
+            if (tile.View != null)
+            {
+                var renderers = tile.View.GetComponentsInChildren<SpriteRenderer>(true);
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    var sr = renderers[i];
+                    if (sr == null || sr.sprite == null)
+                        continue;
+                    sprite = sr.sprite;
+                    tint = sr.color;
+                    return true;
+                }
+            }
+
+            if (tile.Type == TileType.HomeBase)
+            {
+                sprite = TileInfoRefinerySprite();
+                if (sprite != null)
+                {
+                    tint = new Color(1f, 1f, 1f, 0.25f);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        void DrawTileBoardOverlayOnModalHex(Rect hexR, BoardTile tile)
+        {
+            if (!TryResolveTileBoardOverlay(tile, out Sprite sprite, out Color tint) || sprite == null)
+                return;
+
+            // Match board placement (~72% of hex width); lift alpha slightly so it reads in the modal UI.
+            float targetW = hexR.width * 0.72f;
+            float aspect = Mathf.Max(0.01f, sprite.rect.width / sprite.rect.height);
+            float w = targetW;
+            float h = w / aspect;
+            float maxH = hexR.height * 0.72f;
+            if (h > maxH)
+            {
+                h = maxH;
+                w = h * aspect;
+            }
+
+            var overlayR = new Rect(hexR.x + (hexR.width - w) * 0.5f, hexR.y + (hexR.height - h) * 0.5f, w, h);
+            Color prev = GUI.color;
+            float a = Mathf.Clamp(tint.a < 0.4f ? tint.a * 2.8f : tint.a, 0.35f, 1f);
+            GUI.color = new Color(tint.r, tint.g, tint.b, a);
+            new NexusGuiImage(sprite).DrawAspectFit(overlayR);
+            GUI.color = prev;
         }
 
         Texture2D HexModalSilhouetteMask()
@@ -3435,6 +3554,51 @@ namespace NexusGame
             return new Vector2(e.mousePosition.x, Screen.height - e.mousePosition.y);
         }
 
+        /// <summary>True when a modal/overlay is open — bottom HUD must not register buttons underneath.</summary>
+        bool BlocksGameplayHudInteractives()
+        {
+            if (_showCenterBuyModal || _showQuickRef || _showSettingsMenu || _showMyEnergizeHelp || _showEndGameStats)
+                return true;
+            if (_handPileViewer != HandPileViewerKind.None)
+                return true;
+            if (Game != null && Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting)
+                return true;
+
+            if (Game != null && Game.Players.Count > 0)
+            {
+                var player = Game.CurrentPlayer;
+                if (player != null && ShouldPaintFullBattleOverlay(player, out _))
+                    return true;
+
+                var dp = Game.DragonPhase;
+                if (dp != null && dp.PendingHit != null && dp.PendingEnemies != null &&
+                    !Game.IsAiControlled(dp.Player))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Invisible IMGUI hit targets around <paramref name="windowRect"/> so clicks on the dimmed backdrop do not
+        /// reach controls drawn earlier in the same frame (e.g. cards pile under TILE INFO).
+        /// </summary>
+        static void DrawModalPerimeterClickBlockers(Rect windowRect)
+        {
+            float sw = Screen.width;
+            float sh = Screen.height;
+            var none = GUIStyle.none;
+            if (windowRect.x > 0f)
+                GUI.Button(new Rect(0f, 0f, windowRect.x, sh), GUIContent.none, none);
+            if (windowRect.xMax < sw)
+                GUI.Button(new Rect(windowRect.xMax, 0f, Mathf.Max(0f, sw - windowRect.xMax), sh), GUIContent.none, none);
+            if (windowRect.y > 0f)
+                GUI.Button(new Rect(windowRect.x, 0f, windowRect.width, windowRect.y), GUIContent.none, none);
+            if (windowRect.yMax < sh)
+                GUI.Button(new Rect(windowRect.x, windowRect.yMax, windowRect.width, Mathf.Max(0f, sh - windowRect.yMax)),
+                    GUIContent.none, none);
+        }
+
         bool PointerOverBottomHudInteractives()
         {
             if (Event.current == null)
@@ -3551,14 +3715,14 @@ namespace NexusGame
                 normal = { textColor = Color.white }
             };
             ApplyTileInfoFont(phaseStyle);
-            int phaseMax = GameUiScale.ImGuiScaledFont(11f, 8, 22);
+            int phaseMax = GameUiScale.ImGuiScaledFont(15f, 11, 30);
             var gc = new GUIContent();
             int phaseFs = phaseMax;
             foreach (var ph in phases)
             {
                 gc.text = ph;
                 phaseFs = Mathf.Min(phaseFs,
-                    GameUiScale.ComputeBestFitFontSize(phaseStyle, gc, segInnerW, segH, 7, phaseMax, false));
+                    GameUiScale.ComputeBestFitFontSize(phaseStyle, gc, segInnerW, segH, 10, phaseMax, false));
             }
 
             phaseStyle.fontSize = phaseFs;
@@ -4156,6 +4320,7 @@ namespace NexusGame
             }
 
             var panel = GetBattleScreenPanelGuiRect();
+            DrawModalPerimeterClickBlockers(panel);
             DrawTintedRect(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0.015f, 0.02f, 0.04f, 0.72f));
             DrawBattleScreenModalBackground();
             GUI.BeginGroup(panel);
@@ -4243,6 +4408,7 @@ namespace NexusGame
             GUI.color = prevGui;
 
             var panel = GameUiScale.GetBattleCasualtyModalPanelGuiRect();
+            DrawModalPerimeterClickBlockers(panel);
             DrawCasualtyModalPanelBackground(panel);
             Rect content = DrawCasualtySelectionModalHeader(owner, panel, out float panelScale);
 
@@ -4856,7 +5022,8 @@ namespace NexusGame
             // BeginGroup + local BeginArea avoids GUILayout.BeginArea(absolute rect) swallowing sibling layout in strips.
             GUI.BeginGroup(colRect);
             GUILayout.BeginArea(new Rect(0f, 0f, colRect.width, colRect.height));
-            GUILayout.BeginVertical(GUILayout.Width(sidePanelW));
+            GUILayout.BeginVertical(GUILayout.Width(sidePanelW), GUILayout.ExpandHeight(true));
+            GUILayout.FlexibleSpace();
 
             var titleStyle = new GUIStyle(GUI.skin.label)
             {
@@ -4923,7 +5090,7 @@ namespace NexusGame
                 float maxIcon = Mathf.Min(boxW * 0.92f, innerH - countH - BattleS(4f));
                 float iconSz = Mathf.Clamp(maxIcon, BattleS(32f), Mathf.Min(boxW * 0.95f, innerH));
                 float blockH = iconSz + countH;
-                float blockY = box.y + (innerH - blockH) * 0.5f;
+                float blockY = box.yMax - labelH - blockH;
                 float ix = box.x + (box.width - iconSz) * 0.5f;
                 var iconR = new Rect(ix, blockY, iconSz, iconSz);
                 if (Event.current.type == EventType.Repaint)
@@ -5537,20 +5704,7 @@ namespace NexusGame
             if (dp.PendingHit != null && dp.PendingEnemies != null)
                 return;
 
-            // Hex targets: orange rings on the board + End Turn becomes "SKIP DRAGON'S BREATH". Optional hint.
-            if (dp.Options != null && dp.Options.Count > 0)
-            {
-                var hint = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale)),
-                    alignment = TextAnchor.MiddleCenter,
-                    wordWrap = true,
-                    normal = { textColor = new Color(0.92f, 0.93f, 0.96f, 0.9f) }
-                };
-                float hintH = HudS(36f);
-                GUI.Label(new Rect(hp.x + HudS(12f), hp.yMax - HudS(44f), hp.width - HudS(24f), hintH),
-                    "Tap an orange-highlighted hex to fire. Skip with the top-left button.", hint);
-            }
+            // Hex targets: orange rings on the board; skip via End Turn ("SKIP DRAGON'S BREATH").
         }
 
         void DrawBuyUnitGrid(float x0, float y0, float width, int columns, float nameBoxH, float shopIconSize,
@@ -5840,13 +5994,20 @@ namespace NexusGame
             }
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label(popupTile.Type.ToString(), rowTitle, GUILayout.MaxWidth(contentWidth * 0.32f));
-            GUILayout.Space(BottomHudS(6f));
+            float contestedReserve = contested ? BottomHudS(92f) : 0f;
+            float playerTabsReserve = ownersOnTile.Count > 1
+                ? ownersOnTile.Count * BottomHudS(50f) + (ownersOnTile.Count - 1) * BottomHudS(4f) + BottomHudS(10f)
+                : BottomHudS(56f);
+            float tileNameMaxW = Mathf.Max(BottomHudS(64f),
+                contentWidth - playerTabsReserve - contestedReserve - BottomHudS(28f));
+            GUILayout.Label(TileTypeDisplayName(popupTile.Type), rowTitle, GUILayout.MaxWidth(tileNameMaxW));
+            GUILayout.Space(BottomHudS(14f));
 
             if (ownersOnTile.Count > 1)
                 DrawTilePanelFactionTabs(ownersOnTile, bhMul);
             else if (ownersOnTile.Count == 1)
             {
+                GUILayout.Space(BottomHudS(6f));
                 var solo = ownersOnTile[0];
                 Color prev = GUI.color;
                 GUI.color = solo.Color;
@@ -6055,7 +6216,7 @@ namespace NexusGame
                 : new Dictionary<UnitType, int>();
             movableCounts.TryGetValue(unitType, out int movable);
 
-            float counterH = BottomHudS(32f);
+            float counterH = BottomHudS(28f);
             float gapIconToControls = BottomHudS(16f);
             float iconMaxH = Mathf.Max(BottomHudS(40f), r.height - counterH - gapIconToControls - BottomHudS(16f));
             float iconSz = Mathf.Clamp(Mathf.Min(r.width * 0.9f, iconMaxH), BottomHudS(44f), BottomHudS(70f));
@@ -6088,14 +6249,16 @@ namespace NexusGame
             {
                 alignment = TextAnchor.MiddleCenter,
                 fontStyle = FontStyle.Bold,
-                fontSize = Mathf.Max(12, Mathf.RoundToInt(15f * _hudFontScale * bhMul))
+                fontSize = Mathf.Max(11, Mathf.RoundToInt(13f * _hudFontScale * bhMul))
             };
             ApplyTileInfoFont(btnFallback);
 
-            float qtyBtnSz = Mathf.Min(counterH, BottomHudS(32f));
-            float countW = BottomHudS(42f);
+            float qtyBtnSz = BottomHudS(24f);
+            float qtyBtnH = BottomHudS(24f);
+            float countW = BottomHudS(40f);
             float rowW = qtyBtnSz * 2f + countW + BottomHudS(4f);
             float rowX = r.x + (r.width - rowW) * 0.5f;
+            float qtyBtnY = counterY + (counterH - qtyBtnH) * 0.5f;
             bool canAdjust = movable > 0;
             int chosen = 0;
             if (InputController != null)
@@ -6126,11 +6289,11 @@ namespace NexusGame
                 GUI.color = prevCol;
             }
 
-            var minusR = new Rect(rowX, counterY, qtyBtnSz, counterH);
+            var minusR = new Rect(rowX, qtyBtnY, qtyBtnSz, qtyBtnH);
             DrawQtyBtn(minusR, _moveStackMinusButtonTex, "-", () => InputController.AdjustMoveSelection(unitType, -1));
             GUI.Label(new Rect(minusR.xMax + BottomHudS(2f), counterY, countW, counterH), chosen + "/" + movable,
                 countStyle);
-            var plusR = new Rect(minusR.xMax + BottomHudS(2f) + countW, counterY, qtyBtnSz, counterH);
+            var plusR = new Rect(minusR.xMax + BottomHudS(2f) + countW, qtyBtnY, qtyBtnSz, qtyBtnH);
             DrawQtyBtn(plusR, _moveStackPlusButtonTex, "+", () => InputController.AdjustMoveSelection(unitType, +1));
         }
 
@@ -6644,6 +6807,7 @@ namespace NexusGame
             float w = Mathf.Min(HudS(640f), Screen.width - HudS(40f));
             float h = Mathf.Min(HudS(520f), Screen.height - HudS(40f));
             var panel = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
+            DrawModalPerimeterClickBlockers(panel);
             var boxStyle = new GUIStyle(GUI.skin.box)
             {
                 fontSize = Mathf.Max(16, Mathf.RoundToInt(20f * s)),

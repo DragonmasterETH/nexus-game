@@ -35,7 +35,8 @@ namespace NexusGame
             go.transform.localScale = new Vector3(planeExtent, planeExtent, 1f);
 
             var rend = go.GetComponent<MeshRenderer>();
-            var mat = CreateUnlitMaterial(img, uvCenterFit: 0.26f);
+            float uvFit = ResolveUvCenterFit(Camera.main, planeExtent);
+            var mat = CreateUnlitMaterial(img, uvCenterFit: uvFit);
             if (mat == null)
             {
                 Object.Destroy(go);
@@ -47,9 +48,35 @@ namespace NexusGame
             rend.receiveShadows = false;
         }
 
+        /// <summary>
+        /// Maps the full background art onto a world-sized patch that roughly matches the camera’s ground footprint
+        /// so portrait phones see the starscape instead of a tight crop on the planet center.
+        /// </summary>
+        static float ResolveUvCenterFit(Camera cam, float planeExtent)
+        {
+            const float fallback = 0.12f;
+            if (cam == null || planeExtent < 1f)
+                return fallback;
+
+            float height = Mathf.Max(0.5f, cam.transform.position.y);
+            float aspect = (float)Screen.width / Mathf.Max(1, Screen.height);
+            float vFovRad = cam.fieldOfView * Mathf.Deg2Rad;
+            float hFovRad = 2f * Mathf.Atan(Mathf.Tan(vFovRad * 0.5f) * aspect);
+            float visibleGroundWidth = height * Mathf.Tan(hFovRad * 0.5f) * 2f;
+
+            // Slightly wider than the view so the full illustration (stars + planet) fits inside the frame.
+            float fit = visibleGroundWidth * 1.18f / planeExtent;
+
+            // Portrait phones need extra pull-back; wide screens can show a bit more detail.
+            if (aspect < 0.72f)
+                fit *= 0.82f;
+
+            return Mathf.Clamp(fit, 0.045f, 0.38f);
+        }
+
         /// <param name="uvCenterFit">
         /// Fraction of the quad (0–1) used for the full image on each axis, centered (letterbox).
-        /// Smaller = more “zoomed out” (whole art smaller on screen, more empty margin on the quad).
+        /// Smaller = more “zoomed out” (whole art smaller on the ground patch, wider starscape visible).
         /// </param>
         static Material CreateUnlitMaterial(NexusGuiImage img, float uvCenterFit)
         {

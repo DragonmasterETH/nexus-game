@@ -203,6 +203,16 @@ namespace NexusGame
                 "Sprites/Tile_Info_Screen");
         }
 
+        /// <summary>Strip under tile name / owner on the TILE INFO modal (<c>tile info banner.png</c>).</summary>
+        public static NexusGuiImage LoadTileInfoNameBanner()
+        {
+            return Load(
+                "Sprites/tile info banner",
+                "Sprites/Tile info banner",
+                "Sprites/TileInfoBanner",
+                "Sprites/UI/tile info banner");
+        }
+
         /// <summary>Battle overlay panel frame (<c>Battle Screen.png</c> under Resources).</summary>
         public static NexusGuiImage LoadBattleScreenBackground()
         {

@@ -11,9 +11,11 @@ namespace NexusGame
         public const float ImGuiReferenceWidth = 900f;
         public const float ImGuiReferenceHeight = 1300f;
         /// <summary>Global IMGUI text size vs design pixels (menus, HUD, tile modals, battle overlay).</summary>
-        const float GlobalImGuiFontFactor = 1.08f;
+        const float GlobalImGuiFontFactor = 1.18f;
         /// <summary>Raises minimum/maximum font clamps so small phones don't pin everything at tiny mins.</summary>
-        const float ImGuiFontClampMultiplier = 1.12f;
+        const float ImGuiFontClampMultiplier = 1.22f;
+        /// <summary>Extra legibility bump for HUD labels and menu copy (on top of canvas scale).</summary>
+        public const float LegibilityBoost = 1.24f;
         /// <summary>Soft clamp only — keeps extreme DPI / simulator sizes sane without pinning phones and tablets to one size.</summary>
         const float ImGuiFontScaleMin = 0.28f;
         const float ImGuiFontScaleMax = 2.55f;
@@ -123,7 +125,7 @@ namespace NexusGame
         public static float TileInfoDeviceTextMultiplier()
         {
             float shortSide = Mathf.Min(Screen.width, Screen.height);
-            return Mathf.Lerp(0.9f, 1.04f, Mathf.InverseLerp(720f, 1600f, shortSide));
+            return Mathf.Lerp(0.96f, 1.12f, Mathf.InverseLerp(720f, 1600f, shortSide));
         }
 
         /// <summary>
@@ -133,7 +135,7 @@ namespace NexusGame
         {
             float shortSide = Mathf.Min(Screen.width, Screen.height);
             // Stronger range than the legacy multiplier so fixed min-font clamps are less likely to pin all text.
-            return Mathf.Lerp(0.76f, 1.36f, Mathf.InverseLerp(640f, 2160f, shortSide));
+            return Mathf.Lerp(0.84f, 1.48f, Mathf.InverseLerp(640f, 2160f, shortSide));
         }
 
         public static int TileInfoScaledFont(float designSize, float panelScale, int minSize)
@@ -256,7 +258,7 @@ namespace NexusGame
         /// </summary>
         public static float ImGuiHudScale()
         {
-            return ImGuiCanvasScale();
+            return ImGuiCanvasScale() * HudReadabilityScaleFloor() * LegibilityBoost;
         }
 
         /// <summary>
@@ -268,7 +270,8 @@ namespace NexusGame
             float canvasW = Mathf.Max(1f, GetImGuiCanvasRect().width);
             float widthRatio = Mathf.Clamp(Screen.width / canvasW, 1f, 2.4f);
             float widthBoost = Mathf.Lerp(1f, widthRatio, 0.35f);
-            float raw = ImGuiCanvasScale() * TileInfoDeviceTextMultiplier() * DeviceAdaptiveTextScale() * GlobalImGuiFontFactor * widthBoost;
+            float raw = ImGuiCanvasScale() * HudReadabilityScaleFloor() * TileInfoDeviceTextMultiplier() *
+                        DeviceAdaptiveTextScale() * GlobalImGuiFontFactor * LegibilityBoost * widthBoost;
             return Mathf.Clamp(raw, ImGuiFontScaleMin, ImGuiFontScaleMax);
         }
 
