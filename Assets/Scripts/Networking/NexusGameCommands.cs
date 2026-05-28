@@ -4,11 +4,12 @@ namespace NexusGame
 {
     /// <summary>
     /// Player intents for host-authoritative play. Local paths call <see cref="GameController"/> directly;
-    /// online clients will send RPCs here once NGO + Relay are wired.
+    /// online clients send RPCs through <see cref="NexusOnlineBridge"/>.
     /// </summary>
     public static class NexusGameCommands
     {
         public static GameController Game { get; set; }
+        public static NexusOnlineBridge Bridge { get; set; }
 
         public static void RequestEndTurn()
         {
@@ -19,7 +20,13 @@ namespace NexusGame
 
             if (NexusSession.IsOnline && !NexusSession.IsHost)
             {
-                Debug.Log("[Net] RequestEndTurn — will send to host when Relay/NGO is connected.");
+                if (Bridge != null && Bridge.IsSpawned)
+                {
+                    Bridge.RequestEndTurnServerRpc(NexusSession.LocalPlayerIndex);
+                    return;
+                }
+
+                Debug.LogWarning("[Net] RequestEndTurn — online bridge not connected yet.");
                 return;
             }
 

@@ -4,18 +4,18 @@ using UnityEngine;
 namespace NexusGame
 {
     /// <summary>
-    /// Bemora for IMGUI: loads the same source <see cref="Font"/> as <c>Resources/Fonts/Bemora SDF</c> (TMP cannot draw in IMGUI).
+    /// Seabox for IMGUI: loads the same source <see cref="Font"/> as <c>Resources/Fonts/Seabox. SDF</c> (TMP cannot draw in IMGUI).
     /// </summary>
     public static class NexusUiFonts
     {
-        public const string TmpFontResourcePath = "Fonts/Bemora SDF";
-        public const string LegacyFontResourcePath = "Fonts/Bemora";
+        public const string TmpFontResourcePath = "Fonts/Seabox. SDF";
+        public const string LegacyFontResourcePath = "Fonts/Seabox.";
 
         static Font _imguiFont;
         static bool _imguiFontTried;
         static bool _skinApplied;
 
-        /// <summary>Underlying TrueType font paired with the project's TMP Bemora SDF asset.</summary>
+        /// <summary>Underlying TrueType font paired with the project's TMP Seabox SDF asset.</summary>
         public static Font ImguiFont()
         {
             if (!_imguiFontTried)
@@ -25,8 +25,7 @@ namespace NexusGame
                 if (tmp != null && tmp.sourceFontFile != null)
                     _imguiFont = tmp.sourceFontFile;
                 if (_imguiFont == null)
-                    _imguiFont = Resources.Load<Font>(LegacyFontResourcePath)
-                                 ?? Resources.Load<Font>("Fonts/Bemora-Regular");
+                    _imguiFont = Resources.Load<Font>(LegacyFontResourcePath);
             }
 
             return _imguiFont;
@@ -40,7 +39,7 @@ namespace NexusGame
             style.font = f;
         }
 
-        /// <summary>Call once per IMGUI frame before drawing so labels, buttons, boxes, and fields use Bemora (including digits).</summary>
+        /// <summary>Call once per IMGUI frame before drawing so labels, buttons, boxes, and fields use Seabox (including digits).</summary>
         public static void EnsureImGuiSkinFonts()
         {
             Font f = ImguiFont();

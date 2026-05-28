@@ -167,8 +167,9 @@ PlayerSettings:
   androidMaxAspectRatio: 2.1
   androidMinAspectRatio: 1
   applicationIdentifier:
-    Android: com.clankergames.nexusops
+    Android: com.clankergames.nexus
     Standalone: com.DefaultCompany.2DProject
+    iPhone: com.clankergames.nexus
   buildNumber:
     Standalone: 0
     VisionOS: 0
@@ -924,11 +925,11 @@ PlayerSettings:
   captureStartupLogs: {}
   activeInputHandler: 0
   windowsGamepadBackendHint: 0
-  cloudProjectId: 
+  cloudProjectId: 9c72d227-03ff-433d-96d0-56d6fea721a6
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: 
-  organizationId: 
+  projectName: Nexus Game
+  organizationId: unity_f0f367b51cc33c81798f
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}

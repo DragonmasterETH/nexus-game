@@ -9,6 +9,12 @@ namespace NexusGame
     {
         const string GoName = "BoardBackground";
 
+        public enum Presentation
+        {
+            Game,
+            Menu
+        }
+
         public static void Remove()
         {
             var existing = GameObject.Find(GoName);
@@ -16,7 +22,7 @@ namespace NexusGame
                 Object.Destroy(existing);
         }
 
-        public static void EnsureLoaded()
+        public static void EnsureLoaded(Presentation presentation = Presentation.Game)
         {
             Remove();
 
@@ -35,7 +41,9 @@ namespace NexusGame
             go.transform.localScale = new Vector3(planeExtent, planeExtent, 1f);
 
             var rend = go.GetComponent<MeshRenderer>();
-            float uvFit = ResolveUvCenterFit(Camera.main, planeExtent);
+            float uvFit = presentation == Presentation.Menu
+                ? ResolveUvCenterFitForMenu(Camera.main, planeExtent)
+                : ResolveUvCenterFit(Camera.main, planeExtent);
             var mat = CreateUnlitMaterial(img, uvCenterFit: uvFit);
             if (mat == null)
             {
@@ -72,6 +80,13 @@ namespace NexusGame
                 fit *= 0.82f;
 
             return Mathf.Clamp(fit, 0.045f, 0.38f);
+        }
+
+        /// <summary>Menus use a slightly wider framing so the starscape matches the main-menu camera height.</summary>
+        static float ResolveUvCenterFitForMenu(Camera cam, float planeExtent)
+        {
+            float fit = ResolveUvCenterFit(cam, planeExtent);
+            return Mathf.Clamp(fit * 0.9f, 0.045f, 0.38f);
         }
 
         /// <param name="uvCenterFit">

@@ -3,7 +3,7 @@ using UnityEngine.SceneManagement;
 
 namespace NexusGame
 {
-    public class Bootstrap : MonoBehaviour
+    public partial class Bootstrap : MonoBehaviour
     {
         enum UiState
         {
@@ -29,10 +29,14 @@ namespace NexusGame
         int _rulebookTab; // 0 = rules, 1 = units
 
         GUIStyle _menuButtonStyle;
+        GUIStyle _menuPanelStyle;
+        Texture2D _menuDimTexture;
         string _joinRoomCodeInput = "";
 
         /// <summary>Design pixels × layout scale; menus use an extra tap-target bump on top of <see cref="GameUiScale.ImGuiHudScale"/>.</summary>
         const float MenuLayoutMul = 1.22f;
+        const float MenuCameraHeight = 16f;
+        const float GameCameraHeight = 12f;
 
         static float MenuS(float designPixels) =>
             Mathf.Max(1f, designPixels * GameUiScale.ImGuiHudScale() * MenuLayoutMul);
@@ -42,6 +46,84 @@ namespace NexusGame
             ApplyPortraitForMobile();
             EnsureCamera();
             EnsureLight();
+            NexusUgsRunner.EnsureExists();
+            _ = NexusUgsAuth.EnsureServicesInitializedAsync();
+            NexusOnlineBridge.MatchStartRequested += OnNetworkMatchStartRequested;
+            BoardMapPreview.ClearCache();
+            EnsureMenuPresentation();
+        }
+
+        static bool IsMenuUiState(UiState state) => state != UiState.InGame;
+
+        void EnsureMenuPresentation()
+        {
+            var mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                mainCam.transform.SetPositionAndRotation(
+                    new Vector3(0f, MenuCameraHeight, 0f),
+                    Quaternion.Euler(90f, 0f, 0f));
+            }
+
+            var boardCam = FindObjectOfType<BoardCameraPanZoom>();
+            if (boardCam != null)
+                boardCam.enabled = false;
+
+            BoardBackground.EnsureLoaded(BoardBackground.Presentation.Menu);
+        }
+
+        void EnsureGamePresentation()
+        {
+            var boardCam = FindObjectOfType<BoardCameraPanZoom>();
+            if (boardCam != null)
+                boardCam.enabled = true;
+
+            var mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                var p = mainCam.transform.position;
+                if (p.y < GameCameraHeight * 0.5f)
+                    mainCam.transform.position = new Vector3(p.x, GameCameraHeight, p.z);
+            }
+        }
+
+        static Texture2D CreateMenuTintTexture(Color color)
+        {
+            var tex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            tex.SetPixel(0, 0, color);
+            tex.Apply();
+            tex.wrapMode = TextureWrapMode.Clamp;
+            return tex;
+        }
+
+        void EnsureMenuPanelStyle()
+        {
+            if (_menuPanelStyle != null)
+                return;
+
+            _menuPanelStyle = new GUIStyle(GUI.skin.box);
+            var panelBg = CreateMenuTintTexture(new Color(0.06f, 0.07f, 0.12f, 0.9f));
+            _menuPanelStyle.normal.background = panelBg;
+            _menuPanelStyle.border = new RectOffset(12, 12, 12, 12);
+            _menuPanelStyle.padding = new RectOffset(8, 8, 8, 8);
+        }
+
+        void DrawMenuBackdrop()
+        {
+            if (_menuDimTexture == null)
+                _menuDimTexture = CreateMenuTintTexture(new Color(0f, 0f, 0f, 0.28f));
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), _menuDimTexture);
+        }
+
+        void DrawMenuPanel(Rect rect)
+        {
+            EnsureMenuPanelStyle();
+            GUI.Box(rect, GUIContent.none, _menuPanelStyle);
+        }
+
+        void OnDestroy()
+        {
+            NexusOnlineBridge.MatchStartRequested -= OnNetworkMatchStartRequested;
         }
 
         /// <summary>Lock handheld builds to portrait (Project Settings also default to portrait).</summary>
@@ -148,8 +230,8 @@ namespace NexusGame
             }
 
             bool online = NexusSession.IsOnline;
-            // VS AI / AI test / online always uses the 1v1 board (two seats).
-            board.LayoutMode = _vsAi || _aiVsAi || online ? BoardLayoutMode.OneVOne : _selectedLayout;
+            // Online and AI-vs-AI still use the standard 1v1 board until multiplayer supports more layouts.
+            board.LayoutMode = online || _aiVsAi ? BoardLayoutMode.OneVOne : _selectedLayout;
             board.Regenerate();
 
             var game = FindObjectOfType<GameController>();
@@ -244,13 +326,36 @@ namespace NexusGame
             ai.Input = input;
             ai.enabled = (_vsAi || _aiVsAi) && !online;
 
-            BoardBackground.EnsureLoaded();
+            EnsureGamePresentation();
+            BoardBackground.EnsureLoaded(BoardBackground.Presentation.Game);
         }
 
         void StartOnlineMatch()
         {
-            int localSeat = NexusLobbyService.IsHost ? 0 : 1;
-            NexusSession.ConfigureOnline(localSeat, NexusLobbyService.IsHost, NexusLobbyService.JoinCode);
+            if (NexusLobbyService.IsBusy)
+                return;
+
+            if (NexusLobbyService.UseLiveServices)
+            {
+                NexusLobbyService.BeginMatchConnection(
+                    () => EnterOnlineMatch(NexusLobbyService.IsHost ? 0 : 1, NexusLobbyService.IsHost),
+                    msg => Debug.LogWarning($"[Lobby] Match start failed: {msg}"));
+                return;
+            }
+
+            EnterOnlineMatch(NexusLobbyService.IsHost ? 0 : 1, NexusLobbyService.IsHost);
+        }
+
+        void OnNetworkMatchStartRequested()
+        {
+            if (_state == UiState.InGame)
+                return;
+            EnterOnlineMatch(1, false);
+        }
+
+        void EnterOnlineMatch(int localSeat, bool isHost)
+        {
+            NexusSession.ConfigureOnline(localSeat, isHost, NexusLobbyService.JoinCode);
             _debugMode = false;
             _vsAi = false;
             _aiVsAi = false;
@@ -262,6 +367,13 @@ namespace NexusGame
         void OnGUI()
         {
             NexusUiFonts.EnsureImGuiSkinFonts();
+
+            if (IsMenuUiState(_state))
+            {
+                if (GameObject.Find("BoardBackground") == null)
+                    EnsureMenuPresentation();
+                DrawMenuBackdrop();
+            }
 
             switch (_state)
             {
@@ -289,122 +401,23 @@ namespace NexusGame
             }
         }
 
-        void DrawMainMenu()
-        {
-            var btnStyle = MenuButtonStyle();
-            float padX = MenuS(22f);
-            float bw = Mathf.Min(MenuS(500f), Screen.width - padX * 2f);
-            float titleH = MenuS(52f);
-            float btnH = MenuS(74f);
-            float btnGap = MenuS(14f);
-            float footerH = MenuS(28f);
-            const int nBtn = 7;
-            float h = titleH + nBtn * (btnH + btnGap) + footerH + MenuS(20f);
-            h = Mathf.Min(h, Screen.height - MenuS(24f));
-            var rect = new Rect((Screen.width - bw) / 2f, Mathf.Max(MenuS(12f), (Screen.height - h) / 2f), bw, h);
-            GUI.Box(rect, "");
-
-            var titleStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter
-            };
-            titleStyle.fontSize = GameUiScale.ComputeBestFitFontSize(titleStyle, "Nexus Ops", rect.width - MenuS(16f),
-                titleH - MenuS(4f), 18, GameUiScale.ImGuiScaledFont(32f, 26, 64), false);
-            GUI.Label(new Rect(rect.x, rect.y + MenuS(8f), rect.width, titleH), "Nexus Ops", titleStyle);
-
-            float y = rect.y + titleH + MenuS(10f);
-            float x = rect.x + padX;
-            float innerW = bw - padX * 2f;
-
-            FitSharedMenuButtonFont(btnStyle, innerW, btnH, 15, GameUiScale.ImGuiScaledFont(28f, 22, 60), "Play",
-                "Play vs AI", "AI vs AI (test)", "Multiplayer", "Settings", "How to Play", "Debug");
-
-            if (GUI.Button(new Rect(x, y, innerW, btnH), "Play", btnStyle))
-            {
-                _debugMode = false;
-                _vsAi = false;
-                _aiVsAi = false;
-                NexusSession.ConfigureLocalHotseat();
-                _state = UiState.MapSelect;
-            }
-
-            y += btnH + btnGap;
-
-            if (GUI.Button(new Rect(x, y, innerW, btnH), "Play vs AI", btnStyle))
-            {
-                _debugMode = false;
-                _vsAi = true;
-                _aiVsAi = false;
-                NexusSession.ConfigureVsAi();
-                _state = UiState.MapSelect;
-            }
-
-            y += btnH + btnGap;
-
-            if (GUI.Button(new Rect(x, y, innerW, btnH), "AI vs AI (test)", btnStyle))
-            {
-                _debugMode = false;
-                _vsAi = false;
-                _aiVsAi = true;
-                NexusSession.ConfigureAiVsAi();
-                _state = UiState.MapSelect;
-            }
-
-            y += btnH + btnGap;
-
-            if (GUI.Button(new Rect(x, y, innerW, btnH), "Multiplayer", btnStyle))
-            {
-                NexusSession.Reset();
-                NexusLobbyService.Leave();
-                _joinRoomCodeInput = "";
-                _state = UiState.MultiplayerHub;
-            }
-
-            y += btnH + btnGap;
-
-            if (GUI.Button(new Rect(x, y, innerW, btnH), "Settings", btnStyle))
-                Debug.Log("Settings: placeholder option.");
-
-            y += btnH + btnGap;
-
-            if (GUI.Button(new Rect(x, y, innerW, btnH), "How to Play", btnStyle))
-            {
-                _rulebookScroll = Vector2.zero;
-                _rulebookTab = 0;
-                _state = UiState.Rulebook;
-            }
-
-            y += btnH + btnGap;
-
-            if (GUI.Button(new Rect(x, y, innerW, btnH), "Debug", btnStyle))
-            {
-                _debugMode = true;
-                _vsAi = false;
-                _aiVsAi = false;
-                NexusSession.ConfigureLocalHotseat();
-                _state = UiState.MapSelect;
-            }
-
-            float footerY = rect.yMax - footerH - MenuS(10f);
-            var creditStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
-            creditStyle.fontSize = GameUiScale.ComputeBestFitFontSize(creditStyle, "Made by Clanker Games Inc",
-                rect.width - MenuS(16f), footerH, 10, GameUiScale.ImGuiScaledFont(14f, 12, 26), true);
-            GUI.Label(new Rect(rect.x + MenuS(8f), footerY, rect.width - MenuS(16f), footerH),
-                "Made by Clanker Games Inc", creditStyle);
-        }
-
         void DrawMapSelect()
         {
             var btnStyle = MenuButtonStyle();
             float padX = MenuS(18f);
             float w = Mathf.Min(MenuS(460f), Screen.width - MenuS(20f));
-            float x0 = (Screen.width - w) / 2f;
-            float y = MenuS(18f);
             float btnH = MenuS(68f);
             float gap = MenuS(14f);
-            float x = x0 + padX;
-            float bw = w - padX * 2f;
+            float previewCap = Mathf.Clamp(Screen.height * 0.22f, MenuS(100f), MenuS(180f));
+            float panelH = Mathf.Min(Screen.height - MenuS(20f), Screen.height * 0.92f);
+            float x0 = (Screen.width - w) / 2f;
+            float y0 = Mathf.Max(MenuS(10f), (Screen.height - panelH) * 0.5f);
+            var panel = new Rect(x0, y0, w, panelH);
+            DrawMenuPanel(panel);
+
+            float x = panel.x + padX;
+            float bw = panel.width - padX * 2f;
+            float y = panel.y + MenuS(10f);
 
             var hdr = new GUIStyle(GUI.skin.label)
             {
@@ -413,7 +426,7 @@ namespace NexusGame
             };
             hdr.fontSize = GameUiScale.ComputeBestFitFontSize(hdr, "Select Map", w - MenuS(8f), MenuS(40f) - MenuS(4f),
                 18, GameUiScale.ImGuiScaledFont(28f, 22, 52), false);
-            GUI.Label(new Rect(x0, y, w, MenuS(40f)), "Select Map", hdr);
+            GUI.Label(new Rect(panel.x, y, panel.width, MenuS(40f)), "Select Map", hdr);
             y += MenuS(44f);
 
             FitSharedMenuButtonFont(btnStyle, bw, btnH, 14, GameUiScale.ImGuiScaledFont(27f, 20, 56), "1v1 Map (Current Board)",
@@ -443,7 +456,6 @@ namespace NexusGame
             GUI.Label(new Rect(x, y, bw, MenuS(28f)), "2–4 Player Maps:", subHdr);
             y += MenuS(30f);
 
-            float previewCap = Mathf.Clamp(Screen.height * 0.28f, MenuS(100f), MenuS(200f));
             if (TwoToFourPlayerMapPreview != null)
             {
                 GUI.DrawTexture(new Rect(x, y, bw, previewCap), TwoToFourPlayerMapPreview, ScaleMode.ScaleToFit);
@@ -475,7 +487,6 @@ namespace NexusGame
 
             if (GUI.Button(new Rect(x, y, bw, btnH), "Back", btnStyle))
             {
-                BoardBackground.Remove();
                 NexusSession.Reset();
                 _state = UiState.MainMenu;
             }
@@ -486,12 +497,25 @@ namespace NexusGame
             var btnStyle = MenuButtonStyle();
             float padX = MenuS(18f);
             float w = Mathf.Min(MenuS(460f), Screen.width - MenuS(20f));
-            float x0 = (Screen.width - w) / 2f;
-            float y = MenuS(18f);
             float btnH = MenuS(68f);
             float gap = MenuS(14f);
-            float x = x0 + padX;
-            float bw = w - padX * 2f;
+            float innerW = w - padX * 2f;
+
+            var sub = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, wordWrap = true };
+            sub.fontSize = GameUiScale.ImGuiScaledFont(14f, 11, 28);
+            string ugsLine = NexusUgsAuth.MultiplayerStatusLine();
+            string subText = ugsLine + "\nLive rooms need UGS + " + NexusPlatformSignIn.PlatformLabel + " when shipping.";
+            float subH = sub.CalcHeight(new GUIContent(subText), innerW);
+            float panelH = MenuS(56f) + subH + 4f * (btnH + gap) + MenuS(16f);
+            panelH = Mathf.Min(panelH, Screen.height - MenuS(24f));
+            float x0 = (Screen.width - w) / 2f;
+            float y0 = Mathf.Max(MenuS(12f), (Screen.height - panelH) * 0.5f);
+            var panel = new Rect(x0, y0, w, panelH);
+            DrawMenuPanel(panel);
+
+            float x = panel.x + padX;
+            float bw = innerW;
+            float y = panel.y + MenuS(12f);
 
             var hdr = new GUIStyle(GUI.skin.label)
             {
@@ -500,15 +524,13 @@ namespace NexusGame
             };
             hdr.fontSize = GameUiScale.ComputeBestFitFontSize(hdr, "Multiplayer", w - MenuS(8f), MenuS(40f) - MenuS(4f),
                 18, GameUiScale.ImGuiScaledFont(28f, 22, 52), false);
-            GUI.Label(new Rect(x0, y, w, MenuS(40f)), "Multiplayer", hdr);
+            GUI.Label(new Rect(panel.x, y, panel.width, MenuS(40f)), "Multiplayer", hdr);
             y += MenuS(44f);
 
-            var sub = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, wordWrap = true };
-            sub.fontSize = GameUiScale.ImGuiScaledFont(14f, 11, 28);
-            string subText = "Room codes and matchmaking use Unity Gaming Services once linked.";
-            float subH = sub.CalcHeight(new GUIContent(subText), bw);
             GUI.Label(new Rect(x, y, bw, subH), subText, sub);
             y += subH + gap;
+
+            GUI.enabled = !NexusLobbyService.IsBusy;
 
             FitSharedMenuButtonFont(btnStyle, bw, btnH, 14, GameUiScale.ImGuiScaledFont(27f, 20, 56),
                 "Create Room", "Join Room", "Find Match", "Back");
@@ -543,6 +565,8 @@ namespace NexusGame
                 NexusSession.Reset();
                 _state = UiState.MainMenu;
             }
+
+            GUI.enabled = true;
         }
 
         void DrawMultiplayerJoin()
@@ -550,12 +574,18 @@ namespace NexusGame
             var btnStyle = MenuButtonStyle();
             float padX = MenuS(18f);
             float w = Mathf.Min(MenuS(460f), Screen.width - MenuS(20f));
-            float x0 = (Screen.width - w) / 2f;
-            float y = MenuS(18f);
             float btnH = MenuS(68f);
             float gap = MenuS(14f);
-            float x = x0 + padX;
-            float bw = w - padX * 2f;
+            float fieldH = MenuS(52f);
+            float panelH = MenuS(48f) + MenuS(32f) + fieldH + 2f * (btnH + gap) + MenuS(56f);
+            float x0 = (Screen.width - w) / 2f;
+            float y0 = Mathf.Max(MenuS(12f), (Screen.height - panelH) * 0.5f);
+            var panel = new Rect(x0, y0, w, panelH);
+            DrawMenuPanel(panel);
+
+            float x = panel.x + padX;
+            float bw = panel.width - padX * 2f;
+            float y = panel.y + MenuS(12f);
 
             var hdr = new GUIStyle(GUI.skin.label)
             {
@@ -564,7 +594,7 @@ namespace NexusGame
             };
             hdr.fontSize = GameUiScale.ComputeBestFitFontSize(hdr, "Join Room", w - MenuS(8f), MenuS(40f) - MenuS(4f),
                 18, GameUiScale.ImGuiScaledFont(28f, 22, 52), false);
-            GUI.Label(new Rect(x0, y, w, MenuS(40f)), "Join Room", hdr);
+            GUI.Label(new Rect(panel.x, y, panel.width, MenuS(40f)), "Join Room", hdr);
             y += MenuS(48f);
 
             var lbl = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
@@ -578,7 +608,6 @@ namespace NexusGame
                 fontStyle = FontStyle.Bold
             };
             fieldStyle.fontSize = GameUiScale.ImGuiScaledFont(22f, 16, 40);
-            float fieldH = MenuS(52f);
             _joinRoomCodeInput = GUI.TextField(new Rect(x, y, bw, fieldH), _joinRoomCodeInput, 8, fieldStyle)
                 .ToUpperInvariant();
             y += fieldH + gap;
@@ -617,12 +646,17 @@ namespace NexusGame
             var btnStyle = MenuButtonStyle();
             float padX = MenuS(18f);
             float w = Mathf.Min(MenuS(460f), Screen.width - MenuS(20f));
-            float x0 = (Screen.width - w) / 2f;
-            float y = MenuS(18f);
             float btnH = MenuS(66f);
             float gap = MenuS(10f);
-            float x = x0 + padX;
-            float bw = w - padX * 2f;
+            float panelH = Mathf.Min(Screen.height - MenuS(24f), Screen.height * 0.88f);
+            float x0 = (Screen.width - w) / 2f;
+            float y0 = Mathf.Max(MenuS(12f), (Screen.height - panelH) * 0.5f);
+            var panel = new Rect(x0, y0, w, panelH);
+            DrawMenuPanel(panel);
+
+            float x = panel.x + padX;
+            float bw = panel.width - padX * 2f;
+            float y = panel.y + MenuS(12f);
 
             bool searching = NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.Searching;
             string title = searching ? "Finding Match" : "Room";
@@ -633,7 +667,7 @@ namespace NexusGame
             };
             hdr.fontSize = GameUiScale.ComputeBestFitFontSize(hdr, title, w - MenuS(8f), MenuS(40f) - MenuS(4f),
                 16, GameUiScale.ImGuiScaledFont(24f, 18, 44), false);
-            GUI.Label(new Rect(x0, y, w, MenuS(40f)), title, hdr);
+            GUI.Label(new Rect(panel.x, y, panel.width, MenuS(40f)), title, hdr);
             y += MenuS(44f);
 
             var statusStyle = new GUIStyle(GUI.skin.label)
@@ -675,7 +709,8 @@ namespace NexusGame
             FitSharedMenuButtonFont(btnStyle, bw, btnH, 13, GameUiScale.ImGuiScaledFont(24f, 18, 52),
                 "Simulate opponent (dev)", "Simulate match found (dev)", "Start Match", "Leave");
 
-            if (NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.InRoom &&
+            if (!NexusLobbyService.UseLiveServices &&
+                NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.InRoom &&
                 NexusLobbyService.PlayersInRoom < 2)
             {
                 if (GUI.Button(new Rect(x, y, bw, btnH), "Simulate opponent (dev)", btnStyle))
@@ -683,14 +718,14 @@ namespace NexusGame
                 y += btnH + gap;
             }
 
-            if (searching)
+            if (!NexusLobbyService.UseLiveServices && searching)
             {
                 if (GUI.Button(new Rect(x, y, bw, btnH), "Simulate match found (dev)", btnStyle))
                     NexusLobbyService.SimulateMatchFound();
                 y += btnH + gap;
             }
 
-            bool canStart = NexusLobbyService.IsReadyToStart && NexusLobbyService.IsHost;
+            bool canStart = NexusLobbyService.IsReadyToStart && NexusLobbyService.IsHost && !NexusLobbyService.IsBusy;
             GUI.enabled = canStart;
             if (GUI.Button(new Rect(x, y, bw, btnH), "Start Match", btnStyle))
                 StartOnlineMatch();
@@ -737,7 +772,7 @@ namespace NexusGame
 
             float pad = MenuS(14f);
             var panel = new Rect(pad, pad, Screen.width - 2f * pad, Screen.height - 2f * pad);
-            GUI.Box(panel, "");
+            DrawMenuPanel(panel);
 
             string header = _rulebookTab == 0 ? NexusRulebook.Title : NexusUnitQuickReference.Title;
             var titleStyle = new GUIStyle(GUI.skin.label)
@@ -792,10 +827,7 @@ namespace NexusGame
             if (GUI.Button(
                     new Rect(panel.x + (panel.width - backW) * 0.5f, panel.yMax - backH - MenuS(12f), backW, backH),
                     "Back to menu", backStyle))
-            {
-                BoardBackground.Remove();
                 _state = UiState.MainMenu;
-            }
         }
     }
 }

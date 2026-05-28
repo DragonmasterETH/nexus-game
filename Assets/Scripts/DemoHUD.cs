@@ -3969,7 +3969,7 @@ namespace NexusGame
         }
 
         /// <summary>
-        /// IMGUI cannot render TMP SDF assets; uses the same Bemora <see cref="Font"/> as tile UI (paired with TMP Bemora SDF in Resources).
+        /// IMGUI cannot render TMP SDF assets; uses the same Seabox <see cref="Font"/> as tile UI (paired with TMP Seabox SDF in Resources).
         /// </summary>
         GUIStyle EndTurnAdvanceOverlayLabelStyle()
         {
