@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
@@ -76,8 +77,9 @@ namespace NexusGame
         {
             if (Game != null && Game.IsGameOver)
                 return;
-            if (Game != null && !Game.CanLocalPlayerActNow())
-                return;
+
+            bool canAct = Game == null || Game.CanLocalPlayerActNow();
+
             if (IsBattleOverlayBlockingBoardInput())
             {
                 if (_selectedTile != null)
@@ -123,6 +125,13 @@ namespace NexusGame
                         _pendingTap = false;
 
                     PrepareDragFromPointer(touch.position);
+                    if (!canAct)
+                    {
+                        _dragPrepared = false;
+                        _dragSourceTile = null;
+                        _dragStartUnit = null;
+                    }
+
                     if (_boardCam != null)
                         _boardCam.NotifyTouchBeganOnUnit(_dragPrepared);
                 }
@@ -151,7 +160,8 @@ namespace NexusGame
                 }
                 else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
                 {
-                    if (_dragPrepared &&
+                    if (canAct &&
+                        _dragPrepared &&
                         (_dragging ||
                          Vector2.Distance(touch.position, _pointerDownPos) >= _dragThresholdPixels))
                     {
@@ -159,7 +169,7 @@ namespace NexusGame
                     }
                     else if (_pendingTap)
                     {
-                        HandleTap(_pointerDownPos);
+                        HandleTap(_pointerDownPos, canAct);
                     }
 
                     _pendingTap = false;
@@ -188,6 +198,12 @@ namespace NexusGame
                     _pendingTap = false;
 
                 PrepareDragFromPointer(Input.mousePosition);
+                if (!canAct)
+                {
+                    _dragPrepared = false;
+                    _dragSourceTile = null;
+                    _dragStartUnit = null;
+                }
             }
 
             if (Input.GetMouseButton(0))
@@ -201,13 +217,15 @@ namespace NexusGame
 
             if (Input.GetMouseButtonUp(0))
             {
-                if (_dragPrepared && (_dragging || Vector2.Distance(Input.mousePosition, _pointerDownPos) >= _dragThresholdPixels))
+                if (canAct &&
+                    _dragPrepared &&
+                    (_dragging || Vector2.Distance(Input.mousePosition, _pointerDownPos) >= _dragThresholdPixels))
                 {
                     TryDragMove(Input.mousePosition);
                 }
                 else if (_pendingTap)
                 {
-                    HandleTap(_pointerDownPos);
+                    HandleTap(_pointerDownPos, canAct);
                 }
 
                 _pendingTap = false;
@@ -259,6 +277,8 @@ namespace NexusGame
 
         void TryDragMove(Vector2 screenPos)
         {
+            if (Game == null || !Game.CanLocalPlayerActNow())
+                return;
             if (Hud != null && Hud.IsCenterBuyModalOpen)
                 return;
             if (Hud != null && Hud.ScreenPointOverlapsBuyMenu(screenPos))
@@ -269,30 +289,12 @@ namespace NexusGame
             if (_dragSourceTile == target)
                 return;
 
-            bool moved = false;
-            if (_dragStartUnit != null &&
-                _dragStartUnit.Owner == Game.CurrentPlayer &&
-                !_dragStartUnit.HasMovedThisTurn &&
-                CanUnitMoveTo(_dragStartUnit, target))
+            var selection = new System.Collections.Generic.Dictionary<UnitType, int>
             {
-                var from = _dragStartUnit.Tile;
-                _dragStartUnit.MoveTo(target);
-                target.Owner = _dragStartUnit.Owner;
-                Game.NotifyUnitMoved(_dragStartUnit.Owner, from, target);
-
-                // Reveal exploration only when a unit actually moves onto this hex.
-                if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
-                {
-                    RevealExploration(target);
-                }
-                moved = true;
-            }
-
-            // Fallback: if exact dragged unit path failed, use existing grouped move path.
-            if (!moved)
-                TryMoveGroupTo(target);
-
-            // After moving, focus selection on destination so the existing UI stays in sync.
+                { _dragType, 1 }
+            };
+            var explicitTypes = new System.Collections.Generic.HashSet<UnitType> { _dragType };
+            NexusGameCommands.RequestMoveGroup(_dragSourceTile, target, selection, explicitTypes);
             SetSelectedTile(target);
         }
 
@@ -328,7 +330,7 @@ namespace NexusGame
             return clickedTile;
         }
 
-        void HandleTap(Vector2 screenPos)
+        void HandleTap(Vector2 screenPos, bool canAct)
         {
             if (IsBattleOverlayBlockingBoardInput())
                 return;
@@ -417,7 +419,7 @@ namespace NexusGame
                                (Time.time - _lastTapTime) <= DoubleTapMaxGapSeconds &&
                                Vector2.Distance(screenPos, _lastTapScreenPos) <= DoubleTapMaxMovePixels;
 
-            if (Game != null && Game.CurrentPlayer != null && isDoubleTap)
+            if (canAct && Game != null && Game.CurrentPlayer != null && isDoubleTap)
             {
                 SetSelectedTile(clickedTile);
                 if (Hud != null)
@@ -446,8 +448,8 @@ namespace NexusGame
             // attempt to move the selected group there immediately (single-click confirm).
             if (_selectedTile != null && clickedTile != _selectedTile)
             {
-                TryMoveGroupTo(clickedTile);
-                // After moving, focus selection on the destination so the popup reflects new contents.
+                if (canAct)
+                    TryMoveGroupTo(clickedTile);
                 SetSelectedTile(clickedTile);
                 RecordLastTapForDoubleTap(clickedTile, screenPos);
             }
@@ -625,7 +627,7 @@ namespace NexusGame
             Debug.Log(debugMessage);
         }
 
-        void UpdateMineLabel(BoardTile tile)
+        public void UpdateMineLabel(BoardTile tile)
         {
             // Remove label if no bonus.
             if (tile.ExtraMineYield <= 0)
@@ -691,7 +693,6 @@ namespace NexusGame
                 return;
             }
 
-            // If nothing is selected to move, treat this as just changing focus.
             bool anySelected = false;
             foreach (var kvp in _moveSelection)
             {
@@ -701,20 +702,32 @@ namespace NexusGame
                     break;
                 }
             }
+
             if (!anySelected)
             {
                 Debug.Log("MoveGroupTo: no unit types selected to move; treating click as focus change only.");
                 return;
             }
 
+            NexusGameCommands.RequestMoveGroup(_selectedTile, target, _moveSelection, _explicitMoveSelection);
+        }
+
+        public bool TryExecuteMoveGroup(PlayerState actingPlayer, BoardTile from, BoardTile to,
+            System.Collections.Generic.IReadOnlyDictionary<UnitType, int> selection,
+            System.Collections.Generic.IReadOnlyCollection<UnitType> explicitTypes)
+        {
+            if (Game == null || actingPlayer == null || from == null || to == null || selection == null ||
+                explicitTypes == null)
+                return false;
+            if (Game.BattlePhaseBlockingPlay)
+                return false;
+
             bool anyMoved = false;
-            foreach (var kvp in _moveSelection)
+            foreach (var kvp in selection)
             {
                 var type = kvp.Key;
                 int toMove = kvp.Value;
-                if (toMove <= 0)
-                    continue;
-                if (!_explicitMoveSelection.Contains(type))
+                if (toMove <= 0 || !explicitTypes.Contains(type))
                     continue;
 
                 foreach (var unit in Object.FindObjectsOfType<UnitInstance>())
@@ -722,36 +735,28 @@ namespace NexusGame
                     if (toMove <= 0)
                         break;
 
-                    if (unit.Tile == _selectedTile &&
-                        unit.Owner == Game.CurrentPlayer &&
+                    if (unit.Tile == from &&
+                        unit.Owner == actingPlayer &&
                         unit.Definition.Type == type &&
                         !unit.HasMovedThisTurn &&
-                        CanUnitMoveTo(unit, target))
+                        CanUnitMoveTo(unit, to))
                     {
-                        var from = unit.Tile;
-                        unit.MoveTo(target);
-                        target.Owner = unit.Owner;
-                        Game.NotifyUnitMoved(unit.Owner, from, target);
-                        // Reveal exploration only when a unit actually moves onto this hex.
-                        if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
-                        {
-                            RevealExploration(target);
-                        }
+                        var moveFrom = unit.Tile;
+                        unit.MoveTo(to);
+                        to.Owner = unit.Owner;
+                        Game.NotifyUnitMoved(unit.Owner, moveFrom, to);
+                        if (!to.ExplorationRevealed && to.ExplorationReward != ExplorationReward.None)
+                            RevealExploration(to);
                         toMove--;
                         anyMoved = true;
                     }
                 }
-
-                if (toMove > 0)
-                {
-                    Debug.LogWarning($"MoveGroupTo: could not move {toMove} '{type}' units from ({_selectedTile.Q},{_selectedTile.R}) to ({target.Q},{target.R}).");
-                }
             }
 
-            if (!anyMoved)
-            {
-                Debug.LogWarning($"MoveGroupTo: no units actually moved from ({_selectedTile.Q},{_selectedTile.R}) to ({target.Q},{target.R}).");
-            }
+            if (anyMoved)
+                Game.AfterOnlineHostMutation();
+
+            return anyMoved;
         }
 
         public void AdjustMoveSelection(UnitType type, int delta)
@@ -1139,6 +1144,7 @@ namespace NexusGame
             Game.NotifyUnitMoved(unit.Owner, from, target);
             if (!target.ExplorationRevealed && target.ExplorationReward != ExplorationReward.None)
                 RevealExploration(target);
+            Game.AfterOnlineHostMutation();
             return true;
         }
 

@@ -795,6 +795,7 @@ namespace NexusGame
                 _turnNumber++;
 
             BeginTurn();
+            NotifyOnlineStateChanged();
         }
 
         /// <summary>End current turn: optional Rubium Dragon strikes, then next player.</summary>
@@ -810,6 +811,7 @@ namespace NexusGame
             if (hasContested)
             {
                 BeginBattleArrangement(endingPlayer);
+                NotifyOnlineStateChanged();
                 StartCoroutine(EndTurnAfterBattleThenDragon(endingPlayer));
                 return;
             }
@@ -880,6 +882,8 @@ namespace NexusGame
         public bool CanLocalPlayerActFor(PlayerState p)
         {
             if (p == null || IsGameOver)
+                return false;
+            if (NexusSession.IsOnline && !NexusConnectionMonitor.CanPlay)
                 return false;
             if (IsAiControlled(p))
                 return false;
@@ -976,6 +980,7 @@ namespace NexusGame
             player.DeploymentPurchaseDiscountRubium -= use;
             player.Rubium -= pay;
             SpawnUnit(player, type, homeTile);
+            AfterOnlineHostMutation();
             return true;
         }
 
@@ -1220,10 +1225,11 @@ namespace NexusGame
                     _activeRetreatSourceThisTurn = from;
                 else if (_activeRetreatSourceThisTurn != from)
                     _normalMovementOccurredThisTurn = true;
-                return;
             }
-
-            _normalMovementOccurredThisTurn = true;
+            else
+            {
+                _normalMovementOccurredThisTurn = true;
+            }
         }
 
         bool TileHasEnemyForOwner(BoardTile tile, PlayerState owner)

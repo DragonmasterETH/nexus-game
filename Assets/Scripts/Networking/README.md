@@ -7,7 +7,7 @@
 3. Enable **Authentication** + ID providers (see **[AUTH_SETUP.md](AUTH_SETUP.md)** for Game Center / Play Games).
 4. Enable **Lobby** and **Relay** (via **Multiplayer Services**).
 
-Optional later: **Matchmaker** queues for ranked “Find match”.
+**Find Match (Queue)** — public quick-join session; waits in queue until a second player joins, then the host auto-starts the match.
 
 ## Platform sign-in (production)
 
@@ -48,8 +48,8 @@ Full step-by-step (Apple, Google, Unity dashboard, plugins, defines): **[AUTH_SE
 1. **Main menu → Multiplayer** — initializes UGS; signs in on first room action.
 2. **Create room** — `MultiplayerService.CreateSessionAsync` (lobby only; Relay deferred).
 3. **Join room** — `JoinSessionByCodeAsync`.
-4. **Find match** — `MatchmakeSessionAsync` (quick join).
-5. **Start match (host)** — `StartRelayNetworkAsync`, spawn bridge, client enters via RPC.
+4. **Find match (queue)** — `MatchmakeSessionAsync` (quick join); lobby stays in **Matchmaking Queue** until 2/2 players, then host auto-starts.
+5. **Start match (host)** — `StartRelayNetworkAsync`, spawn bridge, client enters via RPC (manual start still works for private rooms).
 6. **End turn (client)** — `RequestEndTurnServerRpc` → host runs `GameController.EndTurn()`.
 
 If sign-in or UGS init fails, the menu falls back to **stub rooms** with dev simulate buttons.

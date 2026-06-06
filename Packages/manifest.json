@@ -9,6 +9,7 @@
     "com.unity.multiplayer.center": "1.0.1",
     "com.unity.netcode.gameobjects": "2.11.2",
     "com.unity.services.multiplayer": "2.2.2",
+    "com.unity.services.authentication": "3.6.0",
     "com.unity.test-framework": "1.6.0",
     "com.unity.textmeshpro": "3.2.0",
     "com.unity.timeline": "1.8.11",

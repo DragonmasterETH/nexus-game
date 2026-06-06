@@ -515,7 +515,7 @@ namespace NexusGame
 
             // Full-screen battle modal (dim + panel) — block board when it is shown.
             if (Game != null && Game.Players.Count > 0 &&
-                ShouldPaintFullBattleOverlay(Game.CurrentPlayer, out _))
+                ShouldPaintFullBattleOverlay(Game.CurrentPlayer))
                 return true;
 
             return false;
@@ -547,6 +547,7 @@ namespace NexusGame
         int _lastContestedToastPlayerIndex = -1;
         int _lastContestedToastTurnNumber = -1;
         float _contestedToastUntilTime;
+        float _lastEnergizeAutoPassAttemptUnscaled = -999f;
 
         /// <summary>Main gameplay HUD rect — top-anchored (<see cref="GameUiScale.GetMainHudPanelGuiRect"/>). Tile/deploy modal uses <see cref="GameUiScale.GetFullscreenModalStylePanelGuiRect"/>; other menus may use <see cref="GetCenterBuyModalPanelGuiRect"/>.</summary>
         Rect _hudLayoutPanel;
@@ -1356,6 +1357,7 @@ namespace NexusGame
                 _hudFontScale = MainHudFontScale();
                 ApplyMainHudScaledStyles();
                 DrawEndGameOverlay(Game.FinalSnapshot);
+                DrawOnlineConnectionBanner();
                 return;
             }
 
@@ -1599,13 +1601,12 @@ namespace NexusGame
             var dragonPhase = Game.DragonPhase;
             bool dragonSkipButton = dragonPhase != null && Game.CanLocalPlayerActFor(dragonPhase.Player) &&
                 dragonPhase.PendingHit == null;
-            bool blockEndTurn = Game.BattlePhaseBlockingPlay || !Game.CanLocalPlayerActFor(player) || handPileModalOpen;
+            bool blockEndTurn = Game.BattlePhaseBlockingPlay || !Game.CanLocalPlayerActNow() || handPileModalOpen;
             if (dragonPhase != null && !dragonSkipButton)
                 blockEndTurn = true;
 
             bool canOpenHexDetailModal = InputController != null && InputController.SelectedTile != null;
-            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || !Game.CanLocalPlayerActFor(player) ||
-                handPileModalOpen)
+            if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null || handPileModalOpen)
                 canOpenHexDetailModal = false;
 
             if (_showCenterBuyModal && !canOpenHexDetailModal)
@@ -1648,6 +1649,96 @@ namespace NexusGame
             if (dpEnd != null && dpEnd.PendingHit != null && dpEnd.PendingEnemies != null &&
                 !Game.IsAiControlled(dpEnd.Player))
                 DrawCasualtySelectionModalDragon(dpEnd);
+
+            DrawOnlineConnectionBanner();
+        }
+
+        void DrawOnlineConnectionBanner()
+        {
+            if (!NexusSession.IsOnline || !NexusConnectionMonitor.IsMonitoringMatch)
+                return;
+
+            var phase = NexusConnectionMonitor.Phase;
+            if (phase == NexusConnectionMonitor.ConnectionPhase.Connected)
+                return;
+
+            float s = MainHudUiScale();
+            string message = NexusConnectionMonitor.StatusMessage;
+            if (string.IsNullOrEmpty(message))
+            {
+                message = phase switch
+                {
+                    NexusConnectionMonitor.ConnectionPhase.Reconnecting => "Reconnecting…",
+                    NexusConnectionMonitor.ConnectionPhase.OpponentDisconnected =>
+                        "Opponent disconnected. Waiting for them to reconnect…",
+                    NexusConnectionMonitor.ConnectionPhase.RoomClosed => "The room was closed.",
+                    _ => "Connection lost."
+                };
+            }
+
+            var dim = new Color(0f, 0f, 0f, 0.72f);
+            Color prev = GUI.color;
+            GUI.color = dim;
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture,
+                ScaleMode.StretchToFill);
+            GUI.color = prev;
+
+            float panelW = Mathf.Min(Screen.width * 0.88f, HudS(520f));
+            float panelH = HudS(220f);
+            var panel = new Rect((Screen.width - panelW) * 0.5f, (Screen.height - panelH) * 0.38f, panelW, panelH);
+            GUI.Box(panel, GUIContent.none);
+
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Max(18, Mathf.RoundToInt(24f * s)),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.UpperCenter,
+                wordWrap = true
+            };
+            ApplyTileInfoFont(titleStyle);
+
+            var bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Max(14, Mathf.RoundToInt(18f * s)),
+                alignment = TextAnchor.UpperCenter,
+                wordWrap = true
+            };
+            ApplyTileInfoFont(bodyStyle);
+
+            string title = phase switch
+            {
+                NexusConnectionMonitor.ConnectionPhase.Reconnecting => "Reconnecting",
+                NexusConnectionMonitor.ConnectionPhase.OpponentDisconnected => "Player Disconnected",
+                NexusConnectionMonitor.ConnectionPhase.RoomClosed => "Room Closed",
+                _ => "Connection Lost"
+            };
+
+            float y = panel.y + HudS(16f);
+            GUI.Label(new Rect(panel.x + HudS(16f), y, panel.width - HudS(32f), HudS(36f)), title, titleStyle);
+            y += HudS(40f);
+            GUI.Label(new Rect(panel.x + HudS(16f), y, panel.width - HudS(32f), HudS(72f)), message, bodyStyle);
+
+            float btnW = (panel.width - HudS(40f)) * 0.5f;
+            float btnH = HudS(44f);
+            y = panel.yMax - btnH - HudS(16f);
+            var btnStyle = new GUIStyle(GUI.skin.button) { fontSize = Mathf.Max(14, Mathf.RoundToInt(18f * s)) };
+            ApplyTileInfoFont(btnStyle);
+
+            bool canRetry = phase == NexusConnectionMonitor.ConnectionPhase.Reconnecting ||
+                            phase == NexusConnectionMonitor.ConnectionPhase.Disconnected;
+            if (canRetry)
+            {
+                if (GUI.Button(new Rect(panel.x + HudS(16f), y, btnW, btnH), "RETRY", btnStyle))
+                    NexusConnectionMonitor.ManualRetryReconnect();
+            }
+
+            float leaveX = canRetry ? panel.x + HudS(24f) + btnW : panel.x + (panel.width - btnW) * 0.5f;
+            if (GUI.Button(new Rect(leaveX, y, btnW, btnH), "LEAVE GAME", btnStyle))
+            {
+                var bootstrap = FindObjectOfType<Bootstrap>();
+                if (bootstrap != null)
+                    bootstrap.ReturnToMainMenu();
+            }
         }
 
         void DrawBattleClashIntroOverlay()
@@ -3567,7 +3658,7 @@ namespace NexusGame
             if (Game != null && Game.Players.Count > 0)
             {
                 var player = Game.CurrentPlayer;
-                if (player != null && ShouldPaintFullBattleOverlay(player, out _))
+                if (player != null && ShouldPaintFullBattleOverlay(player))
                     return true;
 
                 var dp = Game.DragonPhase;
@@ -3741,7 +3832,8 @@ namespace NexusGame
         {
             if (Game.IsGameOver)
                 return "End";
-            if (NexusSession.IsOnline && player != null && !Game.CanLocalPlayerActFor(player))
+            if (NexusSession.IsOnline && Game.CurrentPlayer != null &&
+                Game.CurrentPlayer.PlayerIndex != NexusSession.LocalPlayerIndex)
                 return "Opponent";
             if (Game.DragonPhase != null)
                 return "Dragon";
@@ -3750,7 +3842,7 @@ namespace NexusGame
             if (_showCenterBuyModal)
                 return "Deploy";
             // In this implementation, deployment purchases/cards are available during movement window.
-            if (player != null && Game.CanLocalPlayerActFor(player))
+            if (player != null && Game.CanLocalPlayerActNow())
                 return "Move";
             return "Draw";
         }
@@ -4277,12 +4369,13 @@ namespace NexusGame
 
         /// <summary>
         /// Same gating as <see cref="DrawFullBattleOverlays"/> — when true, the full-screen battle modal is painted.
-        /// <paramref name="submitEnergizePass"/> is set when the energize step should auto-pass without showing UI.
         /// </summary>
-        bool ShouldPaintFullBattleOverlay(PlayerState currentPlayer, out bool submitEnergizePass)
+        bool ShouldPaintFullBattleOverlay(PlayerState currentPlayer)
         {
-            submitEnergizePass = false;
             bool active = Game.PendingBattleArrangement ||
+                          Game.BattlePhaseBlockingPlay ||
+                          Game.BattleClashIntroActive ||
+                          Game.HasActiveBattleStep ||
                           Game.EnergizePromptPlayer != null ||
                           Game.FocusFirePicker != null ||
                           Game.CasualtyPick != null ||
@@ -4296,15 +4389,27 @@ namespace NexusGame
             if (actor != null && Game.IsAiControlled(actor))
                 return false;
 
-            if (Game.EnergizePromptPlayer != null &&
-                Game.FocusFirePicker == null &&
-                (Game.EnergizePromptPlayer.BattleEnergize == null || Game.EnergizePromptPlayer.BattleEnergize.Count == 0))
-            {
-                submitEnergizePass = true;
-                return false;
-            }
+            // While battle blocks normal play, always keep the full modal visible (view-only or interactive).
+            if (Game.BattlePhaseBlockingPlay)
+                return true;
 
             return true;
+        }
+
+        void TryAutoPassEmptyEnergizeStep()
+        {
+            if (Game?.EnergizePromptPlayer == null || Game.FocusFirePicker != null)
+                return;
+            if (Game.EnergizePromptPlayer.BattleEnergize != null &&
+                Game.EnergizePromptPlayer.BattleEnergize.Count > 0)
+                return;
+            if (!Game.CanLocalPlayerActFor(Game.EnergizePromptPlayer))
+                return;
+
+            if (Time.unscaledTime - _lastEnergizeAutoPassAttemptUnscaled < 0.35f)
+                return;
+            _lastEnergizeAutoPassAttemptUnscaled = Time.unscaledTime;
+            NexusGameCommands.RequestSubmitEnergizePass();
         }
 
         void DrawFullBattleOverlays(PlayerState currentPlayer)
@@ -4312,12 +4417,10 @@ namespace NexusGame
             if (Game != null)
                 Game.PruneExpiredBattleCasualtyDeathFx(Time.unscaledTime);
 
-            if (!ShouldPaintFullBattleOverlay(currentPlayer, out bool submitEnergizePass))
-            {
-                if (submitEnergizePass)
-                    Game.SubmitEnergizePass();
+            TryAutoPassEmptyEnergizeStep();
+
+            if (!ShouldPaintFullBattleOverlay(currentPlayer))
                 return;
-            }
 
             var panel = GetBattleScreenPanelGuiRect();
             DrawModalPerimeterClickBlockers(panel);
@@ -4387,12 +4490,16 @@ namespace NexusGame
             if (cp?.Owner == null)
                 return;
 
+            bool canAct = Game.CanLocalPlayerActFor(cp.Owner);
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct;
+
             cp.Pool.RemoveAll(u => u == null);
             cp.Selected.RemoveAll(u => u == null || !cp.Pool.Contains(u));
             cp.Required = Mathf.Clamp(cp.Required, 0, cp.Pool.Count);
             if (cp.Required == 0)
             {
-                Game.SubmitCasualtyPick();
+                NexusGameCommands.RequestSubmitCasualtyPick();
                 return;
             }
 
@@ -4474,11 +4581,11 @@ namespace NexusGame
                 cp.Selected.Clear();
             GUILayout.EndHorizontal();
             GUILayout.Space(BattleS(12f));
-            GUI.enabled = cp.Selected.Count == cp.Required;
+            GUI.enabled = canAct && cp.Selected.Count == cp.Required;
             if (GUILayout.Button("CONFIRM", _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true),
                     GUILayout.Height(BattleS(48f))))
-                Game.SubmitCasualtyPick();
-            GUI.enabled = true;
+                NexusGameCommands.RequestSubmitCasualtyPick();
+            GUI.enabled = prevEnabled;
 
             GUILayout.EndVertical();
             GUILayout.EndArea();
@@ -4487,6 +4594,7 @@ namespace NexusGame
         /// <summary>3×2 grid of the six battle order types; same interaction as the former battle-strip casualty cells.</summary>
         void DrawCasualtyOverlaySixTypeGrid(CasualtyPickState cp, BoardTile hex, PlayerState player)
         {
+            bool canAct = player != null && Game.CanLocalPlayerActFor(player);
             float fs = _hudFontScale;
             var dRollOpt = Game.LastBattleUiDiceRoll;
             var counts = new Dictionary<UnitType, int>();
@@ -4597,8 +4705,8 @@ namespace NexusGame
                                 normal = { textColor = selected > 0 ? new Color(0.15f, 0.1f, 0.02f, 1f) : new Color(0.82f, 0.88f, 0.98f, 1f) }
                             });
 
-                        bool canAdd = cp.Selected.Count < cp.Required && selected < n;
-                        bool canSub = selected > 0;
+                        bool canAdd = canAct && cp.Selected.Count < cp.Required && selected < n;
+                        bool canSub = canAct && selected > 0;
                         bool prevEnabled = GUI.enabled;
                         // Tap once to add, tap again to remove one casualty of this type.
                         GUI.enabled = canAdd || canSub;
@@ -5256,9 +5364,13 @@ namespace NexusGame
         void BattleArrangeWindow()
         {
             EnsureBattleHudStyles();
+            bool canAct = Game.CurrentPlayer != null && Game.CanLocalPlayerActFor(Game.CurrentPlayer);
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct;
             if (Game.BattlePlan == null || Game.BattlePlan.Count == 0)
             {
                 GUILayout.Label("No battles to resolve.");
+                GUI.enabled = prevEnabled;
                 return;
             }
 
@@ -5272,7 +5384,8 @@ namespace NexusGame
                 GUILayout.EndHorizontal();
                 GUILayout.Space(8);
                 if (GUILayout.Button("CONFIRM", _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
-                    Game.ConfirmBattleArrangement();
+                    NexusGameCommands.RequestConfirmBattleArrangement();
+                GUI.enabled = prevEnabled;
                 return;
             }
 
@@ -5290,9 +5403,9 @@ namespace NexusGame
                 if (canReorder)
                 {
                     if (GUILayout.Button("^", GUILayout.Width(28)))
-                        Game.MoveBattlePlanEntry(i, -1);
+                        NexusGameCommands.RequestMoveBattlePlanEntry(i, -1);
                     if (GUILayout.Button("v", GUILayout.Width(28)))
-                        Game.MoveBattlePlanEntry(i, 1);
+                        NexusGameCommands.RequestMoveBattlePlanEntry(i, 1);
                 }
                 else
                     GUILayout.Space(56);
@@ -5310,7 +5423,7 @@ namespace NexusGame
                     {
                         if (GUILayout.Button("P" + (o.PlayerIndex + 1), GUILayout.Width(48)) &&
                             e.DefenderPlayerIndex != o.PlayerIndex)
-                            Game.SetBattleDefenderForEntry(i, o.PlayerIndex);
+                            NexusGameCommands.RequestSetBattleDefender(i, o.PlayerIndex);
                     }
                 }
 
@@ -5320,7 +5433,8 @@ namespace NexusGame
             GUILayout.EndScrollView();
             GUILayout.Space(8);
             if (GUILayout.Button("CONFIRM", _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
-                Game.ConfirmBattleArrangement();
+                NexusGameCommands.RequestConfirmBattleArrangement();
+            GUI.enabled = prevEnabled;
         }
 
         void EnergizeWindow()
@@ -5328,6 +5442,16 @@ namespace NexusGame
             EnsureBattleHudStyles();
             EnsureHandPileCardFaces();
             var p = Game.EnergizePromptPlayer;
+            bool canAct = p != null && Game.CanLocalPlayerActFor(p);
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct;
+            if (!canAct && p != null)
+            {
+                GUILayout.Label("Waiting for P" + (p.PlayerIndex + 1) + " to play Energize…");
+                GUI.enabled = prevEnabled;
+                return;
+            }
+
             float colW = Mathf.Max(BattleS(120f), _battlePanelContentWidth);
             float contentW = colW;
 
@@ -5398,7 +5522,7 @@ namespace NexusGame
                         CardDetailFromName(cardFullName),
                         count);
                     if (GUI.Button(cellRect, GUIContent.none, GUIStyle.none))
-                        Game.SubmitEnergizePlay(g.Key);
+                        NexusGameCommands.RequestSubmitEnergizePlay(g.Key);
                 }
 
                 GUILayout.FlexibleSpace();
@@ -5410,15 +5534,27 @@ namespace NexusGame
             GUILayout.Space(BattleS(10f));
             if (GUILayout.Button("PASS", _battleSecondaryButtonStyleCached, GUILayout.Height(BattleS(44f)),
                     GUILayout.ExpandWidth(true)))
-                Game.SubmitEnergizePass();
+                NexusGameCommands.RequestSubmitEnergizePass();
             GUILayout.EndVertical();
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
+            GUI.enabled = prevEnabled;
         }
 
         void FocusFireWindow()
         {
             EnsureBattleHudStyles();
+            var picker = Game.FocusFirePicker;
+            bool canAct = picker != null && Game.CanLocalPlayerActFor(picker);
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct;
+            if (!canAct && picker != null)
+            {
+                GUILayout.Label("Waiting for P" + (picker.PlayerIndex + 1) + " to choose Focus Fire…");
+                GUI.enabled = prevEnabled;
+                return;
+            }
+
             var types = new HashSet<UnitType>();
             var hex = Game.FocusFireBattleHex;
             foreach (var u in FindObjectsOfType<UnitInstance>())
@@ -5438,26 +5574,38 @@ namespace NexusGame
                 if (GUILayout.Button(UnitUiName(t), _battlePrimaryButtonStyleCached,
                         GUILayout.Height(BattleS(38f)),
                         GUILayout.ExpandWidth(true)))
-                    Game.SubmitFocusFireUnitType(t);
+                    NexusGameCommands.RequestSubmitFocusFireUnitType(t);
                 GUILayout.EndHorizontal();
             }
 
             if (types.Count == 0 && GUILayout.Button("CANCEL (REFUND)", _battleSecondaryButtonStyleCached,
                     GUILayout.ExpandWidth(true)))
-                Game.CancelFocusFireRefund();
+                NexusGameCommands.RequestCancelFocusFireRefund();
+            GUI.enabled = prevEnabled;
         }
 
         void CasualtyWindow()
         {
             EnsureBattleHudStyles();
             var cp = Game.CasualtyPick;
+            bool canAct = cp?.Owner != null && Game.CanLocalPlayerActFor(cp.Owner);
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct;
+            if (!canAct && cp?.Owner != null)
+            {
+                GUILayout.Label("Waiting for P" + (cp.Owner.PlayerIndex + 1) + " to pick casualties…");
+                GUI.enabled = prevEnabled;
+                return;
+            }
+
             cp.Pool.RemoveAll(u => u == null);
             cp.Selected.RemoveAll(u => u == null || !cp.Pool.Contains(u));
             cp.Required = Mathf.Clamp(cp.Required, 0, cp.Pool.Count);
             if (cp.Required == 0)
             {
-                Game.SubmitCasualtyPick();
+                NexusGameCommands.RequestSubmitCasualtyPick();
                 GUILayout.Label("No valid casualties remain. Auto-continuing...");
+                GUI.enabled = prevEnabled;
                 return;
             }
 
@@ -5486,11 +5634,11 @@ namespace NexusGame
             GUILayout.EndHorizontal();
 
             GUILayout.Space(BattleS(10f));
-            GUI.enabled = cp.Selected.Count == cp.Required;
+            GUI.enabled = canAct && cp.Selected.Count == cp.Required;
             if (GUILayout.Button("CONFIRM", _battlePrimaryButtonStyleCached, GUILayout.Height(BattleS(46f)),
                     GUILayout.ExpandWidth(true)))
-                Game.SubmitCasualtyPick();
-            GUI.enabled = true;
+                NexusGameCommands.RequestSubmitCasualtyPick();
+            GUI.enabled = prevEnabled;
         }
 
         void DrawBattleCenterClashOnly(float colW)
@@ -5600,13 +5748,23 @@ namespace NexusGame
             EnsureBattleHudStyles();
             var offer = Game.SecretMissionOffer;
             var att = offer.Player;
+            bool canAct = att != null && Game.CanLocalPlayerActFor(att);
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct;
+            if (!canAct && att != null)
+            {
+                GUILayout.Label("Waiting for P" + (att.PlayerIndex + 1) + " to play a secret mission…");
+                GUI.enabled = prevEnabled;
+                return;
+            }
+
             if (offer.OffersFallbackBattleVp)
             {
                 GUILayout.Label("Battle won! P" + (att.PlayerIndex + 1) +
                     " — no secret in hand matches this win. Claim +1 VP, or skip:");
                 if (GUILayout.Button("Battle secret +1 VP (no card)", _battlePrimaryButtonStyleCached,
                         GUILayout.ExpandWidth(true)))
-                    Game.ClaimFallbackBattleSecretVp();
+                    NexusGameCommands.RequestClaimFallbackBattleSecretVp();
             }
             else
             {
@@ -5620,14 +5778,15 @@ namespace NexusGame
                         var s = att.SecretMissions[idx];
                         if (GUILayout.Button(SecretMissionLabel(s) + " +" + s.VictoryPoints + " VP [i" + idx + "]",
                                 _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
-                            Game.PlaySecretMissionAtIndex(idx);
+                            NexusGameCommands.RequestPlaySecretMissionAtIndex(idx);
                     }
                 }
             }
 
             GUILayout.Space(8);
             if (GUILayout.Button("SKIP", _battleSecondaryButtonStyleCached, GUILayout.ExpandWidth(true)))
-                Game.SkipSecretMissionPlay();
+                NexusGameCommands.RequestSkipSecretMissionPlay();
+            GUI.enabled = prevEnabled;
         }
 
         void SecretMissionOverdrawWindow()
@@ -5909,21 +6068,20 @@ namespace NexusGame
 
         void TryBuyUnit(UnitType type, PlayerState player, int discountUse, int pay)
         {
-                BoardTile homeTile = null;
-                if (InputController != null && InputController.SelectedTile != null)
-                {
-                    var sel = InputController.SelectedTile;
+            BoardTile homeTile = null;
+            if (InputController != null && InputController.SelectedTile != null)
+            {
+                var sel = InputController.SelectedTile;
                 if (Game.CanDeployToStartingHomeTile(player, sel))
-                        homeTile = sel;
-                }
+                    homeTile = sel;
+            }
 
-                if (homeTile == null)
-                    homeTile = FindHomeBaseTileForPlayer(player);
+            if (homeTile == null)
+                homeTile = FindHomeBaseTileForPlayer(player);
             if (homeTile == null)
                 return;
-            player.DeploymentPurchaseDiscountRubium -= discountUse;
-            player.Rubium -= pay;
-            Game.SpawnUnit(player, type, homeTile);
+
+            NexusGameCommands.RequestPurchase(player, type, discountUse, pay, homeTile);
         }
 
         void DrawSelectedTilePanelBody(PlayerState player, BoardTile popupTile, float contentWidth, float contentHeight)
@@ -5983,8 +6141,10 @@ namespace NexusGame
             bool isMovementPhase = !Game.IsGameOver &&
                                    !Game.BattlePhaseBlockingPlay &&
                                    Game.DragonPhase == null &&
-                                   Game.CanLocalPlayerActFor(player);
-            bool viewingLocal = viewOwner.PlayerIndex == player.PlayerIndex;
+                                   Game.CanLocalPlayerActNow();
+            bool viewingLocal = viewOwner.PlayerIndex == (NexusSession.IsOnline
+                ? NexusSession.LocalPlayerIndex
+                : player.PlayerIndex);
             bool interactiveStacks = viewingLocal && InputController != null && isMovementPhase;
 
             if (_moveAllTile != popupTile)
@@ -6028,8 +6188,11 @@ namespace NexusGame
             GUILayout.Space(BottomHudS(20f));
 
             var displayCounts = GetUnitCountsOnTileForOwner(popupTile, viewOwner);
+            var seatPlayer = NexusSession.IsOnline && Game.Players.Count > NexusSession.LocalPlayerIndex
+                ? Game.Players[NexusSession.LocalPlayerIndex]
+                : player;
             var movableCounts = viewingLocal && InputController != null
-                ? GetMovableUnitCountsOnTile(player, popupTile)
+                ? GetMovableUnitCountsOnTile(seatPlayer, popupTile)
                 : new Dictionary<UnitType, int>();
 
             if (displayCounts.Count == 0)
@@ -6208,8 +6371,10 @@ namespace NexusGame
             bool isMovementPhase = !Game.IsGameOver &&
                                    !Game.BattlePhaseBlockingPlay &&
                                    Game.DragonPhase == null &&
-                                   Game.CanLocalPlayerActFor(player);
-            bool viewingLocal = viewOwner.PlayerIndex == player.PlayerIndex;
+                                   Game.CanLocalPlayerActNow();
+            bool viewingLocal = viewOwner.PlayerIndex == (NexusSession.IsOnline
+                ? NexusSession.LocalPlayerIndex
+                : player.PlayerIndex);
             bool interactiveStacks = viewingLocal && InputController != null && isMovementPhase;
             var movableCounts = interactiveStacks
                 ? GetMovableUnitCountsOnTile(player, tile)
@@ -6761,6 +6926,8 @@ namespace NexusGame
         void DrawBattleFocusOverlay()
         {
             if (Game == null || Game.ActiveBattleHex == null)
+                return;
+            if (ShouldPaintFullBattleOverlay(Game.CurrentPlayer))
                 return;
             var cam = Camera.main;
             if (cam == null)

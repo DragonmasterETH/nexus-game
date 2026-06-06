@@ -11,6 +11,8 @@ namespace NexusGame
     /// </summary>
     public static class NexusAppleGameCenterSignIn
     {
+        public static string LastError { get; private set; } = "";
+
         public static bool IsAvailable
         {
             get
@@ -62,6 +64,7 @@ namespace NexusGame
             }
             catch (Exception ex)
             {
+                LastError = ex.Message;
                 Debug.LogWarning($"[UGS] Game Center sign-in failed: {ex.Message}");
                 return false;
             }

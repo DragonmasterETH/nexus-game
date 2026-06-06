@@ -13,22 +13,29 @@ namespace NexusGame
         {
             Unknown,
             EditorDev,
+            AnonymousFallback,
             AppleGameCenter,
             GooglePlayGames
         }
 
         public static PlatformKind ActivePlatform { get; private set; } = PlatformKind.Unknown;
 
+        /// <summary>Most recent sign-in failure (shown in multiplayer UI).</summary>
+        public static string LastSignInError { get; private set; } = "";
+
         public static string PlatformLabel => ActivePlatform switch
         {
             PlatformKind.AppleGameCenter => "Game Center",
             PlatformKind.GooglePlayGames => "Google Play Games",
+            PlatformKind.AnonymousFallback => "UGS (anonymous)",
             PlatformKind.EditorDev => "Editor (dev)",
             _ => "platform account"
         };
 
         public static async Task<bool> TrySignInAsync()
         {
+            LastSignInError = "";
+
             if (AuthenticationService.Instance.IsSignedIn)
             {
                 ResolveActivePlatformFromBuild();
@@ -40,17 +47,41 @@ namespace NexusGame
 #elif UNITY_IOS
             ActivePlatform = PlatformKind.AppleGameCenter;
             if (NexusAppleGameCenterSignIn.IsAvailable)
-                return await NexusAppleGameCenterSignIn.TrySignInAsync();
-            Debug.LogWarning("[UGS] Install Apple Game Kit and add scripting define NEXUS_APPLE_GAMEKIT (see AUTH_SETUP.md).");
+            {
+                if (await NexusAppleGameCenterSignIn.TrySignInAsync())
+                    return true;
+                LastSignInError = NexusAppleGameCenterSignIn.LastError ?? "Game Center sign-in failed.";
+                return false;
+            }
+
+            LastSignInError = "Install Apple Game Kit + NEXUS_APPLE_GAMEKIT (see AUTH_SETUP.md).";
             return false;
 #elif UNITY_ANDROID
             ActivePlatform = PlatformKind.GooglePlayGames;
-            if (NexusGooglePlayGamesSignIn.IsAvailable)
-                return await NexusGooglePlayGamesSignIn.TrySignInAsync();
-            Debug.LogWarning("[UGS] Import Google Play Games plugin (Assets/GooglePlayGames).");
+            if (NexusGooglePlayGamesSignIn.IsConfigured && NexusGooglePlayGamesSignIn.IsAvailable)
+            {
+                if (await NexusGooglePlayGamesSignIn.TrySignInAsync())
+                    return true;
+
+                LastSignInError = NexusGooglePlayGamesSignIn.LastError ?? "Google Play Games sign-in failed.";
+                Debug.LogWarning($"[UGS] Play Games failed: {LastSignInError}. Trying anonymous UGS sign-in…");
+            }
+            else
+            {
+                LastSignInError = NexusGooglePlayGamesSignIn.LastError ??
+                                  "GPGS not configured — run Nexus → Multiplayer → Google Play Games Setup.";
+                Debug.LogWarning($"[UGS] {LastSignInError} Trying anonymous UGS sign-in…");
+            }
+
+            if (await SignInAnonymousAsync())
+            {
+                ActivePlatform = PlatformKind.AnonymousFallback;
+                return true;
+            }
+
             return false;
 #else
-            Debug.LogWarning("[UGS] Platform sign-in is not configured for this build target.");
+            LastSignInError = "Platform sign-in is not configured for this build target.";
             return false;
 #endif
         }
@@ -59,20 +90,23 @@ namespace NexusGame
         {
 #if UNITY_EDITOR
             if (AuthenticationService.Instance.IsSignedIn)
-                return $"Signed in for dev testing ({PlatformLabel}).";
-            return "Editor: link UGS in Project Settings, or use offline stub rooms.";
+                return $"Signed in ({PlatformLabel}). Live rooms enabled.";
+            return "Editor: link UGS in Project Settings → Services, then open Multiplayer.";
 #elif UNITY_IOS
             if (AuthenticationService.Instance.IsSignedIn)
-                return $"Signed in with {PlatformLabel}.";
+                return $"Signed in with {PlatformLabel}. Live rooms enabled.";
             if (NexusAppleGameCenterSignIn.IsAvailable)
-                return "Tap Multiplayer to sign in with Game Center.";
-            return "Game Center: install Apple Game Kit + NEXUS_APPLE_GAMEKIT (see AUTH_SETUP.md).";
+                return "Open Multiplayer to sign in with Game Center.";
+            return "Game Center: install Apple Game Kit + NEXUS_APPLE_GAMEKIT.";
 #elif UNITY_ANDROID
             if (AuthenticationService.Instance.IsSignedIn)
-                return $"Signed in with {PlatformLabel}.";
-            if (NexusGooglePlayGamesSignIn.IsAvailable)
-                return "Tap Multiplayer to sign in with Google Play Games.";
-            return "Play Games: import GPGS plugin and run Nexus → Multiplayer → Google Play Games Setup.";
+            {
+                if (ActivePlatform == PlatformKind.AnonymousFallback)
+                    return "Signed in (anonymous dev). Enable Play Games in UGS dashboard for production.";
+                return $"Signed in with {PlatformLabel}. Live rooms enabled.";
+            }
+
+            return "Open Multiplayer to sign in (Play Games or anonymous fallback).";
 #else
             return "Platform sign-in is not available on this build.";
 #endif
@@ -85,27 +119,43 @@ namespace NexusGame
 #elif UNITY_IOS
             ActivePlatform = PlatformKind.AppleGameCenter;
 #elif UNITY_ANDROID
-            ActivePlatform = PlatformKind.GooglePlayGames;
+            if (ActivePlatform == PlatformKind.Unknown)
+                ActivePlatform = PlatformKind.GooglePlayGames;
 #else
             ActivePlatform = PlatformKind.Unknown;
 #endif
         }
 
-#if UNITY_EDITOR
-        static async Task<bool> SignInEditorAnonymousAsync()
+#if UNITY_EDITOR || UNITY_ANDROID
+        static async Task<bool> SignInAnonymousAsync()
         {
             try
             {
                 await AuthenticationService.Instance.SignInAnonymouslyAsync();
-                ActivePlatform = PlatformKind.EditorDev;
-                Debug.Log($"[UGS] Editor dev sign-in (anonymous). PlayerId={AuthenticationService.Instance.PlayerId}");
+                Debug.Log($"[UGS] Anonymous sign-in. PlayerId={AuthenticationService.Instance.PlayerId}");
                 return true;
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning($"[UGS] Editor anonymous sign-in failed: {ex.Message}");
+                LastSignInError = string.IsNullOrEmpty(LastSignInError)
+                    ? $"Anonymous sign-in failed: {ex.Message}"
+                    : LastSignInError + "\nAnonymous fallback also failed: " + ex.Message;
+                Debug.LogWarning($"[UGS] Anonymous sign-in failed: {ex.Message}");
                 return false;
             }
+        }
+#endif
+
+#if UNITY_EDITOR
+        static async Task<bool> SignInEditorAnonymousAsync()
+        {
+            if (await SignInAnonymousAsync())
+            {
+                ActivePlatform = PlatformKind.EditorDev;
+                return true;
+            }
+
+            return false;
         }
 #endif
     }

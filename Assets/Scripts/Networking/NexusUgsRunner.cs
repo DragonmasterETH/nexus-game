@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -8,6 +9,7 @@ namespace NexusGame
     public sealed class NexusUgsRunner : MonoBehaviour
     {
         static NexusUgsRunner _instance;
+        readonly Queue<Action> _mainThreadQueue = new();
 
         public static NexusUgsRunner Instance => _instance;
 
@@ -38,6 +40,29 @@ namespace NexusGame
         {
             if (_instance == this)
                 _instance = null;
+        }
+
+        void Update()
+        {
+            while (_mainThreadQueue.Count > 0)
+                _mainThreadQueue.Dequeue()?.Invoke();
+
+            NexusLobbyService.TickPresence();
+        }
+
+        public static void RunOnMainThread(Action action)
+        {
+            if (action == null)
+                return;
+
+            if (_instance == null)
+            {
+                action();
+                return;
+            }
+
+            lock (_instance._mainThreadQueue)
+                _instance._mainThreadQueue.Enqueue(action);
         }
 
         static async Task WarmUpAsync()

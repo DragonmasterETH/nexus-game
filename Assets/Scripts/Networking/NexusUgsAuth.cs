@@ -16,6 +16,14 @@ namespace NexusGame
         public static string PlayerId => IsSignedIn ? AuthenticationService.Instance.PlayerId : "";
         public static string PlatformLabel => NexusPlatformSignIn.PlatformLabel;
 
+        public static event Action OnAuthStateChanged;
+
+        static void SetLastError(string message)
+        {
+            LastError = message ?? "";
+            NexusUgsRunner.RunOnMainThread(() => OnAuthStateChanged?.Invoke());
+        }
+
         public static async Task<bool> EnsureServicesInitializedAsync()
         {
             if (IsServicesInitialized)
@@ -27,14 +35,42 @@ namespace NexusGame
                     await UnityServices.InitializeAsync();
 
                 IsServicesInitialized = true;
-                LastError = "";
+                SetLastError("");
                 return true;
             }
             catch (Exception ex)
             {
                 IsServicesInitialized = false;
-                LastError = ex.Message;
+                SetLastError(ex.Message);
                 Debug.LogWarning($"[UGS] Initialize failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>Try sign-in without throwing; updates <see cref="LastError"/> on failure.</summary>
+        public static async Task<bool> TrySignInAsync()
+        {
+            if (IsSignedIn)
+                return true;
+
+            if (!await EnsureServicesInitializedAsync())
+                return false;
+
+            try
+            {
+                if (await NexusPlatformSignIn.TrySignInAsync())
+                {
+                    SetLastError("");
+                    return true;
+                }
+
+                SetLastError(NexusPlatformSignIn.LastSignInError ?? $"{PlatformLabel} sign-in failed.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                SetLastError(ex.Message);
+                Debug.LogWarning($"[UGS] Sign-in failed: {ex.Message}");
                 return false;
             }
         }
@@ -48,29 +84,22 @@ namespace NexusGame
             if (!await EnsureServicesInitializedAsync())
                 return false;
 
-            try
-            {
-                if (await NexusPlatformSignIn.TrySignInAsync())
-                {
-                    LastError = "";
-                    return true;
-                }
+            if (await TrySignInAsync())
+                return true;
 
-                LastError = $"{PlatformLabel} sign-in not available yet.";
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LastError = ex.Message;
-                Debug.LogWarning($"[UGS] Sign-in failed: {ex.Message}");
-                return false;
-            }
+            return false;
         }
 
         public static string MultiplayerStatusLine()
         {
+            if (IsReady)
+                return NexusPlatformSignIn.MultiplayerStatusLine();
+
             if (!IsServicesInitialized && !string.IsNullOrEmpty(LastError))
-                return $"UGS offline ({LastError}). Stub rooms still work.";
+                return $"UGS offline: {LastError}";
+
+            if (!string.IsNullOrEmpty(LastError))
+                return $"Not signed in: {LastError}";
 
             return NexusPlatformSignIn.MultiplayerStatusLine();
         }

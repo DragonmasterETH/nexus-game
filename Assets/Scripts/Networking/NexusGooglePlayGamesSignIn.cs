@@ -10,12 +10,27 @@ namespace NexusGame
     /// </summary>
     public static class NexusGooglePlayGamesSignIn
     {
+        public static string LastError { get; private set; } = "";
+
         public static bool IsAvailable
         {
             get
             {
-#if UNITY_ANDROID || UNITY_EDITOR
+#if UNITY_ANDROID
                 return true;
+#else
+                return false;
+#endif
+            }
+        }
+
+        public static bool IsConfigured
+        {
+            get
+            {
+#if UNITY_ANDROID
+                return GooglePlayGames.GameInfo.ApplicationIdInitialized() &&
+                       GooglePlayGames.GameInfo.WebClientIdInitialized();
 #else
                 return false;
 #endif
@@ -24,15 +39,23 @@ namespace NexusGame
 
         public static async Task<bool> TrySignInAsync()
         {
-#if UNITY_ANDROID || UNITY_EDITOR
+#if UNITY_ANDROID
+            LastError = "";
+            if (!IsConfigured)
+            {
+                LastError = "GPGS App ID or Web Client ID missing. Run Google Play Games Setup in Unity.";
+                return false;
+            }
+
             return await SignInWithPlayGamesAsync();
 #else
+            LastError = "Play Games sign-in only runs on Android device builds.";
             await Task.CompletedTask;
             return false;
 #endif
         }
 
-#if UNITY_ANDROID || UNITY_EDITOR
+#if UNITY_ANDROID
         static Task<bool> SignInWithPlayGamesAsync()
         {
             var tcs = new TaskCompletionSource<bool>();
@@ -45,7 +68,8 @@ namespace NexusGame
                 {
                     if (status != GooglePlayGames.BasicApi.SignInStatus.Success)
                     {
-                        Debug.LogWarning($"[UGS] Google Play Games authenticate failed: {status}");
+                        LastError = $"Play Games authenticate failed: {status}. Sign into Play Games on the device.";
+                        Debug.LogWarning($"[UGS] {LastError}");
                         tcs.TrySetResult(false);
                         return;
                     }
@@ -54,7 +78,9 @@ namespace NexusGame
                     {
                         if (string.IsNullOrEmpty(authCode))
                         {
-                            Debug.LogWarning("[UGS] Google Play Games auth code was empty.");
+                            LastError =
+                                "Play Games auth code empty. Add your keystore SHA-1 to the Android OAuth client in Google Cloud Console.";
+                            Debug.LogWarning($"[UGS] {LastError}");
                             tcs.TrySetResult(false);
                             return;
                         }
@@ -65,6 +91,7 @@ namespace NexusGame
             }
             catch (Exception ex)
             {
+                LastError = ex.Message;
                 Debug.LogWarning($"[UGS] Play Games sign-in failed: {ex.Message}");
                 tcs.TrySetResult(false);
             }
@@ -82,6 +109,9 @@ namespace NexusGame
             }
             catch (Exception ex)
             {
+                LastError =
+                    "UGS rejected Play Games token. In Unity Dashboard → Authentication, add Google Play Games with your Web Client ID + secret. " +
+                    ex.Message;
                 Debug.LogWarning($"[UGS] SignInWithGooglePlayGamesAsync failed: {ex.Message}");
                 tcs.TrySetResult(false);
             }

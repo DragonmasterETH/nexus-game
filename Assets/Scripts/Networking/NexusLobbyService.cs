@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Unity.Netcode;
 using Unity.Services.Multiplayer;
 using UnityEngine;
 
@@ -20,6 +21,7 @@ namespace NexusGame
         }
 
         const int MaxPlayers = 2;
+        public const int MaxPlayersForMatch = MaxPlayers;
         const string SessionName = "Nexus Ops";
 
         public static LobbyPhase Phase { get; private set; } = LobbyPhase.Idle;
@@ -29,15 +31,71 @@ namespace NexusGame
         public static bool IsHost { get; private set; }
         public static bool IsBusy { get; private set; }
         public static bool UseLiveServices { get; private set; }
-        public static bool IsReadyToStart => Phase == LobbyPhase.InRoom && PlayersInRoom >= MaxPlayers;
+        public static bool IsReadyToStart =>
+            (Phase == LobbyPhase.InRoom || Phase == LobbyPhase.Searching) && PlayersInRoom >= MaxPlayers;
+
+        /// <summary>True while waiting in the public matchmaking queue for a second player.</summary>
+        public static bool IsInMatchmakingQueue { get; private set; }
+
+        /// <summary>Seconds spent in the current matchmaking queue (for UI).</summary>
+        public static float QueueWaitSeconds => IsInMatchmakingQueue ? Time.unscaledTime - _queueStartedAt : 0f;
+
+        /// <summary>Human-readable lobby occupancy for the multiplayer UI.</summary>
+        public static string PlayersLine { get; private set; } = "Players: 0/2";
 
         public static event Action OnLobbyUpdated;
 
+        /// <summary>Host: queue filled — Bootstrap should start the online match.</summary>
+        public static event Action OnMatchmakingMatchReady;
+
+        /// <summary>Client: host started Relay; safe to enter the match (also signaled via NGO RPC).</summary>
+        public static event Action OnClientRelayReady;
+
+        /// <summary>Client: UGS relay network is up (host clicked Start Match).</summary>
+        public static bool IsClientMatchNetworkStarted { get; private set; }
+
         static ISession _activeSession;
+        static float _presencePollTimer;
+        static float _queueStartedAt;
+        static bool _autoStartScheduled;
+        const float PresencePollInterval = 0.35f;
 
         static void Notify()
         {
-            OnLobbyUpdated?.Invoke();
+            NexusUgsRunner.RunOnMainThread(() => OnLobbyUpdated?.Invoke());
+        }
+
+        /// <summary>Refresh player count while waiting in a live room (UGS events + poll).</summary>
+        public static void TickPresence()
+        {
+            if (Phase != LobbyPhase.InRoom && Phase != LobbyPhase.Searching)
+                return;
+
+            _presencePollTimer -= Time.unscaledDeltaTime;
+            if (_presencePollTimer > 0f)
+                return;
+
+            _presencePollTimer = PresencePollInterval;
+
+            if (IsInMatchmakingQueue && (!UseLiveServices || _activeSession == null))
+            {
+                int waitSec = Mathf.FloorToInt(QueueWaitSeconds);
+                StatusMessage = UseLiveServices || !AllowStubFallback
+                    ? $"In matchmaking queue… ({waitSec}s)\nWaiting for another player."
+                    : $"In matchmaking queue… ({waitSec}s)\n(Editor stub — use Simulate match found.)";
+                PlayersLine = "Queue: 1/2 — waiting for opponent";
+                Notify();
+                return;
+            }
+
+            if (!UseLiveServices || _activeSession == null)
+                return;
+
+            int before = PlayersInRoom;
+            ApplySessionSnapshot(_activeSession);
+            if (PlayersInRoom != before)
+                Debug.Log($"[Lobby] Presence poll: {PlayersInRoom}/{MaxPlayers} players.");
+            Notify();
         }
 
         public static void ReportAsyncFailure(Exception ex)
@@ -58,12 +116,18 @@ namespace NexusGame
             JoinCode = "";
             StatusMessage = "";
             PlayersInRoom = 0;
+            PlayersLine = "Players: 0/2";
             IsHost = false;
             IsBusy = false;
             UseLiveServices = false;
+            IsInMatchmakingQueue = false;
+            IsClientMatchNetworkStarted = false;
+            _autoStartScheduled = false;
+            _presencePollTimer = 0f;
             Notify();
 
             NexusNetworkSetup.ShutdownIfListening();
+            NexusConnectionMonitor.StopMonitoring();
 
             if (session == null)
                 return;
@@ -84,6 +148,7 @@ namespace NexusGame
         public static void CreateRoom()
         {
             Leave();
+            IsInMatchmakingQueue = false;
             IsHost = true;
             Phase = LobbyPhase.InRoom;
             PlayersInRoom = 1;
@@ -107,6 +172,7 @@ namespace NexusGame
             }
 
             Leave();
+            IsInMatchmakingQueue = false;
             IsHost = false;
             Phase = LobbyPhase.InRoom;
             PlayersInRoom = 1;
@@ -123,18 +189,25 @@ namespace NexusGame
         public static bool StartFindMatch()
         {
             Leave();
+            IsInMatchmakingQueue = true;
+            _autoStartScheduled = false;
+            _queueStartedAt = Time.unscaledTime;
             IsHost = false;
             Phase = LobbyPhase.Searching;
             PlayersInRoom = 1;
+            PlayersLine = "Queue: 1/2 — waiting for opponent";
             IsBusy = true;
             JoinCode = "";
-            StatusMessage = "Searching for opponent…";
+            StatusMessage = "Joining matchmaking queue…";
             Notify();
 
             NexusUgsRunner.EnsureExists();
             NexusUgsRunner.Instance.Run(FindMatchAsync);
             return true;
         }
+
+        /// <summary>Leave the matchmaking queue (same as <see cref="Leave"/>).</summary>
+        public static void CancelMatchmaking() => Leave();
 
         public static void SimulateOpponentJoined()
         {
@@ -149,11 +222,13 @@ namespace NexusGame
             }
 
             PlayersInRoom = Mathf.Max(PlayersInRoom, MaxPlayers);
+            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} — room full (stub)";
             StatusMessage = IsHost
                 ? "Opponent joined. You can start the match."
                 : "Opponent joined. Waiting for host to start.";
             Debug.Log("[Lobby] SimulateOpponentJoined (stub).");
             Notify();
+            TryAutoStartMatchmaking();
         }
 
         public static void SimulateMatchFound()
@@ -187,13 +262,18 @@ namespace NexusGame
                     Notify();
 
                     await EnsureRelayNetworkStartedAsync(_activeSession);
-                    var bridge = NexusNetworkSetup.SpawnOnlineBridge();
-                    bridge?.NotifyClientsMatchStarting();
 
-                    IsBusy = false;
-                    StatusMessage = "Connected.";
-                    Notify();
-                    onSuccess?.Invoke();
+                    NexusUgsRunner.RunOnMainThread(() =>
+                    {
+                        IsBusy = false;
+                        StatusMessage = "Connected.";
+                        Notify();
+
+                        onSuccess?.Invoke();
+
+                        var bridge = NexusNetworkSetup.SpawnOnlineBridge();
+                        bridge?.NotifyClientsMatchStarting();
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -207,11 +287,62 @@ namespace NexusGame
             });
         }
 
+        /// <summary>Rejoin the same UGS room and restart Relay/NGO after a disconnect.</summary>
+        public static async Task<bool> TryReconnectMatchAsync(string roomCode, bool wasHost)
+        {
+            if (string.IsNullOrWhiteSpace(roomCode))
+                return false;
+
+            if (!await TryBeginLiveSessionAsync())
+                return false;
+
+            try
+            {
+                NexusNetworkSetup.ShutdownIfListening();
+                roomCode = roomCode.Trim().ToUpperInvariant();
+
+                ISession session = _activeSession;
+                if (session == null || !string.Equals(session.Code, roomCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    NexusNetworkSetup.EnsureNetworkManager();
+                    session = await MultiplayerService.Instance.JoinSessionByCodeAsync(roomCode);
+                    AttachSession(session);
+                    ApplySessionSnapshot(session);
+                }
+
+                if (session == null)
+                    return false;
+
+                if (wasHost)
+                {
+                    if (!session.IsHost)
+                        return false;
+
+                    await EnsureRelayNetworkStartedAsync(session);
+                    var bridge = NexusOnlineBridge.Instance ?? NexusNetworkSetup.SpawnOnlineBridge();
+                    bridge?.NotifyClientsMatchStarting();
+                    NexusGameCommands.Game?.NotifyOnlineStateChanged();
+                }
+                else
+                {
+                    await WaitForNetworkStateAsync(session, NetworkState.Started, TimeSpan.FromSeconds(30));
+                }
+
+                var nm = NetworkManager.Singleton;
+                return nm != null && nm.IsListening;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Lobby] Reconnect failed: {ex.Message}");
+                return false;
+            }
+        }
+
         static async Task CreateRoomAsync()
         {
             if (!await TryBeginLiveSessionAsync())
             {
-                CreateRoomStub();
+                FailLiveOrStub(CreateRoomStub, FormatAuthFailureMessage());
                 return;
             }
 
@@ -233,8 +364,9 @@ namespace NexusGame
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[Lobby] CreateSession failed, using stub: {ex.Message}");
-                CreateRoomStub();
+                var msg = FriendlyError(ex);
+                Debug.LogWarning($"[Lobby] CreateSession failed: {ex.Message}");
+                FailLiveOrStub(CreateRoomStub, msg);
             }
             finally
             {
@@ -247,7 +379,7 @@ namespace NexusGame
         {
             if (!await TryBeginLiveSessionAsync())
             {
-                JoinRoomStub(code);
+                FailLiveOrStub(() => JoinRoomStub(code), FormatAuthFailureMessage());
                 return;
             }
 
@@ -276,7 +408,9 @@ namespace NexusGame
         {
             if (!await TryBeginLiveSessionAsync())
             {
-                StatusMessage = "Searching for opponent… (offline stub — simulate match found.)";
+                FailLiveOrStub(
+                    () => StatusMessage = "Searching for opponent… (Editor stub — simulate match found.)",
+                    FormatAuthFailureMessage());
                 IsBusy = false;
                 Notify();
                 return;
@@ -294,13 +428,12 @@ namespace NexusGame
                     IsLocked = false
                 };
 
+                StatusMessage = "In queue… waiting for another player.";
+                Notify();
+
                 var session = await MultiplayerService.Instance.MatchmakeSessionAsync(quickJoin, sessionOptions);
                 AttachSession(session);
                 ApplySessionSnapshot(session);
-                Phase = LobbyPhase.InRoom;
-                StatusMessage = session.IsHost
-                    ? "Match found. You can start the match."
-                    : "Match found. Waiting for host to start.";
             }
             catch (Exception ex)
             {
@@ -320,11 +453,76 @@ namespace NexusGame
             if (!await NexusUgsAuth.EnsureReadyAsync())
             {
                 UseLiveServices = false;
+                Phase = LobbyPhase.Error;
+                StatusMessage = FormatAuthFailureMessage();
+                Debug.LogWarning($"[Lobby] Live services unavailable: {StatusMessage}");
                 return false;
             }
 
             UseLiveServices = true;
             return true;
+        }
+
+        static string FormatAuthFailureMessage()
+        {
+            if (!string.IsNullOrEmpty(NexusUgsAuth.LastError))
+                return NexusUgsAuth.LastError;
+
+            return "Sign-in failed. Enable Anonymous + Google Play Games in the Unity Dashboard (Authentication).";
+        }
+
+        /// <summary>Call when opening multiplayer UI — signs in before create/join/queue.</summary>
+        public static void EnsureSignedIn()
+        {
+            if (NexusUgsAuth.IsReady || IsBusy)
+                return;
+
+            IsBusy = true;
+            StatusMessage = "Signing in…";
+            Notify();
+            NexusUgsRunner.EnsureExists();
+            NexusUgsRunner.Instance.Run(async () =>
+            {
+                try
+                {
+                    if (await NexusUgsAuth.TrySignInAsync())
+                    {
+                        UseLiveServices = true;
+                        StatusMessage = NexusUgsAuth.MultiplayerStatusLine();
+                        Phase = LobbyPhase.Idle;
+                    }
+                    else
+                    {
+                        UseLiveServices = false;
+                        Phase = LobbyPhase.Error;
+                        StatusMessage = FormatAuthFailureMessage();
+                    }
+                }
+                finally
+                {
+                    IsBusy = false;
+                    Notify();
+                }
+            });
+        }
+
+#if UNITY_EDITOR
+        static bool AllowStubFallback => true;
+#else
+        static bool AllowStubFallback => false;
+#endif
+
+        static void FailLiveOrStub(Action stubAction, string liveFailureContext)
+        {
+            if (AllowStubFallback)
+            {
+                Debug.LogWarning($"[Lobby] {liveFailureContext} — using Editor stub.");
+                stubAction();
+                return;
+            }
+
+            Phase = LobbyPhase.Error;
+            StatusMessage = liveFailureContext;
         }
 
         static void AttachSession(ISession session)
@@ -339,6 +537,7 @@ namespace NexusGame
             session.PlayerHasLeft += OnSessionPlayerChanged;
             session.Deleted += OnSessionDeleted;
             session.RemovedFromSession += OnRemovedFromSession;
+            session.Network.StateChanged += OnSessionNetworkStateChanged;
         }
 
         static void DetachSessionEvents(ISession session)
@@ -351,6 +550,7 @@ namespace NexusGame
             session.PlayerHasLeft -= OnSessionPlayerChanged;
             session.Deleted -= OnSessionDeleted;
             session.RemovedFromSession -= OnRemovedFromSession;
+            session.Network.StateChanged -= OnSessionNetworkStateChanged;
         }
 
         static void OnSessionChanged()
@@ -361,19 +561,59 @@ namespace NexusGame
 
         static void OnSessionPlayerChanged(string playerId)
         {
-            Debug.Log($"[Lobby] Player changed: {playerId}");
+            int before = PlayersInRoom;
+            Debug.Log($"[Lobby] Player event: {playerId} (count={_activeSession?.PlayerCount ?? 0})");
             ApplySessionSnapshot(_activeSession);
+            if (PlayersInRoom != before)
+                NexusConnectionMonitor.HandleSessionPlayerCountChanged(PlayersInRoom);
             Notify();
+        }
+
+        static void OnSessionNetworkStateChanged(NetworkState state)
+        {
+            Debug.Log($"[Lobby] Network state: {state} (host={_activeSession?.IsHost})");
+            ApplySessionSnapshot(_activeSession);
+            NexusConnectionMonitor.HandleSessionNetworkStateChanged(state);
+
+            if (_activeSession != null && !_activeSession.IsHost)
+            {
+                IsClientMatchNetworkStarted = state == NetworkState.Starting ||
+                                              state == NetworkState.Started;
+                if (IsClientMatchNetworkStarted)
+                    StatusMessage = "Host started — joining match…";
+            }
+
+            Notify();
+
+            if (_activeSession == null || _activeSession.IsHost)
+                return;
+
+            if (state != NetworkState.Starting && state != NetworkState.Started)
+                return;
+
+            NexusUgsRunner.RunOnMainThread(() => OnClientRelayReady?.Invoke());
         }
 
         static void OnSessionDeleted()
         {
+            if (NexusConnectionMonitor.IsMonitoringMatch)
+            {
+                NexusConnectionMonitor.NotifyRoomClosed();
+                return;
+            }
+
             StatusMessage = "Room closed.";
             Leave();
         }
 
         static void OnRemovedFromSession()
         {
+            if (NexusConnectionMonitor.IsMonitoringMatch)
+            {
+                NexusConnectionMonitor.NotifyLocalConnectionLost("Removed from the room.");
+                return;
+            }
+
             StatusMessage = "Removed from room.";
             Leave();
         }
@@ -385,9 +625,33 @@ namespace NexusGame
 
             UseLiveServices = true;
             JoinCode = session.Code ?? JoinCode;
-            PlayersInRoom = Mathf.Clamp(session.PlayerCount, 1, MaxPlayers);
+            int count = Mathf.Max(1, session.PlayerCount);
+            PlayersInRoom = Mathf.Clamp(count, 1, MaxPlayers);
             IsHost = session.IsHost;
+
+            if (IsInMatchmakingQueue && PlayersInRoom < MaxPlayers)
+            {
+                Phase = LobbyPhase.Searching;
+                PlayersLine = $"Queue: {PlayersInRoom}/{MaxPlayers} — waiting for opponent";
+                int waitSec = Mathf.FloorToInt(QueueWaitSeconds);
+                StatusMessage = $"In matchmaking queue… ({waitSec}s)\nWaiting for another player to join.";
+                return;
+            }
+
+            if (IsInMatchmakingQueue && PlayersInRoom >= MaxPlayers)
+            {
+                Phase = LobbyPhase.InRoom;
+                PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} — match found!";
+                StatusMessage = IsHost
+                    ? "Opponent found! Starting match…"
+                    : "Opponent found! Host is starting the match…";
+                TryAutoStartMatchmaking();
+                return;
+            }
+
             Phase = LobbyPhase.InRoom;
+            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers}" +
+                          (PlayersInRoom >= MaxPlayers ? " — room full" : IsHost ? " — waiting for join" : "");
 
             if (PlayersInRoom >= MaxPlayers && IsHost)
                 StatusMessage = "Opponent joined. You can start the match.";
@@ -397,6 +661,27 @@ namespace NexusGame
                 StatusMessage = "Waiting for opponent… Share the code below.";
             else
                 StatusMessage = "Joined room. Waiting for host to start.";
+        }
+
+        static void TryAutoStartMatchmaking()
+        {
+            if (!IsInMatchmakingQueue || _autoStartScheduled || !IsReadyToStart)
+                return;
+
+            _autoStartScheduled = true;
+            IsInMatchmakingQueue = false;
+            Phase = LobbyPhase.InRoom;
+
+            if (!IsHost)
+            {
+                StatusMessage = "Match found! Waiting for host to start…";
+                Notify();
+                return;
+            }
+
+            StatusMessage = "Match found! Starting game…";
+            Notify();
+            NexusUgsRunner.RunOnMainThread(() => OnMatchmakingMatchReady?.Invoke());
         }
 
         static async Task EnsureRelayNetworkStartedAsync(ISession session)
@@ -413,23 +698,6 @@ namespace NexusGame
             var relayOptions = new RelayNetworkOptions(RelayProtocol.DTLS, null, true);
             await session.AsHost().Network.StartRelayNetworkAsync(relayOptions);
             await WaitForNetworkStateAsync(session, NetworkState.Started, TimeSpan.FromSeconds(45));
-            await WaitForConnectedClientsAsync(MaxPlayers, TimeSpan.FromSeconds(45));
-        }
-
-        static async Task WaitForConnectedClientsAsync(int expectedPlayers, TimeSpan timeout)
-        {
-            var nm = NexusNetworkSetup.EnsureNetworkManager();
-            var cts = new CancellationTokenSource(timeout);
-            int requiredClientConnections = Mathf.Max(0, expectedPlayers - 1);
-
-            while (!cts.IsCancellationRequested)
-            {
-                if (requiredClientConnections == 0 || nm.ConnectedClientsIds.Count >= requiredClientConnections)
-                    return;
-                await Task.Delay(250, cts.Token);
-            }
-
-            throw new TimeoutException("Timed out waiting for the opponent to connect.");
         }
 
         static async Task WaitForNetworkStateAsync(ISession session, NetworkState desired, TimeSpan timeout)
@@ -468,8 +736,10 @@ namespace NexusGame
             IsHost = true;
             Phase = LobbyPhase.InRoom;
             PlayersInRoom = 1;
+            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} (stub)";
             JoinCode = GenerateStubJoinCode();
-            StatusMessage = "Waiting for opponent… Share the code below. (Offline stub — wire Game Center / Play Games + UGS for live rooms.)";
+            StatusMessage =
+                "Waiting for opponent… Share the code. (Offline stub — both devices need Play Games + UGS for live sync.)";
             Debug.Log($"[Lobby] Created room (stub). Code: {JoinCode}");
         }
 
@@ -478,9 +748,11 @@ namespace NexusGame
             UseLiveServices = false;
             IsHost = false;
             Phase = LobbyPhase.InRoom;
-            PlayersInRoom = MaxPlayers;
+            PlayersInRoom = 1;
+            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} (stub — other device cannot see you)";
             JoinCode = code;
-            StatusMessage = "Joined room. Waiting for host to start. (Offline stub.)";
+            StatusMessage =
+                "Joined stub room. Use live UGS + sign-in on both devices to sync. Host: Simulate opponent (dev).";
             Debug.Log($"[Lobby] Joined room (stub). Code: {JoinCode}");
         }
 

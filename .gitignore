@@ -68,6 +68,7 @@ mono_crash.*
 
 # Android signing (do not commit)
 dev.keystore
+dev.keystore.credentials
 
 # Builds
 *.apk

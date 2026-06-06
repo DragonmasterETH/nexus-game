@@ -160,6 +160,7 @@ namespace NexusGame
                 : Array.Empty<int>();
             _lastBattleUiDiceRoll = new BattleUiDiceRoll(unitType, attackerRolling, roll.Dice, roll.Need,
                 roll.ImpossibleToHit, roll.Hits, copy);
+            BattleUiStateChanged();
         }
 
         public string LiveBattlePhaseLog
@@ -464,6 +465,7 @@ namespace NexusGame
             }
 
             p.DeployEnergize.Remove(id);
+            AfterOnlineHostMutation();
             return true;
         }
 
@@ -506,6 +508,7 @@ namespace NexusGame
                 RunLegacyAutoBattle(attacker);
                 PendingBattleArrangement = false;
                 BattlePhaseBlockingPlay = false;
+                NotifyOnlineStateChanged();
                 return;
             }
 
@@ -532,6 +535,7 @@ namespace NexusGame
 
             PendingBattleArrangement = true;
             BattlePhaseBlockingPlay = true;
+            BattleUiStateChanged();
         }
 
         public void MoveBattlePlanEntry(int index, int delta)
@@ -542,6 +546,7 @@ namespace NexusGame
             var t = BattlePlan[index];
             BattlePlan[index] = BattlePlan[ni];
             BattlePlan[ni] = t;
+            BattleUiStateChanged();
         }
 
         public void SetBattleDefenderForEntry(int planIndex, int defenderPlayerIndex)
@@ -555,6 +560,7 @@ namespace NexusGame
                 if (o.PlayerIndex == defenderPlayerIndex)
                 {
                     e.DefenderPlayerIndex = defenderPlayerIndex;
+                    BattleUiStateChanged();
                     break;
                 }
             }
@@ -567,6 +573,7 @@ namespace NexusGame
             PendingBattleArrangement = false;
             Debug.Log("[Battle] Battle order confirmed — resolving");
             StartBattleCoroutine(CurrentPlayer);
+            BattleUiStateChanged();
         }
 
         void StartBattleCoroutine(PlayerState attacker)
@@ -579,6 +586,7 @@ namespace NexusGame
         IEnumerator BattlePhaseCoroutine(PlayerState attacker)
         {
             BattlePhaseBlockingPlay = true;
+            BattleUiStateChanged();
             var log = new StringBuilder();
             _battleRng = new System.Random(Environment.TickCount ^ (attacker.PlayerIndex << 8));
 
@@ -667,6 +675,7 @@ namespace NexusGame
                     if (!AutoResolveBattlesQuick)
                     {
                         SecretMissionOffer = BuildSecretOffer(attacker, defCasualties, defStart, defLostDragon);
+                        BattleUiStateChanged();
                         while (SecretMissionOffer != null && SecretMissionOffer.Waiting)
                             yield return null;
                         SecretMissionOffer = null;
@@ -701,6 +710,7 @@ namespace NexusGame
             ActiveBattleHitsOnDefender = 0;
             _battleCoroutine = null;
             Debug.Log("[Battle] --- Phase complete ---");
+            NotifyOnlineStateChanged();
         }
 
         /// <param name="winner">Battle winner eligible for secret-mission payout — always the attacker in current rules (cleared defender from hex).</param>
@@ -757,6 +767,7 @@ namespace NexusGame
             SecretMissionOffer.Waiting = false;
             Debug.Log($"[Battle] Fallback battle secret: P{p.PlayerIndex + 1} +{vp} VP (no card played)");
             CheckGameEndAfterVpChange();
+            BattleUiStateChanged();
         }
 
         public void PlaySecretMissionAtIndex(int indexInHand)
@@ -775,6 +786,7 @@ namespace NexusGame
             SecretMissionOffer.Waiting = false;
             Debug.Log($"[Battle] Secret mission played: P{p.PlayerIndex + 1} +{s.VictoryPoints} VP (index {indexInHand})");
             CheckGameEndAfterVpChange();
+            BattleUiStateChanged();
         }
 
         public void SkipSecretMissionPlay()
@@ -784,6 +796,7 @@ namespace NexusGame
                 Debug.Log(
                     $"[Battle] Secret mission: P{SecretMissionOffer.Player.PlayerIndex + 1} skipped optional play");
                 SecretMissionOffer.Waiting = false;
+                BattleUiStateChanged();
             }
         }
 
@@ -799,6 +812,7 @@ namespace NexusGame
                 {
                     EnergizePromptPlayer = p;
                     _energizeRoundActive = true;
+                    BattleUiStateChanged();
                     while (_energizeRoundActive)
                         yield return null;
 
@@ -817,6 +831,7 @@ namespace NexusGame
             Debug.Log("[Battle] Energize: both sides done (pass chain complete)");
             EnergizePromptPlayer = null;
             EnergizeBattleContext = null;
+            BattleUiStateChanged();
         }
 
         EnergizeBattleId _lastEnergizePlayed = EnergizeBattleId.None;
@@ -828,6 +843,7 @@ namespace NexusGame
             Debug.Log($"[Battle] Energize: P{EnergizePromptPlayer.PlayerIndex + 1} pass");
             _lastEnergizePlayed = EnergizeBattleId.None;
             _energizeRoundActive = false;
+            BattleUiStateChanged();
         }
 
         public void SubmitEnergizePlay(EnergizeBattleId id)
@@ -848,11 +864,13 @@ namespace NexusGame
                 FocusFireForAttackerSide = EnergizePromptPlayer == _battleAttacker;
                 _focusFireHex = _battleHex;
                 _pendingFocusFireCard = true;
+                BattleUiStateChanged();
                 return;
             }
 
             _lastEnergizePlayed = id;
             _energizeRoundActive = false;
+            BattleUiStateChanged();
         }
 
         bool _pendingFocusFireCard;
@@ -878,6 +896,7 @@ namespace NexusGame
             FocusFirePicker = null;
             _pendingFocusFireCard = false;
             _energizeRoundActive = false;
+            BattleUiStateChanged();
         }
 
         public void CancelFocusFireRefund()
@@ -889,6 +908,7 @@ namespace NexusGame
             _pendingFocusFireCard = false;
             _lastEnergizePlayed = EnergizeBattleId.None;
             _energizeRoundActive = false;
+            BattleUiStateChanged();
         }
 
         IEnumerable<PlayerState> EnergizePlayerOrder(PlayerState attacker, PlayerState defender)
@@ -985,6 +1005,7 @@ namespace NexusGame
                     continue;
                 HasActiveBattleStep = true;
                 ActiveBattleStepUnitType = unitType;
+                BattleUiStateChanged();
 
                 // --- Defender strikes first for this unit type; resolve attacker casualties before attacker rolls ---
                 int hitsOnAttacker = 0;
@@ -1060,6 +1081,7 @@ namespace NexusGame
                                         onAttackerDragonKilled();
                                 }
                             };
+                            BattleUiStateChanged();
                             while (CasualtyPick != null)
                                 yield return null;
                         }
@@ -1154,6 +1176,7 @@ namespace NexusGame
                                         onDefenderDragonKilled();
                                 }
                             };
+                            BattleUiStateChanged();
                             while (CasualtyPick != null)
                                 yield return null;
                         }
@@ -1192,6 +1215,7 @@ namespace NexusGame
             }
 
             CasualtyPick = null;
+            BattleUiStateChanged();
         }
 
         public void ToggleCasualtyUnit(UnitInstance u)

@@ -26,13 +26,17 @@ namespace NexusGame
 
         public void MoveTo(BoardTile tile)
         {
+            SyncToTile(tile, hasMovedThisTurn: true);
+        }
+
+        /// <summary>Network snapshot apply: reposition without forcing a local move action.</summary>
+        public void SyncToTile(BoardTile tile, bool hasMovedThisTurn)
+        {
             var previousTile = Tile;
             Tile = tile;
+            HasMovedThisTurn = hasMovedThisTurn;
             RelayoutTile(previousTile);
             RelayoutTile(tile);
-
-            // Mark that this unit has used its move for the current turn.
-            HasMovedThisTurn = true;
         }
 
         public static void RelayoutTile(BoardTile tile)

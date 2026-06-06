@@ -71,6 +71,7 @@ namespace NexusGame
             EndGameReason = reason ?? "";
             FinalSnapshot = BuildGameEndSnapshot(winner, EndGameReason);
             StopBattleFlowForGameEnd();
+            NotifyOnlineStateChanged();
             Debug.Log($"[GameEnd] P{winner.PlayerIndex + 1} wins: {EndGameReason}");
         }
 
