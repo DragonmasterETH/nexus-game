@@ -21,6 +21,19 @@ namespace NexusGame
         [Tooltip("Pause after each deployment, purchase, or move during the AI turn.")]
         public float ActionDelaySeconds = 0.5f;
 
+        bool _humanLikePacing;
+
+        public void EnableHumanLikePacing() => _humanLikePacing = true;
+
+        float SampleTurnStartDelay() =>
+            _humanLikePacing ? Random.Range(2.2f, 5.8f) : TurnStartDelaySeconds;
+
+        float SampleActionDelay() =>
+            _humanLikePacing ? Random.Range(1.1f, 3.4f) : ActionDelaySeconds;
+
+        float SamplePromptDelay() =>
+            _humanLikePacing ? Random.Range(1.4f, 4.1f) : ActionDelaySeconds;
+
         static int AxialDist(BoardTile a, BoardTile b)
         {
             int dq = a.Q - b.Q;
@@ -73,7 +86,10 @@ namespace NexusGame
         {
             if (Game.PendingBattleArrangement && Game.IsAiControlled(Game.CurrentPlayer))
             {
-                yield return wait;
+                if (_humanLikePacing)
+                    yield return new WaitForSeconds(SamplePromptDelay());
+                else
+                    yield return wait;
                 Game.ConfirmBattleArrangement();
                 yield return tick;
             }
@@ -86,7 +102,10 @@ namespace NexusGame
                 if (!HasAnyAiOwnedBlockingPrompt())
                     break;
 
-                yield return wait;
+                if (_humanLikePacing)
+                    yield return new WaitForSeconds(SamplePromptDelay());
+                else
+                    yield return wait;
 
                 if (Game.EnergizePromptPlayer != null && !Game.IsAiControlled(Game.EnergizePromptPlayer))
                 {
@@ -143,7 +162,10 @@ namespace NexusGame
             int guard = 0;
             while (Game.DragonPhase != null && Game.IsAiControlled(Game.DragonPhase.Player) && guard++ < 32)
             {
-                yield return wait;
+                if (_humanLikePacing)
+                    yield return new WaitForSeconds(SamplePromptDelay());
+                else
+                    yield return wait;
                 if (!TryResolveDragonStep())
                     break;
                 yield return tick;
@@ -322,8 +344,9 @@ namespace NexusGame
             if (Game.BattlePhaseBlockingPlay || Game.DragonPhase != null)
                 yield break;
 
-            if (TurnStartDelaySeconds > 0.001f)
-                yield return new WaitForSeconds(TurnStartDelaySeconds);
+            float turnDelay = SampleTurnStartDelay();
+            if (turnDelay > 0.001f)
+                yield return new WaitForSeconds(turnDelay);
 
             int safety = 0;
             while (safety++ < 56 &&
@@ -333,26 +356,26 @@ namespace NexusGame
             {
                 if (TryPlayOneDeployment())
                 {
-                    yield return wait;
+                    yield return new WaitForSeconds(SampleActionDelay());
                     continue;
                 }
 
                 if (TryBuySomething())
                 {
-                    yield return wait;
+                    yield return new WaitForSeconds(SampleActionDelay());
                     continue;
                 }
 
                 if (TryOneBestMove())
                 {
-                    yield return wait;
+                    yield return new WaitForSeconds(SampleActionDelay());
                     continue;
                 }
 
                 break;
             }
 
-            yield return wait;
+            yield return new WaitForSeconds(SampleActionDelay());
             if (Game.IsAiControlled(Game.CurrentPlayer) &&
                 !Game.BattlePhaseBlockingPlay &&
                 Game.DragonPhase == null)

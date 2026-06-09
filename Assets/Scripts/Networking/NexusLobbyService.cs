@@ -22,6 +22,7 @@ namespace NexusGame
 
         const int MaxPlayers = 2;
         public const int MaxPlayersForMatch = MaxPlayers;
+        public const float MatchmakingBotTimeoutSeconds = 30f;
         const string SessionName = "Nexus Ops";
 
         public static LobbyPhase Phase { get; private set; } = LobbyPhase.Idle;
@@ -39,6 +40,15 @@ namespace NexusGame
 
         /// <summary>Seconds spent in the current matchmaking queue (for UI).</summary>
         public static float QueueWaitSeconds => IsInMatchmakingQueue ? Time.unscaledTime - _queueStartedAt : 0f;
+
+        /// <summary>True after queue resolves (real opponent or stealth bot).</summary>
+        public static bool MatchFound { get; private set; }
+
+        /// <summary>Current lobby flow began via Find Match (queue), not create/join room.</summary>
+        public static bool FromMatchmakingQueue { get; private set; }
+
+        /// <summary>Queue timed out — start a disguised local bot opponent.</summary>
+        public static bool IsStealthBotMatch { get; private set; }
 
         /// <summary>Human-readable lobby occupancy for the multiplayer UI.</summary>
         public static string PlayersLine { get; private set; } = "Players: 0/2";
@@ -58,6 +68,7 @@ namespace NexusGame
         static float _presencePollTimer;
         static float _queueStartedAt;
         static bool _autoStartScheduled;
+        static bool _botFallbackTriggered;
         const float PresencePollInterval = 0.35f;
 
         static void Notify()
@@ -77,13 +88,19 @@ namespace NexusGame
 
             _presencePollTimer = PresencePollInterval;
 
+            if (IsInMatchmakingQueue && QueueWaitSeconds >= MatchmakingBotTimeoutSeconds)
+            {
+                TriggerStealthBotMatch();
+                return;
+            }
+
             if (IsInMatchmakingQueue && (!UseLiveServices || _activeSession == null))
             {
                 int waitSec = Mathf.FloorToInt(QueueWaitSeconds);
                 StatusMessage = UseLiveServices || !AllowStubFallback
-                    ? $"In matchmaking queue… ({waitSec}s)\nWaiting for another player."
-                    : $"In matchmaking queue… ({waitSec}s)\n(Editor stub — use Simulate match found.)";
-                PlayersLine = "Queue: 1/2 — waiting for opponent";
+                    ? $"Searching for opponent… ({waitSec}s)"
+                    : $"Searching for opponent… ({waitSec}s)\n(Editor stub — use Simulate match found.)";
+                PlayersLine = "Searching…";
                 Notify();
                 return;
             }
@@ -123,6 +140,10 @@ namespace NexusGame
             IsInMatchmakingQueue = false;
             IsClientMatchNetworkStarted = false;
             _autoStartScheduled = false;
+            _botFallbackTriggered = false;
+            MatchFound = false;
+            FromMatchmakingQueue = false;
+            IsStealthBotMatch = false;
             _presencePollTimer = 0f;
             Notify();
 
@@ -190,15 +211,19 @@ namespace NexusGame
         {
             Leave();
             IsInMatchmakingQueue = true;
+            FromMatchmakingQueue = true;
+            MatchFound = false;
+            IsStealthBotMatch = false;
             _autoStartScheduled = false;
+            _botFallbackTriggered = false;
             _queueStartedAt = Time.unscaledTime;
             IsHost = false;
             Phase = LobbyPhase.Searching;
             PlayersInRoom = 1;
-            PlayersLine = "Queue: 1/2 — waiting for opponent";
+            PlayersLine = "Searching…";
             IsBusy = true;
             JoinCode = "";
-            StatusMessage = "Joining matchmaking queue…";
+            StatusMessage = "Searching for opponent…";
             Notify();
 
             NexusUgsRunner.EnsureExists();
@@ -222,10 +247,14 @@ namespace NexusGame
             }
 
             PlayersInRoom = Mathf.Max(PlayersInRoom, MaxPlayers);
-            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} — room full (stub)";
-            StatusMessage = IsHost
-                ? "Opponent joined. You can start the match."
-                : "Opponent joined. Waiting for host to start.";
+            MatchFound = FromMatchmakingQueue;
+            JoinCode = FromMatchmakingQueue ? "" : JoinCode;
+            PlayersLine = FromMatchmakingQueue ? "Match found" : $"Players: {PlayersInRoom}/{MaxPlayers} — room full (stub)";
+            StatusMessage = FromMatchmakingQueue
+                ? "Match found!"
+                : IsHost
+                    ? "Opponent joined. You can start the match."
+                    : "Opponent joined. Waiting for host to start.";
             Debug.Log("[Lobby] SimulateOpponentJoined (stub).");
             Notify();
             TryAutoStartMatchmaking();
@@ -428,22 +457,29 @@ namespace NexusGame
                     IsLocked = false
                 };
 
-                StatusMessage = "In queue… waiting for another player.";
+                StatusMessage = "Searching for opponent…";
                 Notify();
 
                 var session = await MultiplayerService.Instance.MatchmakeSessionAsync(quickJoin, sessionOptions);
+                if (_botFallbackTriggered)
+                    return;
+
                 AttachSession(session);
                 ApplySessionSnapshot(session);
             }
             catch (Exception ex)
             {
+                if (_botFallbackTriggered)
+                    return;
+
                 Phase = LobbyPhase.Error;
                 StatusMessage = FriendlyError(ex);
                 UseLiveServices = false;
             }
             finally
             {
-                IsBusy = false;
+                if (!_botFallbackTriggered)
+                    IsBusy = false;
                 Notify();
             }
         }
@@ -620,7 +656,7 @@ namespace NexusGame
 
         static void ApplySessionSnapshot(ISession session)
         {
-            if (session == null)
+            if (session == null || _botFallbackTriggered || IsStealthBotMatch)
                 return;
 
             UseLiveServices = true;
@@ -632,19 +668,19 @@ namespace NexusGame
             if (IsInMatchmakingQueue && PlayersInRoom < MaxPlayers)
             {
                 Phase = LobbyPhase.Searching;
-                PlayersLine = $"Queue: {PlayersInRoom}/{MaxPlayers} — waiting for opponent";
+                PlayersLine = "Searching…";
                 int waitSec = Mathf.FloorToInt(QueueWaitSeconds);
-                StatusMessage = $"In matchmaking queue… ({waitSec}s)\nWaiting for another player to join.";
+                StatusMessage = $"Searching for opponent… ({waitSec}s)";
                 return;
             }
 
             if (IsInMatchmakingQueue && PlayersInRoom >= MaxPlayers)
             {
                 Phase = LobbyPhase.InRoom;
-                PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} — match found!";
-                StatusMessage = IsHost
-                    ? "Opponent found! Starting match…"
-                    : "Opponent found! Host is starting the match…";
+                MatchFound = true;
+                JoinCode = "";
+                PlayersLine = "Match found";
+                StatusMessage = "Match found!";
                 TryAutoStartMatchmaking();
                 return;
             }
@@ -672,16 +708,67 @@ namespace NexusGame
             IsInMatchmakingQueue = false;
             Phase = LobbyPhase.InRoom;
 
+            MatchFound = true;
+            JoinCode = "";
+            PlayersLine = "Match found";
+
             if (!IsHost)
             {
-                StatusMessage = "Match found! Waiting for host to start…";
+                StatusMessage = "Match found!";
                 Notify();
                 return;
             }
 
-            StatusMessage = "Match found! Starting game…";
+            StatusMessage = "Match found!";
             Notify();
             NexusUgsRunner.RunOnMainThread(() => OnMatchmakingMatchReady?.Invoke());
+        }
+
+        static void TriggerStealthBotMatch()
+        {
+            if (_botFallbackTriggered || !IsInMatchmakingQueue)
+                return;
+
+            _botFallbackTriggered = true;
+            IsStealthBotMatch = true;
+            MatchFound = true;
+            IsInMatchmakingQueue = false;
+            IsHost = true;
+            Phase = LobbyPhase.InRoom;
+            PlayersInRoom = MaxPlayers;
+            PlayersLine = "Match found";
+            StatusMessage = "Match found!";
+            JoinCode = "";
+            IsBusy = false;
+            UseLiveServices = false;
+            _autoStartScheduled = true;
+            DetachFromLiveSessionQuietly();
+            Debug.Log("[Lobby] Matchmaking queue timeout — starting disguised bot opponent.");
+            Notify();
+            NexusUgsRunner.RunOnMainThread(() => OnMatchmakingMatchReady?.Invoke());
+        }
+
+        static void DetachFromLiveSessionQuietly()
+        {
+            var session = _activeSession;
+            _activeSession = null;
+            DetachSessionEvents(session);
+            NexusNetworkSetup.ShutdownIfListening();
+
+            if (session == null)
+                return;
+
+            NexusUgsRunner.Instance?.Run(async () =>
+            {
+                try
+                {
+                    await session.LeaveAsync();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Lobby] LeaveAsync after bot fallback: {ex.Message}");
+                }
+            });
         }
 
         static async Task EnsureRelayNetworkStartedAsync(ISession session)

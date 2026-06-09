@@ -23,6 +23,9 @@ namespace NexusGame
 
         public static string RoomCode { get; private set; } = "";
 
+        /// <summary>Matchmaking bot opponent — runs local AI but UI presents a human opponent.</summary>
+        public static bool StealthBotOpponent { get; private set; }
+
         public static bool IsOnline => Kind == MatchKind.Online;
 
         public static void Reset()
@@ -31,6 +34,7 @@ namespace NexusGame
             LocalPlayerIndex = 0;
             IsHost = false;
             RoomCode = "";
+            StealthBotOpponent = false;
         }
 
         public static void ConfigureLocalHotseat()
@@ -63,6 +67,17 @@ namespace NexusGame
             LocalPlayerIndex = localPlayerIndex;
             IsHost = isHost;
             RoomCode = roomCode ?? "";
+            StealthBotOpponent = false;
+        }
+
+        /// <summary>Local vs AI after matchmaking timeout — opponent appears as a real player.</summary>
+        public static void ConfigureStealthBotMatch()
+        {
+            Kind = MatchKind.VsAi;
+            LocalPlayerIndex = 0;
+            IsHost = true;
+            RoomCode = "";
+            StealthBotOpponent = true;
         }
     }
 }

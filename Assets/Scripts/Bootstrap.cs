@@ -155,7 +155,11 @@ namespace NexusGame
         {
             if (_state == UiState.InGame)
                 return;
-            StartOnlineMatch();
+
+            if (NexusLobbyService.IsStealthBotMatch)
+                EnterStealthBotMatch();
+            else
+                StartOnlineMatch();
         }
 
         void DrawMultiplayerSignInBanner(float x, ref float y, float bw, float gap)
@@ -302,8 +306,9 @@ namespace NexusGame
             }
 
             bool online = NexusSession.IsOnline;
+            bool stealthBot = NexusSession.StealthBotOpponent;
             // Online and AI-vs-AI still use the standard 1v1 board until multiplayer supports more layouts.
-            board.LayoutMode = online || _aiVsAi ? BoardLayoutMode.OneVOne : _selectedLayout;
+            board.LayoutMode = online || _aiVsAi || stealthBot ? BoardLayoutMode.OneVOne : _selectedLayout;
             board.Regenerate();
 
             var game = FindObjectOfType<GameController>();
@@ -317,7 +322,7 @@ namespace NexusGame
 
             game.Board = board;
             game.AiVsAiMode = _aiVsAi && !online;
-            game.VsAiMode = _vsAi && !_aiVsAi && !online;
+            game.VsAiMode = (_vsAi || stealthBot) && !_aiVsAi && !online;
             game.AiPlayerIndex = 1;
             game.ResetAndStartNewMatch();
             NexusGameCommands.Game = game;
@@ -332,7 +337,7 @@ namespace NexusGame
 
             input.Game = game;
             input.DebugClicks = _debugMode;
-            input.SuppressMovementDiagnosticLogs = _vsAi || _aiVsAi;
+            input.SuppressMovementDiagnosticLogs = _vsAi || _aiVsAi || stealthBot;
 
             var hud = FindObjectOfType<DemoHUD>();
             if (hud == null)
@@ -396,7 +401,9 @@ namespace NexusGame
                 ai = game.gameObject.AddComponent<SimpleAiController>();
             ai.Game = game;
             ai.Input = input;
-            ai.enabled = (_vsAi || _aiVsAi) && !online;
+            ai.enabled = (_vsAi || _aiVsAi || stealthBot) && !online;
+            if (stealthBot)
+                ai.EnableHumanLikePacing();
 
             EnsureGamePresentation();
             BoardBackground.EnsureLoaded(BoardBackground.Presentation.Game);
@@ -480,6 +487,17 @@ namespace NexusGame
 
             NexusOnlineBridge.EnsureSyncHandlerRegistered();
             EnterOnlineMatch(1, false);
+        }
+
+        void EnterStealthBotMatch()
+        {
+            NexusSession.ConfigureStealthBotMatch();
+            _debugMode = false;
+            _vsAi = true;
+            _aiVsAi = false;
+            _selectedLayout = BoardLayoutMode.OneVOne;
+            EnsureGameSystems();
+            _state = UiState.InGame;
         }
 
         void EnterOnlineMatch(int localSeat, bool isHost)
@@ -834,7 +852,20 @@ namespace NexusGame
             GUI.Label(new Rect(x, y, bw, statusH), status, statusStyle);
             y += statusH + gap;
 
-            if (inQueue || searching)
+            bool matchFound = NexusLobbyService.MatchFound;
+            if (matchFound)
+            {
+                var foundStyle = new GUIStyle(GUI.skin.label)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    fontStyle = FontStyle.Bold,
+                    normal = { textColor = new Color(0.45f, 0.95f, 0.55f) }
+                };
+                foundStyle.fontSize = GameUiScale.ImGuiScaledFont(28f, 20, 48);
+                GUI.Label(new Rect(x, y, bw, MenuS(52f)), "Match found", foundStyle);
+                y += MenuS(56f);
+            }
+            else if (inQueue || searching)
             {
                 var queueStyle = new GUIStyle(GUI.skin.label)
                 {
@@ -844,7 +875,7 @@ namespace NexusGame
                 };
                 queueStyle.fontSize = GameUiScale.ImGuiScaledFont(13f, 11, 22);
                 int waitSec = Mathf.FloorToInt(NexusLobbyService.QueueWaitSeconds);
-                GUI.Label(new Rect(x, y, bw, MenuS(24f)), $"Queue time: {waitSec}s", queueStyle);
+                GUI.Label(new Rect(x, y, bw, MenuS(24f)), $"Searching… {waitSec}s", queueStyle);
                 y += MenuS(28f);
             }
 
@@ -853,7 +884,8 @@ namespace NexusGame
             {
                 DrawMultiplayerSignInBanner(x, ref y, bw, gap);
             }
-            else if (NexusLobbyService.UseLiveServices && !inQueue)
+            else if (NexusLobbyService.UseLiveServices && !inQueue && !matchFound &&
+                     !NexusLobbyService.FromMatchmakingQueue)
             {
                 var liveStyle = new GUIStyle(GUI.skin.label)
                 {
@@ -866,7 +898,8 @@ namespace NexusGame
                 y += MenuS(26f);
             }
 
-            if (!inQueue && !searching && !string.IsNullOrEmpty(NexusLobbyService.JoinCode))
+            if (!inQueue && !searching && !matchFound && !NexusLobbyService.FromMatchmakingQueue &&
+                !string.IsNullOrEmpty(NexusLobbyService.JoinCode))
             {
                 var codeLbl = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
                 codeLbl.fontSize = GameUiScale.ImGuiScaledFont(13f, 10, 24);
@@ -883,13 +916,16 @@ namespace NexusGame
                 y += MenuS(52f);
             }
 
-            var countStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
-            countStyle.fontSize = GameUiScale.ImGuiScaledFont(14f, 11, 26);
-            string players = string.IsNullOrEmpty(NexusLobbyService.PlayersLine)
-                ? $"Players: {NexusLobbyService.PlayersInRoom}/2"
-                : NexusLobbyService.PlayersLine;
-            GUI.Label(new Rect(x, y, bw, MenuS(28f)), players, countStyle);
-            y += MenuS(34f);
+            if (!matchFound)
+            {
+                var countStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
+                countStyle.fontSize = GameUiScale.ImGuiScaledFont(14f, 11, 26);
+                string players = string.IsNullOrEmpty(NexusLobbyService.PlayersLine)
+                    ? $"Players: {NexusLobbyService.PlayersInRoom}/2"
+                    : NexusLobbyService.PlayersLine;
+                GUI.Label(new Rect(x, y, bw, MenuS(28f)), players, countStyle);
+                y += MenuS(34f);
+            }
 
             FitSharedMenuButtonFont(btnStyle, bw, btnH, 13, GameUiScale.ImGuiScaledFont(24f, 18, 52),
                 "Simulate opponent (dev)", "Simulate match found (dev)", "Start Match", "Leave");
@@ -924,7 +960,18 @@ namespace NexusGame
                     StartOnlineMatch();
                 y += btnH + gap;
             }
-            else if (inQueue && NexusLobbyService.IsBusy)
+            else if ((inQueue || matchFound) && NexusLobbyService.IsBusy)
+            {
+                var wait = new GUIStyle(GUI.skin.label)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    wordWrap = true
+                };
+                wait.fontSize = GameUiScale.ImGuiScaledFont(13f, 10, 24);
+                GUI.Label(new Rect(x, y, bw, MenuS(36f)), "Starting match…", wait);
+                y += MenuS(40f);
+            }
+            else if (matchFound)
             {
                 var wait = new GUIStyle(GUI.skin.label)
                 {

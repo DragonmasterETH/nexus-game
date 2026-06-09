@@ -1963,8 +1963,9 @@ namespace NexusGame
                     return;
                 }
 
+                bool showAiTag = Game.IsAiControlled(subject) && !NexusSession.StealthBotOpponent;
                 GUILayout.Label(
-                    $"P{subject.PlayerIndex + 1}{(Game.IsAiControlled(subject) ? " (AI)" : "")} - Energize in hand",
+                    $"P{subject.PlayerIndex + 1}{(showAiTag ? " (AI)" : "")} - Energize in hand",
                     _energizeHelpSectionLabelStyle);
 
                 float scrollH = Mathf.Max(HudS(120f), winH - HudS(110f));
