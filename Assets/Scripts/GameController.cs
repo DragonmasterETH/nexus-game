@@ -396,6 +396,8 @@ namespace NexusGame
 
             for (int i = 0; i < count; i++)
             {
+                if (CountEnergizeInHand(player) >= MaxEnergizeCardsInHand)
+                    break;
                 int idx = _cardRng.Next(0, options.Count);
                 player.BattleEnergize.Add(options[idx]);
             }

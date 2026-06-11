@@ -104,3 +104,4 @@ InitTestScene*.unity*
 
 # Unity recovery / temp scenes
 /[Aa]ssets/_Recovery/
+dev.keystore.bak

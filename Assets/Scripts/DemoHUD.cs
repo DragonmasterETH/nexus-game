@@ -4373,6 +4373,22 @@ namespace NexusGame
         /// </summary>
         bool ShouldPaintFullBattleOverlay(PlayerState currentPlayer)
         {
+            if (Game == null)
+                return false;
+
+            // Online: always show the full battle modal for any active battle phase (view-only for the other seat).
+            if (NexusSession.IsOnline)
+            {
+                if (Game.BattlePhaseBlockingPlay || Game.PendingBattleArrangement)
+                    return true;
+                if (Game.BattleClashIntroActive || Game.HasActiveBattleStep ||
+                    Game.EnergizePromptPlayer != null || Game.FocusFirePicker != null ||
+                    Game.CasualtyPick != null || Game.ActiveBattleHex != null)
+                    return true;
+                if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
+                    return true;
+            }
+
             bool active = Game.PendingBattleArrangement ||
                           Game.BattlePhaseBlockingPlay ||
                           Game.BattleClashIntroActive ||
@@ -4387,12 +4403,8 @@ namespace NexusGame
 
             var actor = Game.EnergizePromptPlayer ?? Game.FocusFirePicker ?? Game.CasualtyPick?.Owner ??
                         Game.SecretMissionOffer?.Player ?? currentPlayer;
-            if (actor != null && Game.IsAiControlled(actor))
+            if (!NexusSession.IsOnline && actor != null && Game.IsAiControlled(actor))
                 return false;
-
-            // While battle blocks normal play, always keep the full modal visible (view-only or interactive).
-            if (Game.BattlePhaseBlockingPlay)
-                return true;
 
             return true;
         }
@@ -4509,11 +4521,7 @@ namespace NexusGame
             if (hex == null)
                 return;
 
-            Color prevGui = GUI.color;
-            GUI.color = new Color(0f, 0f, 0f, 0.58f);
-            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture,
-                ScaleMode.StretchToFill);
-            GUI.color = prevGui;
+            // Full battle modal already dimmed the screen — keep the army strip visible behind this picker.
 
             var panel = GameUiScale.GetBattleCasualtyModalPanelGuiRect();
             DrawModalPerimeterClickBlockers(panel);
@@ -6927,6 +6935,10 @@ namespace NexusGame
         void DrawBattleFocusOverlay()
         {
             if (Game == null || Game.ActiveBattleHex == null)
+                return;
+            if (Game.BattlePhaseBlockingPlay || Game.PendingBattleArrangement || Game.BattleClashIntroActive ||
+                Game.HasActiveBattleStep || Game.EnergizePromptPlayer != null || Game.FocusFirePicker != null ||
+                Game.CasualtyPick != null)
                 return;
             if (ShouldPaintFullBattleOverlay(Game.CurrentPlayer))
                 return;

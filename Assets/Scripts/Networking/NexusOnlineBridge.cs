@@ -19,6 +19,8 @@ namespace NexusGame
         byte[] _pendingClientPayload;
         uint _pendingClientVersion;
         Coroutine _clientSyncWatchdog;
+        float _lastBattleHeartbeatPushUnscaled;
+        const float BattleHeartbeatIntervalSeconds = 0.28f;
         const string IntentMessageName = "NexusGameIntent";
 
         enum OnlineIntentType : byte
@@ -91,12 +93,29 @@ namespace NexusGame
         void Update()
         {
             if (IsServer)
+            {
+                PushBattleHeartbeatIfNeeded();
                 return;
+            }
 
             if (_pendingClientPayload != null && NexusGameCommands.Game != null)
                 FlushPendingSnapshot();
             else if (_staticPendingPayload != null && NexusGameCommands.Game != null)
                 FlushStaticPendingSnapshot();
+        }
+
+        void PushBattleHeartbeatIfNeeded()
+        {
+            var game = NexusGameCommands.Game;
+            if (game == null || !game.BattlePhaseBlockingPlay)
+                return;
+
+            float now = Time.unscaledTime;
+            if (now - _lastBattleHeartbeatPushUnscaled < BattleHeartbeatIntervalSeconds)
+                return;
+
+            _lastBattleHeartbeatPushUnscaled = now;
+            game.NotifyOnlineStateChanged();
         }
 
         public static void EnsureSyncHandlerRegistered()

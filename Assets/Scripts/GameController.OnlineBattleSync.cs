@@ -101,15 +101,50 @@ namespace NexusGame
             w.Write(LiveBattlePhaseLog ?? "");
         }
 
-        internal void ReadOnlineBattleExtension(BinaryReader r)
+        /// <summary>Reset battle UI fields before applying a new extension block (avoids stale hex / casualty state on clients).</summary>
+        internal void ClearOnlineBattleUiState()
+        {
+            BattlePlan.Clear();
+            _battleHex = null;
+            _battleAttacker = null;
+            _battleDefender = null;
+            EnergizePromptPlayer = null;
+            EnergizeBattleContext = null;
+            _energizeRoundActive = false;
+            FocusFirePicker = null;
+            FocusFireForAttackerSide = false;
+            _focusFireHex = null;
+            _pendingFocusFireCard = false;
+            CasualtyPick = null;
+            SecretMissionOffer = null;
+            HasActiveBattleStep = false;
+            ActiveBattleStepUnitType = default;
+            ActiveBattleHitsOnAttacker = 0;
+            ActiveBattleHitsOnDefender = 0;
+            _battleClashIntroActive = false;
+            _lastBattleUiDiceRoll = null;
+            _liveBattleLines = null;
+            ClearBattleCasualtyDeathFx();
+        }
+
+        internal void ReadOnlineBattleExtension(BinaryReader r, bool battleBlocking)
         {
             if (r.BaseStream.Position >= r.BaseStream.Length)
-                return;
-            if (r.ReadInt32() != BattleExtensionMagic)
             {
-                Debug.LogWarning("[Net] Battle snapshot extension magic mismatch — partial state applied.");
+                if (!battleBlocking)
+                    ClearOnlineBattleUiState();
                 return;
             }
+
+            if (r.ReadInt32() != BattleExtensionMagic)
+            {
+                Debug.LogWarning("[Net] Battle snapshot extension magic mismatch — keeping prior battle UI.");
+                if (!battleBlocking)
+                    ClearOnlineBattleUiState();
+                return;
+            }
+
+            ClearOnlineBattleUiState();
 
             int planCount = r.ReadInt32();
             BattlePlan.Clear();

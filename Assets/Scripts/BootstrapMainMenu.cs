@@ -15,6 +15,14 @@ namespace NexusGame
         int _mainMenuMapIndex;
         int _mainMenuAiDifficulty; // 0 easy, 1 medium, 2 hard (placeholder)
 
+        enum MultiplayerOnlineTab
+        {
+            Matchmaking = 0,
+            PrivateRooms = 1
+        }
+
+        MultiplayerOnlineTab _multiplayerOnlineTab = MultiplayerOnlineTab.Matchmaking;
+
         struct MainMenuMapOption
         {
             public BoardLayoutMode Layout;
@@ -54,6 +62,9 @@ namespace NexusGame
         static readonly Color MenuBlueLight = new Color(0.16f, 0.32f, 0.52f, 0.96f);
         static readonly Color MenuOrange = new Color(0.96f, 0.49f, 0.12f, 1f);
         static readonly Color MenuMapSelectedBorder = new Color(0.35f, 0.78f, 1f, 1f);
+
+        /// <summary>Fixed mode-strip height so map grid and start button stay put across Solo / Vs AI / Online tabs.</summary>
+        static float MainMenuModeStripHeight() => MenuS(112f);
 
         void EnsureColonistMenuStyles()
         {
@@ -151,7 +162,7 @@ namespace NexusGame
             float startH = MenuS(64f);
             float gap = MenuS(10f);
             float tabRowH = MenuS(58f);
-            float modeStripH = MenuS(60f);
+            float modeStripH = MainMenuModeStripHeight();
 
             DrawMainMenuTopBar(new Rect(x0, MenuS(6f), contentW, topBarH));
 
@@ -233,9 +244,16 @@ namespace NexusGame
             var inner = new Rect(rect.x + pad, rect.y + pad, rect.width - pad * 2f, rect.height - pad * 2f);
 
             if (_mainMenuMode == MainMenuMode.VsAi)
-                _mainMenuAiDifficulty = DrawSegmentedRow(inner, new[] { "Easy", "Medium", "Hard" }, _mainMenuAiDifficulty);
+            {
+                float rowH = MenuS(50f);
+                float rowY = inner.y + (inner.height - rowH) * 0.5f;
+                _mainMenuAiDifficulty = DrawSegmentedRow(
+                    new Rect(inner.x, rowY, inner.width, rowH),
+                    new[] { "Easy", "Medium", "Hard" },
+                    _mainMenuAiDifficulty);
+            }
             else
-                DrawMainMenuOnlineActions(inner);
+                DrawMainMenuOnlineModeStrip(inner);
         }
 
         void DrawMainMenuMapGrid(Rect rect)
@@ -259,7 +277,7 @@ namespace NexusGame
             }
 
             float originX = rect.x + (rect.width - gridW) * 0.5f;
-            float originY = rect.y + (rect.height - gridH) * 0.5f;
+            float originY = rect.y;
 
             for (int i = 0; i < MainMenuMapOptions.Length; i++)
             {
@@ -337,7 +355,39 @@ namespace NexusGame
             GUI.DrawTexture(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), lineTex);
         }
 
-        void DrawMainMenuOnlineActions(Rect rect)
+        void DrawMainMenuOnlineModeStrip(Rect rect)
+        {
+            const float tabDesignH = 50f;
+            const float contentDesignH = 48f;
+            const float innerGapDesign = 6f;
+            float tabH = MenuS(tabDesignH);
+            float innerGap = MenuS(innerGapDesign);
+            float contentH = MenuS(contentDesignH);
+
+            var tabRect = new Rect(rect.x, rect.y, rect.width, tabH);
+            _multiplayerOnlineTab = (MultiplayerOnlineTab)DrawSegmentedRow(tabRect,
+                new[] { "Matchmaking", "Private Rooms" }, (int)_multiplayerOnlineTab);
+
+            var content = new Rect(rect.x, rect.y + tabH + innerGap, rect.width, contentH);
+            if (_multiplayerOnlineTab == MultiplayerOnlineTab.PrivateRooms)
+                DrawMainMenuPrivateRoomActions(content);
+            else
+                DrawMainMenuMatchmakingHint(content);
+        }
+
+        void DrawMainMenuMatchmakingHint(Rect rect)
+        {
+            var hint = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                normal = { textColor = new Color(0.78f, 0.86f, 0.96f, 0.92f) }
+            };
+            hint.fontSize = GameUiScale.ImGuiScaledFont(13f, 11, 20);
+            GUI.Label(rect, "Quick match against another player.\nTap Find Match below.", hint);
+        }
+
+        void DrawMainMenuPrivateRoomActions(Rect rect)
         {
             float btnH = rect.height;
             float gap = MenuS(8f);
@@ -352,12 +402,15 @@ namespace NexusGame
                 NexusSession.Reset();
                 NexusLobbyService.Leave();
                 _joinRoomCodeInput = "";
-                _state = UiState.MultiplayerHub;
+                _multiplayerOnlineTab = MultiplayerOnlineTab.PrivateRooms;
+                NexusLobbyService.CreateRoom();
+                _state = UiState.MultiplayerLobby;
             }
 
             if (GUI.Button(new Rect(rect.x + bw + gap, rect.y, bw, btnH), "Join Room", _menuSegmentStyle))
             {
                 _joinRoomCodeInput = "";
+                _multiplayerOnlineTab = MultiplayerOnlineTab.PrivateRooms;
                 _state = UiState.MultiplayerJoin;
             }
         }
@@ -382,7 +435,10 @@ namespace NexusGame
 
         void DrawMainMenuStartButton(Rect rect)
         {
-            string label = _mainMenuMode == MainMenuMode.Online ? "Find Match" : "Start Game";
+            string label = "Start Game";
+            if (_mainMenuMode == MainMenuMode.Online)
+                label = _multiplayerOnlineTab == MultiplayerOnlineTab.Matchmaking ? "Find Match" : "Create Room";
+
             FitSharedMenuButtonFont(_menuStartStyle, rect.width, rect.height, 18, GameUiScale.ImGuiScaledFont(28f, 22, 40),
                 label);
             if (GUI.Button(rect, label, _menuStartStyle))
@@ -407,12 +463,17 @@ namespace NexusGame
                     NexusSession.Reset();
                     NexusLobbyService.Leave();
                     _joinRoomCodeInput = "";
-                    if (NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.InRoom &&
-                        NexusLobbyService.IsReadyToStart && NexusLobbyService.IsHost)
-                        StartOnlineMatch();
-                    else
+                    if (_multiplayerOnlineTab == MultiplayerOnlineTab.Matchmaking)
+                    {
                         NexusLobbyService.StartFindMatch();
-                    _state = UiState.MultiplayerLobby;
+                        _state = UiState.MultiplayerLobby;
+                    }
+                    else
+                    {
+                        NexusLobbyService.CreateRoom();
+                        _state = UiState.MultiplayerLobby;
+                    }
+
                     return;
 
                 default:

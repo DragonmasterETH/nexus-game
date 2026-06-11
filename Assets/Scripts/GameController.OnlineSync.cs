@@ -153,7 +153,7 @@ namespace NexusGame
                 RebuildUnitsFromSnapshot(r);
 
                 _currentPlayerIndex = SeatToListIndex(currentPlayerSeat);
-                ReadOnlineBattleExtension(r);
+                ReadOnlineBattleExtension(r, BattlePhaseBlockingPlay);
 
                 if (isGameOver && !IsGameOver)
                 {

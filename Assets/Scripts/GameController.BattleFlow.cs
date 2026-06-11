@@ -59,6 +59,7 @@ namespace NexusGame
         Queue<UnifiedEnergizeDraw> _unifiedEnergizeDeck;
         Queue<SecretMissionInHand> _secretDeck;
         const int MaxSecretMissionsInHand = 5;
+        public const int MaxEnergizeCardsInHand = 15;
         System.Random _cardRng;
         int _nextSecretInstanceId = 1;
         /// <summary>Round index: 1 until play returns to the first player, then 2, etc. (not per seat turn).</summary>
@@ -412,10 +413,22 @@ namespace NexusGame
             }
         }
 
+        public static int CountEnergizeInHand(PlayerState p)
+        {
+            if (p == null)
+                return 0;
+            return (p.BattleEnergize?.Count ?? 0) + (p.DeployEnergize?.Count ?? 0);
+        }
+
+        bool CanAddEnergizeToHand(PlayerState p) => CountEnergizeInHand(p) < MaxEnergizeCardsInHand;
+
         void DrawEnergizeCards(PlayerState p, int n)
         {
             for (int i = 0; i < n; i++)
             {
+                if (!CanAddEnergizeToHand(p))
+                    break;
+
                 if (_unifiedEnergizeDeck.Count == 0)
                     _unifiedEnergizeDeck = CardDecks.BuildUnifiedEnergizeDeck(_cardRng);
                 if (_unifiedEnergizeDeck.Count == 0)
@@ -618,12 +631,15 @@ namespace NexusGame
                 _battleDefender = defender;
                 _battleHex = hex;
                 _lastBattleUiDiceRoll = null;
+                BattleUiStateChanged();
 
                 if (!AutoResolveBattlesQuick)
                 {
                     _battleClashIntroActive = true;
+                    BattleUiStateChanged();
                     yield return new WaitForSeconds(BattleClashIntroSeconds);
                     _battleClashIntroActive = false;
+                    BattleUiStateChanged();
                 }
 
                 if (!AutoResolveBattlesQuick)
@@ -903,7 +919,8 @@ namespace NexusGame
         {
             if (FocusFirePicker == null || !_pendingFocusFireCard)
                 return;
-            FocusFirePicker.BattleEnergize.Add(EnergizeBattleId.FocusFire);
+            if (CanAddEnergizeToHand(FocusFirePicker))
+                FocusFirePicker.BattleEnergize.Add(EnergizeBattleId.FocusFire);
             FocusFirePicker = null;
             _pendingFocusFireCard = false;
             _lastEnergizePlayed = EnergizeBattleId.None;
