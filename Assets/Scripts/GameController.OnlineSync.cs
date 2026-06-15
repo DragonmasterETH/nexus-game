@@ -102,6 +102,7 @@ namespace NexusGame
                     : Board?.GetTile(retreatQ, retreatR);
 
                 int playerCount = r.ReadInt32();
+                EnsurePlayerCountForSnapshot(playerCount);
                 for (int i = 0; i < playerCount && i < Players.Count; i++)
                 {
                     var p = Players[i];
@@ -124,6 +125,7 @@ namespace NexusGame
                     sbyte ownerSeat = r.ReadSByte();
                     bool revealed = r.ReadBoolean();
                     byte mineYield = r.ReadByte();
+                    sbyte fortressOwner = r.ReadSByte();
 
                     var tile = Board?.GetTile(q, tr);
                     if (tile == null)
@@ -131,6 +133,23 @@ namespace NexusGame
 
                     tile.Owner = PlayerBySeat(ownerSeat);
                     tile.ExtraMineYield = mineYield;
+
+                    if (fortressOwner >= 0 && fortressOwner != tile.FortressOwnerPlayerIndex)
+                    {
+                        tile.FortressOwnerPlayerIndex = fortressOwner;
+                        var fortressPlayer = PlayerBySeat(fortressOwner);
+                        if (fortressPlayer != null)
+                            EnsureFortressMarker(tile, fortressPlayer);
+                    }
+                    else if (fortressOwner < 0 && tile.FortressOwnerPlayerIndex >= 0)
+                    {
+                        tile.FortressOwnerPlayerIndex = -1;
+                        if (tile.FortressMarker != null)
+                        {
+                            Destroy(tile.FortressMarker);
+                            tile.FortressMarker = null;
+                        }
+                    }
 
                     if (revealed && !tile.ExplorationRevealed)
                     {
@@ -174,6 +193,34 @@ namespace NexusGame
             finally
             {
                 IsApplyingOnlineSnapshot = false;
+            }
+        }
+
+        /// <summary>
+        /// Safety net: if the host runs more seats than this client initialized (e.g. a bot-count
+        /// update raced the match start), grow the local player list so the snapshot applies fully.
+        /// </summary>
+        void EnsurePlayerCountForSnapshot(int playerCount)
+        {
+            playerCount = Mathf.Clamp(playerCount, 1, 4);
+            if (Players.Count >= playerCount)
+                return;
+
+            Color[] seatColors = { Color.blue, Color.red, Color.green, Color.yellow };
+            while (Players.Count < playerCount)
+            {
+                var p = new PlayerState
+                {
+                    PlayerIndex = Players.Count,
+                    Color = seatColors[Mathf.Clamp(Players.Count, 0, seatColors.Length - 1)],
+                    Rubium = StartingRubium,
+                    BattleEnergize = new List<EnergizeBattleId>(),
+                    DeployEnergize = new List<EnergizeDeploymentId>(),
+                    SecretMissions = new List<SecretMissionInHand>()
+                };
+                Players.Add(p);
+                _unitsByPlayer[p] = new List<UnitInstance>();
+                Debug.LogWarning($"[Net] Snapshot has {playerCount} players — grew local list to seat {p.PlayerIndex}.");
             }
         }
 

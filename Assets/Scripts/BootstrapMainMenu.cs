@@ -23,6 +23,9 @@ namespace NexusGame
 
         MultiplayerOnlineTab _multiplayerOnlineTab = MultiplayerOnlineTab.Matchmaking;
 
+        /// <summary>Online room capacity: 2 = 1v1, 4 = four-player (separate matchmaking pools).</summary>
+        int _onlineMatchSize = 2;
+
         struct MainMenuMapOption
         {
             public BoardLayoutMode Layout;
@@ -64,7 +67,7 @@ namespace NexusGame
         static readonly Color MenuMapSelectedBorder = new Color(0.35f, 0.78f, 1f, 1f);
 
         /// <summary>Fixed mode-strip height so map grid and start button stay put across Solo / Vs AI / Online tabs.</summary>
-        static float MainMenuModeStripHeight() => MenuS(112f);
+        static float MainMenuModeStripHeight() => MenuS(164f);
 
         void EnsureColonistMenuStyles()
         {
@@ -357,18 +360,27 @@ namespace NexusGame
 
         void DrawMainMenuOnlineModeStrip(Rect rect)
         {
-            const float tabDesignH = 50f;
-            const float contentDesignH = 48f;
+            const float tabDesignH = 46f;
+            const float sizeDesignH = 42f;
+            const float contentDesignH = 46f;
             const float innerGapDesign = 6f;
             float tabH = MenuS(tabDesignH);
+            float sizeH = MenuS(sizeDesignH);
             float innerGap = MenuS(innerGapDesign);
             float contentH = MenuS(contentDesignH);
+            float y = rect.y;
 
-            var tabRect = new Rect(rect.x, rect.y, rect.width, tabH);
+            var tabRect = new Rect(rect.x, y, rect.width, tabH);
             _multiplayerOnlineTab = (MultiplayerOnlineTab)DrawSegmentedRow(tabRect,
                 new[] { "Matchmaking", "Private Rooms" }, (int)_multiplayerOnlineTab);
+            y += tabH + innerGap;
 
-            var content = new Rect(rect.x, rect.y + tabH + innerGap, rect.width, contentH);
+            int sizeSelected = DrawSegmentedRow(new Rect(rect.x, y, rect.width, sizeH),
+                new[] { "1v1", "4 Players" }, _onlineMatchSize == 4 ? 1 : 0);
+            _onlineMatchSize = sizeSelected == 1 ? 4 : 2;
+            y += sizeH + innerGap;
+
+            var content = new Rect(rect.x, y, rect.width, contentH);
             if (_multiplayerOnlineTab == MultiplayerOnlineTab.PrivateRooms)
                 DrawMainMenuPrivateRoomActions(content);
             else
@@ -384,7 +396,8 @@ namespace NexusGame
                 normal = { textColor = new Color(0.78f, 0.86f, 0.96f, 0.92f) }
             };
             hint.fontSize = GameUiScale.ImGuiScaledFont(13f, 11, 20);
-            GUI.Label(rect, "Quick match against another player.\nTap Find Match below.", hint);
+            string vs = _onlineMatchSize == 4 ? "Quick match with up to 4 players." : "Quick match against another player.";
+            GUI.Label(rect, vs + "\nTap Find Match below.", hint);
         }
 
         void DrawMainMenuPrivateRoomActions(Rect rect)
@@ -399,19 +412,25 @@ namespace NexusGame
 
             if (GUI.Button(new Rect(rect.x, rect.y, bw, btnH), "Create Room", _menuSegmentStyle))
             {
-                NexusSession.Reset();
-                NexusLobbyService.Leave();
-                _joinRoomCodeInput = "";
-                _multiplayerOnlineTab = MultiplayerOnlineTab.PrivateRooms;
-                NexusLobbyService.CreateRoom();
-                _state = UiState.MultiplayerLobby;
+                RequireMultiplayerSignIn(() =>
+                {
+                    NexusSession.Reset();
+                    NexusLobbyService.Leave();
+                    _joinRoomCodeInput = "";
+                    _multiplayerOnlineTab = MultiplayerOnlineTab.PrivateRooms;
+                    NexusLobbyService.CreateRoom(_onlineMatchSize);
+                    _state = UiState.MultiplayerLobby;
+                });
             }
 
             if (GUI.Button(new Rect(rect.x + bw + gap, rect.y, bw, btnH), "Join Room", _menuSegmentStyle))
             {
-                _joinRoomCodeInput = "";
-                _multiplayerOnlineTab = MultiplayerOnlineTab.PrivateRooms;
-                _state = UiState.MultiplayerJoin;
+                RequireMultiplayerSignIn(() =>
+                {
+                    _joinRoomCodeInput = "";
+                    _multiplayerOnlineTab = MultiplayerOnlineTab.PrivateRooms;
+                    _state = UiState.MultiplayerJoin;
+                });
             }
         }
 
@@ -460,20 +479,8 @@ namespace NexusGame
                     return;
 
                 case MainMenuMode.Online:
-                    NexusSession.Reset();
-                    NexusLobbyService.Leave();
-                    _joinRoomCodeInput = "";
-                    if (_multiplayerOnlineTab == MultiplayerOnlineTab.Matchmaking)
-                    {
-                        NexusLobbyService.StartFindMatch();
-                        _state = UiState.MultiplayerLobby;
-                    }
-                    else
-                    {
-                        NexusLobbyService.CreateRoom();
-                        _state = UiState.MultiplayerLobby;
-                    }
-
+                    if (!RequireMultiplayerSignIn(StartOnlineFromMainMenu))
+                        return;
                     return;
 
                 default:
@@ -483,6 +490,23 @@ namespace NexusGame
                     EnsureGameSystems();
                     _state = UiState.InGame;
                     break;
+            }
+        }
+
+        void StartOnlineFromMainMenu()
+        {
+            NexusSession.Reset();
+            NexusLobbyService.Leave();
+            _joinRoomCodeInput = "";
+            if (_multiplayerOnlineTab == MultiplayerOnlineTab.Matchmaking)
+            {
+                NexusLobbyService.StartFindMatch(_onlineMatchSize);
+                _state = UiState.MultiplayerLobby;
+            }
+            else
+            {
+                NexusLobbyService.CreateRoom(_onlineMatchSize);
+                _state = UiState.MultiplayerLobby;
             }
         }
     }

@@ -54,6 +54,7 @@ namespace NexusGame
                 w.Write((sbyte)(t.Owner != null ? t.Owner.PlayerIndex : -1));
                 w.Write(t.ExplorationRevealed);
                 w.Write((byte)Mathf.Clamp(t.ExtraMineYield, 0, 255));
+                w.Write((sbyte)t.FortressOwnerPlayerIndex);
             }
 
             var units = UnityEngine.Object.FindObjectsOfType<UnitInstance>()

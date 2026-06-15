@@ -27,9 +27,12 @@ namespace NexusGame
                 new System.Collections.Generic.HashSet<BoardTile>();
             readonly System.Collections.Generic.HashSet<BoardTile> _activeDragonStrikeHighlights =
                 new System.Collections.Generic.HashSet<BoardTile>();
+            readonly System.Collections.Generic.HashSet<BoardTile> _activeFortressPlacementHighlights =
+                new System.Collections.Generic.HashSet<BoardTile>();
 
             static readonly Color DragonStrikeRingColor = new Color(1f, 0.52f, 0.08f, 1f);
             static readonly Color MoveDestinationRingColor = new Color(0.2f, 0.95f, 0.25f, 1f);
+            static readonly Color FortressPlacementRingColor = new Color(0.45f, 0.82f, 1f, 1f);
 
             // Drag-to-move support:
             // - If user presses on a movable unit, dragging selects all movable units of that unit type on the source hex.
@@ -71,6 +74,7 @@ namespace NexusGame
         void LateUpdate()
         {
             RefreshDragonStrikeHighlights();
+            RefreshFortressPlacementHighlights();
         }
 
         void Update()
@@ -241,7 +245,7 @@ namespace NexusGame
         {
             if (Game == null || Game.CurrentPlayer == null || !Game.CanLocalPlayerActFor(Game.CurrentPlayer))
                 return;
-            if (Game.DragonPhase != null)
+            if (Game.DragonPhase != null || Game.PendingFortressPlacement)
                 return;
             if (IsBattleOverlayBlockingBoardInput())
                 return;
@@ -396,6 +400,23 @@ namespace NexusGame
 
             if (DebugClicks)
                 Debug.Log($"CLICK RESOLVED: tile=({clickedTile.Q},{clickedTile.R}) type={clickedTile.Type}");
+
+            if (canAct && Game != null && Game.PendingFortressPlacement)
+            {
+                if (Game.TryPlaceFortressOnHex(clickedTile))
+                    SetSelectedTile(clickedTile);
+                RecordLastTapForDoubleTap(clickedTile, screenPos);
+                return;
+            }
+
+            if (canAct && Game != null && Game.CanUseDeploymentEnergizeNow() && Game.DragonPhase == null &&
+                Game.CurrentPlayer != null && Game.TileHasFortressForPlayer(clickedTile, Game.CurrentPlayer) &&
+                Game.CanBeginFortressBreathDuringDeploy(clickedTile))
+            {
+                Game.TryBeginFortressBreathFromHex(clickedTile);
+                RecordLastTapForDoubleTap(clickedTile, screenPos);
+                return;
+            }
 
             if (Game != null && Game.DragonPhase != null && Game.CanLocalPlayerActFor(Game.DragonPhase.Player) &&
                 Game.DragonPhase.PendingHit == null && Game.DragonPhase.Options != null)
@@ -923,6 +944,48 @@ namespace NexusGame
                 _activeMoveDestinationHighlights.Add(tile);
             else
                 _activeMoveDestinationHighlights.Remove(tile);
+        }
+
+        void RefreshFortressPlacementHighlights()
+        {
+            ClearFortressPlacementHighlights();
+            if (Game == null || Game.Board == null || !Game.PendingFortressPlacement)
+                return;
+            if (!Game.CanLocalPlayerActNow() || Game.CurrentPlayer == null)
+                return;
+
+            var player = Game.CurrentPlayer;
+            foreach (var tile in Game.Board.AllTiles)
+            {
+                if (Game.CanPlaceFortressOnTile(player, tile))
+                    SetFortressPlacementHighlight(tile, true);
+            }
+        }
+
+        void ClearFortressPlacementHighlights()
+        {
+            var toClear = new System.Collections.Generic.List<BoardTile>(_activeFortressPlacementHighlights);
+            foreach (var tile in toClear)
+                SetFortressPlacementHighlight(tile, false);
+            _activeFortressPlacementHighlights.Clear();
+        }
+
+        void SetFortressPlacementHighlight(BoardTile tile, bool on)
+        {
+            if (tile == null || tile.View == null)
+                return;
+            var tf = tile.View.transform.Find("MoveHighlight");
+            if (tf == null)
+                return;
+            var lr = tf.GetComponent<LineRenderer>();
+            if (lr != null)
+                lr.startColor = lr.endColor = on ? FortressPlacementRingColor : MoveDestinationRingColor;
+
+            tf.gameObject.SetActive(on);
+            if (on)
+                _activeFortressPlacementHighlights.Add(tile);
+            else
+                _activeFortressPlacementHighlights.Remove(tile);
         }
 
         void RefreshDragonStrikeHighlights()

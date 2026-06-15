@@ -52,6 +52,8 @@ namespace NexusGame
             NexusOnlineBridge.MatchStartRequested += OnNetworkMatchStartRequested;
             NexusLobbyService.OnMatchmakingMatchReady += OnMatchmakingMatchReady;
             NexusLobbyService.OnClientRelayReady += OnClientMatchNetworkReady;
+            NexusLobbyService.OnSignInRequired += ShowSignInRequiredPopup;
+            NexusUgsAuth.OnAuthStateChanged += HandleMultiplayerAuthStateChanged;
             BoardMapPreview.ClearCache();
             EnsureMenuPresentation();
         }
@@ -129,26 +131,48 @@ namespace NexusGame
             NexusOnlineBridge.MatchStartRequested -= OnNetworkMatchStartRequested;
             NexusLobbyService.OnMatchmakingMatchReady -= OnMatchmakingMatchReady;
             NexusLobbyService.OnClientRelayReady -= OnClientMatchNetworkReady;
+            NexusLobbyService.OnSignInRequired -= ShowSignInRequiredPopup;
+            NexusUgsAuth.OnAuthStateChanged -= HandleMultiplayerAuthStateChanged;
         }
 
-        bool _multiplayerAuthRequested;
+        bool _showSignInRequiredPopup;
+        System.Action _pendingMultiplayerAction;
 
-        void EnsureMultiplayerSignIn()
+        void ShowSignInRequiredPopup()
         {
-            if (NexusLobbyService.IsBusy)
+            _showSignInRequiredPopup = true;
+        }
+
+        void HandleMultiplayerAuthStateChanged()
+        {
+            if (!NexusUgsAuth.IsMultiplayerAuthorized)
                 return;
 
-            if (NexusUgsAuth.IsReady)
+            _showSignInRequiredPopup = false;
+            var pending = _pendingMultiplayerAction;
+            _pendingMultiplayerAction = null;
+            pending?.Invoke();
+        }
+
+        /// <summary>Returns false and shows sign-in popup when platform auth is required.</summary>
+        protected bool RequireMultiplayerSignIn(System.Action onAuthorized)
+        {
+            if (NexusUgsAuth.IsMultiplayerAuthorized)
             {
-                _multiplayerAuthRequested = true;
-                return;
+                onAuthorized?.Invoke();
+                return true;
             }
 
-            if (_multiplayerAuthRequested)
-                return;
+            _pendingMultiplayerAction = onAuthorized;
+            _showSignInRequiredPopup = false;
+            NexusLobbyService.RequestSignInForMultiplayer();
+            return false;
+        }
 
-            _multiplayerAuthRequested = true;
-            NexusLobbyService.EnsureSignedIn();
+        void BeginInteractivePlayGamesSignIn()
+        {
+            _showSignInRequiredPopup = false;
+            NexusLobbyService.RequestSignInForMultiplayer();
         }
 
         void OnMatchmakingMatchReady()
@@ -172,10 +196,10 @@ namespace NexusGame
             statusStyle.fontSize = GameUiScale.ImGuiScaledFont(13f, 11, 24);
 
             string line = NexusUgsAuth.MultiplayerStatusLine();
-            if (NexusLobbyService.IsBusy && !NexusUgsAuth.IsReady)
+            if (NexusLobbyService.IsBusy && !NexusUgsAuth.IsMultiplayerAuthorized)
                 line = "Signing in…";
 
-            statusStyle.normal.textColor = NexusUgsAuth.IsReady
+            statusStyle.normal.textColor = NexusUgsAuth.IsMultiplayerAuthorized
                 ? new Color(0.45f, 0.95f, 0.55f)
                 : NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.Error
                     ? new Color(1f, 0.55f, 0.45f)
@@ -185,20 +209,135 @@ namespace NexusGame
             GUI.Label(new Rect(x, y, bw, h), line, statusStyle);
             y += h + gap;
 
-            if (!NexusUgsAuth.IsReady && !NexusLobbyService.IsBusy)
+            if (!NexusUgsAuth.IsMultiplayerAuthorized && !NexusLobbyService.IsBusy)
             {
                 var btnStyle = MenuButtonStyle();
                 float btnH = MenuS(52f);
                 FitSharedMenuButtonFont(btnStyle, bw, btnH, 12, GameUiScale.ImGuiScaledFont(20f, 16, 32),
                     "Retry Sign-In");
                 if (GUI.Button(new Rect(x, y, bw, btnH), "Retry Sign-In", btnStyle))
-                {
-                    _multiplayerAuthRequested = false;
-                    NexusLobbyService.EnsureSignedIn();
-                }
+                    BeginInteractivePlayGamesSignIn();
 
                 y += btnH + gap;
             }
+        }
+
+        void DrawSignInRequiredPopup()
+        {
+            if (!_showSignInRequiredPopup)
+                return;
+
+            Color prev = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, 0.72f);
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);
+            GUI.color = prev;
+
+            float w = Mathf.Min(MenuS(420f), Screen.width - MenuS(32f));
+            float pad = MenuS(18f);
+            float btnH = MenuS(56f);
+            float btnGap = MenuS(10f);
+            float titleH = MenuS(56f);
+            float innerW = w - pad * 2f;
+
+            var bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true
+            };
+            bodyStyle.fontSize = GameUiScale.ImGuiScaledFont(14f, 11, 24);
+            string detail = NexusUgsAuth.IsMultiplayerAuthorized
+                ? "Signed in."
+                : NexusLobbyService.IsBusy
+                    ? $"Opening {NexusPlatformSignIn.RequiredPlatformLabel} sign-in…"
+                    : string.IsNullOrEmpty(NexusUgsAuth.LastError)
+                        ? $"Sign in with {NexusPlatformSignIn.RequiredPlatformLabel} to use matchmaking and private rooms."
+                        : NexusUgsAuth.LastError;
+            float bodyH = Mathf.Min(bodyStyle.CalcHeight(new GUIContent(detail), innerW), MenuS(160f));
+
+            float panelH = MenuS(20f) + titleH + MenuS(12f) + bodyH + MenuS(16f) +
+                           btnH + btnGap + btnH + MenuS(20f);
+            panelH = Mathf.Min(panelH, Screen.height - MenuS(24f));
+            var panel = new Rect((Screen.width - w) * 0.5f, (Screen.height - panelH) * 0.5f, w, panelH);
+
+            DrawSignInModalPerimeterBlockers(panel);
+            DrawMenuPanel(panel);
+
+            float x = panel.x + pad;
+            float y = panel.y + MenuS(20f);
+
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
+                wordWrap = true
+            };
+            titleStyle.fontSize = GameUiScale.ImGuiScaledFont(22f, 18, 36);
+            titleStyle.normal.textColor = new Color(1f, 0.82f, 0.45f);
+            GUI.Label(new Rect(x, y, innerW, titleH), "Must be signed in to play", titleStyle);
+            y += titleH + MenuS(12f);
+
+            GUI.Label(new Rect(x, y, innerW, bodyH), detail, bodyStyle);
+            y += bodyH + MenuS(16f);
+
+            var btnStyle = MenuButtonStyle();
+            FitSharedMenuButtonFont(btnStyle, innerW, btnH, 12, GameUiScale.ImGuiScaledFont(20f, 16, 32),
+                "Try Again", "Close");
+
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = true;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "Try Again", btnStyle))
+                BeginInteractivePlayGamesSignIn();
+
+            y += btnH + btnGap;
+
+            if (GUI.Button(new Rect(x, y, innerW, btnH), "Close", btnStyle))
+                CloseSignInRequiredPopup();
+
+            GUI.enabled = prevEnabled;
+        }
+
+        static void DrawSignInModalPerimeterBlockers(Rect windowRect)
+        {
+            float sw = Screen.width;
+            float sh = Screen.height;
+            var none = GUIStyle.none;
+            if (windowRect.x > 0f)
+                GUI.Button(new Rect(0f, 0f, windowRect.x, sh), GUIContent.none, none);
+            if (windowRect.xMax < sw)
+                GUI.Button(new Rect(windowRect.xMax, 0f, Mathf.Max(0f, sw - windowRect.xMax), sh), GUIContent.none,
+                    none);
+            if (windowRect.y > 0f)
+                GUI.Button(new Rect(windowRect.x, 0f, windowRect.width, windowRect.y), GUIContent.none, none);
+            if (windowRect.yMax < sh)
+                GUI.Button(new Rect(windowRect.x, windowRect.yMax, windowRect.width,
+                        Mathf.Max(0f, sh - windowRect.yMax)),
+                    GUIContent.none, none);
+        }
+
+        void CloseSignInRequiredPopup()
+        {
+            _showSignInRequiredPopup = false;
+            _pendingMultiplayerAction = null;
+            NexusLobbyService.CancelSignInAttempt();
+            NexusLobbyService.Leave();
+            if (_state != UiState.MainMenu)
+                _state = UiState.MainMenu;
+        }
+
+        void DrawPlayGamesSignInProgressHint()
+        {
+            var style = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.UpperCenter,
+                fontStyle = FontStyle.Bold,
+                wordWrap = true
+            };
+            style.fontSize = GameUiScale.ImGuiScaledFont(15f, 12, 28);
+            style.normal.textColor = new Color(0.75f, 0.92f, 1f, 1f);
+            float h = MenuS(72f);
+            var r = new Rect(MenuS(16f), MenuS(12f), Screen.width - MenuS(32f), h);
+            GUI.Label(r, $"Opening {NexusPlatformSignIn.RequiredPlatformLabel} sign-in…", style);
         }
 
         /// <summary>Lock handheld builds to portrait (Project Settings also default to portrait).</summary>
@@ -306,9 +445,22 @@ namespace NexusGame
             }
 
             bool online = NexusSession.IsOnline;
-            bool stealthBot = NexusSession.StealthBotOpponent;
-            // Online and AI-vs-AI still use the standard 1v1 board until multiplayer supports more layouts.
-            board.LayoutMode = online || _aiVsAi || stealthBot ? BoardLayoutMode.OneVOne : _selectedLayout;
+            bool stealthBot = NexusSession.StealthBotOpponent && !online;
+            bool hostRunsOnlineBots = online && NexusSession.IsHost && NexusSession.BotSeatCount > 0;
+            if (online || stealthBot)
+            {
+                // The room size decides the board: 1v1 rooms use the duel board, 3-4 seat rooms the 2-4 map.
+                board.LayoutMode = NexusSession.RoomSize > 2 ? BoardLayoutMode.TwoToFour : BoardLayoutMode.OneVOne;
+            }
+            else if (_aiVsAi)
+            {
+                board.LayoutMode = BoardLayoutMode.OneVOne;
+            }
+            else
+            {
+                board.LayoutMode = _selectedLayout;
+            }
+
             board.Regenerate();
 
             var game = FindObjectOfType<GameController>();
@@ -337,7 +489,7 @@ namespace NexusGame
 
             input.Game = game;
             input.DebugClicks = _debugMode;
-            input.SuppressMovementDiagnosticLogs = _vsAi || _aiVsAi || stealthBot;
+            input.SuppressMovementDiagnosticLogs = _vsAi || _aiVsAi || stealthBot || hostRunsOnlineBots;
 
             var hud = FindObjectOfType<DemoHUD>();
             if (hud == null)
@@ -401,8 +553,8 @@ namespace NexusGame
                 ai = game.gameObject.AddComponent<SimpleAiController>();
             ai.Game = game;
             ai.Input = input;
-            ai.enabled = (_vsAi || _aiVsAi || stealthBot) && !online;
-            if (stealthBot)
+            ai.enabled = ((_vsAi || _aiVsAi || stealthBot) && !online) || hostRunsOnlineBots;
+            if (stealthBot || (hostRunsOnlineBots && NexusSession.StealthBotOpponent))
                 ai.EnableHumanLikePacing();
 
             EnsureGamePresentation();
@@ -414,15 +566,19 @@ namespace NexusGame
             if (NexusLobbyService.IsBusy)
                 return;
 
-            if (NexusLobbyService.UseLiveServices)
+            if (!NexusUgsAuth.IsMultiplayerAuthorized || !NexusLobbyService.UseLiveServices)
             {
-                NexusLobbyService.BeginMatchConnection(
-                    () => EnterOnlineMatch(NexusLobbyService.IsHost ? 0 : 1, NexusLobbyService.IsHost),
-                    msg => Debug.LogWarning($"[Lobby] Match start failed: {msg}"));
+                RequireMultiplayerSignIn(StartOnlineMatch);
                 return;
             }
 
-            EnterOnlineMatch(NexusLobbyService.IsHost ? 0 : 1, NexusLobbyService.IsHost);
+            int localSeat = NexusLobbyService.IsHost
+                ? 0
+                : Mathf.Max(1, NexusLobbyService.LocalSeatIndex);
+
+            NexusLobbyService.BeginMatchConnection(
+                () => EnterOnlineMatch(localSeat, NexusLobbyService.IsHost),
+                msg => Debug.LogWarning($"[Lobby] Match start failed: {msg}"));
         }
 
         void OnNetworkMatchStartRequested()
@@ -486,27 +642,55 @@ namespace NexusGame
             }
 
             NexusOnlineBridge.EnsureSyncHandlerRegistered();
-            EnterOnlineMatch(1, false);
+            EnterOnlineMatch(Mathf.Max(1, NexusLobbyService.LocalSeatIndex), false);
         }
 
         void EnterStealthBotMatch()
         {
-            NexusSession.ConfigureStealthBotMatch();
+            int totalSeats = Mathf.Clamp(NexusLobbyService.SeatedCount, 2, NexusLobbyService.MaxRoomSize);
+            NexusSession.ConfigureStealthBotMatch(totalSeats);
             _debugMode = false;
             _vsAi = true;
             _aiVsAi = false;
-            _selectedLayout = BoardLayoutMode.OneVOne;
+            _selectedLayout = totalSeats > 2 ? BoardLayoutMode.TwoToFour : BoardLayoutMode.OneVOne;
             EnsureGameSystems();
             _state = UiState.InGame;
         }
 
         void EnterOnlineMatch(int localSeat, bool isHost)
         {
-            NexusSession.ConfigureOnline(localSeat, isHost, NexusLobbyService.JoinCode);
+            int roomSize = Mathf.Clamp(NexusLobbyService.RoomSize, 2, NexusLobbyService.MaxRoomSize);
+            int totalSeats;
+            int humanSeats;
+            bool stealthBots;
+            if (isHost)
+            {
+                humanSeats = Mathf.Clamp(NexusLobbyService.PlayersInRoom, 1, roomSize);
+                totalSeats = Mathf.Clamp(NexusLobbyService.SeatedCount, 2, roomSize);
+                stealthBots = NexusLobbyService.IsStealthBackfillMatch;
+            }
+            else
+            {
+                // Prefer the setup the host sent with the match-start RPC; fall back to lobby state.
+                totalSeats = NexusOnlineBridge.PendingMatchTotalSeats > 0
+                    ? NexusOnlineBridge.PendingMatchTotalSeats
+                    : Mathf.Clamp(NexusLobbyService.SeatedCount, 2, roomSize);
+                humanSeats = NexusOnlineBridge.PendingMatchHumanSeats > 0
+                    ? NexusOnlineBridge.PendingMatchHumanSeats
+                    : Mathf.Clamp(NexusLobbyService.PlayersInRoom, 1, totalSeats);
+                // Fallback: in matchmaking any bot seat is a disguised backfill bot.
+                stealthBots = NexusOnlineBridge.PendingMatchTotalSeats > 0
+                    ? NexusOnlineBridge.PendingMatchStealthBots
+                    : NexusLobbyService.FromMatchmakingQueue;
+            }
+
+            NexusSession.ConfigureOnline(localSeat, isHost, NexusLobbyService.JoinCode,
+                roomSize, totalSeats, humanSeats, stealthBots);
+            NexusOnlineBridge.ClearPendingMatchSetup();
             _debugMode = false;
             _vsAi = false;
             _aiVsAi = false;
-            _selectedLayout = BoardLayoutMode.OneVOne;
+            _selectedLayout = roomSize > 2 ? BoardLayoutMode.TwoToFour : BoardLayoutMode.OneVOne;
             EnsureGameSystems();
 
             if (NexusSession.IsOnline)
@@ -536,6 +720,22 @@ namespace NexusGame
         void OnGUI()
         {
             NexusUiFonts.EnsureImGuiSkinFonts();
+
+            if (_showSignInRequiredPopup)
+            {
+                if (IsMenuUiState(_state))
+                {
+                    if (GameObject.Find("BoardBackground") == null)
+                        EnsureMenuPresentation();
+                    DrawMenuBackdrop();
+                }
+
+                DrawSignInRequiredPopup();
+                return;
+            }
+
+            if (NexusLobbyService.IsBusy && !NexusUgsAuth.IsMultiplayerAuthorized)
+                DrawPlayGamesSignInProgressHint();
 
             if (IsMenuUiState(_state))
             {
@@ -568,6 +768,7 @@ namespace NexusGame
                     // In-game UI is handled by DemoHUD.
                     break;
             }
+
         }
 
         void DrawMapSelect()
@@ -663,7 +864,6 @@ namespace NexusGame
 
         void DrawMultiplayerHub()
         {
-            EnsureMultiplayerSignIn();
             EnsureColonistMenuStyles();
 
             var btnStyle = MenuButtonStyle();
@@ -706,7 +906,7 @@ namespace NexusGame
             var contentSlot = new Rect(x, y, bw, contentSlotH);
             y += contentSlotH + gap + MenuS(6f);
 
-            GUI.enabled = NexusUgsAuth.IsReady && !NexusLobbyService.IsBusy;
+            GUI.enabled = NexusUgsAuth.IsMultiplayerAuthorized && !NexusLobbyService.IsBusy;
 
             if (_multiplayerOnlineTab == MultiplayerOnlineTab.Matchmaking)
             {
@@ -722,8 +922,11 @@ namespace NexusGame
                 FitSharedMenuButtonFont(btnStyle, bw, btnH, 14, GameUiScale.ImGuiScaledFont(27f, 20, 56), "Find Match");
                 if (GUI.Button(new Rect(contentSlot.x, contentSlot.yMax - btnH, bw, btnH), "Find Match", btnStyle))
                 {
-                    NexusLobbyService.StartFindMatch();
-                    _state = UiState.MultiplayerLobby;
+                    RequireMultiplayerSignIn(() =>
+                    {
+                        NexusLobbyService.StartFindMatch(_onlineMatchSize);
+                        _state = UiState.MultiplayerLobby;
+                    });
                 }
             }
             else
@@ -733,14 +936,20 @@ namespace NexusGame
 
                 if (GUI.Button(new Rect(contentSlot.x, contentSlot.y, bw, btnH), "Create Room", btnStyle))
                 {
-                    NexusLobbyService.CreateRoom();
-                    _state = UiState.MultiplayerLobby;
+                    RequireMultiplayerSignIn(() =>
+                    {
+                        NexusLobbyService.CreateRoom(_onlineMatchSize);
+                        _state = UiState.MultiplayerLobby;
+                    });
                 }
 
                 if (GUI.Button(new Rect(contentSlot.x, contentSlot.y + btnH + gap, bw, btnH), "Join Room", btnStyle))
                 {
-                    _joinRoomCodeInput = "";
-                    _state = UiState.MultiplayerJoin;
+                    RequireMultiplayerSignIn(() =>
+                    {
+                        _joinRoomCodeInput = "";
+                        _state = UiState.MultiplayerJoin;
+                    });
                 }
             }
 
@@ -816,8 +1025,11 @@ namespace NexusGame
 
             if (GUI.Button(new Rect(x, y, bw, btnH), "Join", btnStyle))
             {
-                if (NexusLobbyService.JoinRoom(_joinRoomCodeInput))
-                    _state = UiState.MultiplayerLobby;
+                RequireMultiplayerSignIn(() =>
+                {
+                    if (NexusLobbyService.JoinRoom(_joinRoomCodeInput))
+                        _state = UiState.MultiplayerLobby;
+                });
             }
 
             y += btnH + gap;
@@ -831,8 +1043,6 @@ namespace NexusGame
 
         void DrawMultiplayerLobby()
         {
-            EnsureMultiplayerSignIn();
-
             var btnStyle = MenuButtonStyle();
             float padX = MenuS(18f);
             float w = Mathf.Min(MenuS(460f), Screen.width - MenuS(20f));
@@ -903,7 +1113,7 @@ namespace NexusGame
             }
 
             if (NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.Error ||
-                (!NexusUgsAuth.IsReady && !NexusLobbyService.UseLiveServices))
+                (!NexusUgsAuth.IsMultiplayerAuthorized && !NexusLobbyService.UseLiveServices))
             {
                 DrawMultiplayerSignInBanner(x, ref y, bw, gap);
             }
@@ -944,33 +1154,35 @@ namespace NexusGame
                 var countStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
                 countStyle.fontSize = GameUiScale.ImGuiScaledFont(14f, 11, 26);
                 string players = string.IsNullOrEmpty(NexusLobbyService.PlayersLine)
-                    ? $"Players: {NexusLobbyService.PlayersInRoom}/2"
+                    ? $"Players: {NexusLobbyService.SeatedCount}/{NexusLobbyService.RoomSize}"
                     : NexusLobbyService.PlayersLine;
                 GUI.Label(new Rect(x, y, bw, MenuS(28f)), players, countStyle);
                 y += MenuS(34f);
             }
 
+            // Private-room hosts can fill empty seats with AI opponents.
+            if (!fromMatchmaking && NexusLobbyService.IsHost &&
+                NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.InRoom)
+            {
+                float halfW = (bw - gap) * 0.5f;
+                FitSharedMenuButtonFont(btnStyle, halfW, btnH, 12, GameUiScale.ImGuiScaledFont(20f, 15, 40),
+                    "Add Bot", "Remove Bot");
+
+                bool prevEnabled = GUI.enabled;
+                GUI.enabled = NexusLobbyService.CanAddBot;
+                if (GUI.Button(new Rect(x, y, halfW, btnH), "Add Bot", btnStyle))
+                    NexusLobbyService.AddBot();
+
+                GUI.enabled = NexusLobbyService.BotCount > 0;
+                if (GUI.Button(new Rect(x + halfW + gap, y, halfW, btnH), "Remove Bot", btnStyle))
+                    NexusLobbyService.RemoveBot();
+
+                GUI.enabled = prevEnabled;
+                y += btnH + gap;
+            }
+
             FitSharedMenuButtonFont(btnStyle, bw, btnH, 13, GameUiScale.ImGuiScaledFont(24f, 18, 52),
-                "Simulate opponent (dev)", "Simulate match found (dev)", "Start Match", "Leave");
-
-#if UNITY_EDITOR
-            if (!NexusLobbyService.UseLiveServices &&
-                !inQueue &&
-                NexusLobbyService.Phase == NexusLobbyService.LobbyPhase.InRoom &&
-                NexusLobbyService.PlayersInRoom < 2)
-            {
-                if (GUI.Button(new Rect(x, y, bw, btnH), "Simulate opponent (dev)", btnStyle))
-                    NexusLobbyService.SimulateOpponentJoined();
-                y += btnH + gap;
-            }
-
-            if (!NexusLobbyService.UseLiveServices && (inQueue || searching))
-            {
-                if (GUI.Button(new Rect(x, y, bw, btnH), "Simulate match found (dev)", btnStyle))
-                    NexusLobbyService.SimulateMatchFound();
-                y += btnH + gap;
-            }
-#endif
+                "Start Match", "Leave");
 
             bool canManualStart = !inQueue &&
                 NexusLobbyService.IsReadyToStart &&

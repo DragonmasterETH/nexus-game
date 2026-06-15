@@ -58,7 +58,7 @@ namespace NexusGame
 
         Queue<UnifiedEnergizeDraw> _unifiedEnergizeDeck;
         Queue<SecretMissionInHand> _secretDeck;
-        const int MaxSecretMissionsInHand = 5;
+        public const int MaxSecretMissionsInHand = 10;
         public const int MaxEnergizeCardsInHand = 15;
         System.Random _cardRng;
         int _nextSecretInstanceId = 1;
@@ -473,6 +473,8 @@ namespace NexusGame
                     p.Rubium += 1;
                     DrawEnergizeCards(p, 1);
                     break;
+                case EnergizeDeploymentId.Fortress:
+                    return TryPlayDeploymentEnergizeFortress(selectedHomeHex);
                 default:
                     return false;
             }
@@ -1363,10 +1365,25 @@ namespace NexusGame
             return sole == player;
         }
 
-        /// <summary>Rubium Dragon ranged: 1d6, hit on 4+ (same as melee profile).</summary>
+        BoardTile GetStrikeSourceHex(DragonStrikeOption opt) =>
+            opt?.FortressSourceHex ?? opt?.Dragon?.Tile;
+
+        bool StrikeOptionHasValidSource(DragonStrikeOption opt) => GetStrikeSourceHex(opt) != null;
+
+        string StrikeSourceLabel(DragonStrikeOption opt)
+        {
+            var src = GetStrikeSourceHex(opt);
+            if (src == null)
+                return "?";
+            return opt?.FortressSourceHex != null
+                ? $"fortress ({src.Q},{src.R})"
+                : $"dragon ({src.Q},{src.R})";
+        }
+
+        /// <summary>Rubium Dragon / fortress ranged: 1d6, hit on 4+ (same as melee profile).</summary>
         public void ExecuteDragonStrike(DragonStrikeOption opt)
         {
-            if (DragonPhase == null || opt == null || opt.Dragon == null)
+            if (DragonPhase == null || opt == null || !StrikeOptionHasValidSource(opt))
                 return;
             if (opt.TargetHex == null || IsTileContested(opt.TargetHex))
             {
@@ -1393,48 +1410,51 @@ namespace NexusGame
 
             int roll = DragonPhase.Rng.Next(1, 7);
             opt.LastRoll = roll;
+            string breathName = opt.FortressSourceHex != null ? "Fortress" : "Dragon";
+            var src = GetStrikeSourceHex(opt);
             if (roll < 4)
             {
-                DragonPhase.LastLog = $"Dragon ranged: roll {roll} — miss.";
+                DragonPhase.LastLog = $"{breathName} breath: roll {roll} — miss.";
                 Debug.Log(
-                    $"[Battle] Dragon: P{DragonPhase.Player.PlayerIndex + 1} at ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} miss (need 4+)");
+                    $"[Battle] {breathName}: P{DragonPhase.Player.PlayerIndex + 1} at ({src.Q},{src.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} miss (need 4+)");
                 StartCoroutine(ResolveDragonMissAfterImpact(opt));
                 return;
             }
 
             Debug.Log(
-                $"[Battle] Dragon: P{DragonPhase.Player.PlayerIndex + 1} at ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} hit — pick target");
+                $"[Battle] {breathName}: P{DragonPhase.Player.PlayerIndex + 1} at ({src.Q},{src.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R}) | roll {roll} hit — pick target");
             StartCoroutine(ResolveDragonHitAfterImpact(opt, enemies));
         }
 
         IEnumerator ResolveDragonMissAfterImpact(DragonStrikeOption opt)
         {
-            if (DragonPhase == null || opt == null || opt.Dragon == null)
+            if (DragonPhase == null || opt == null || !StrikeOptionHasValidSource(opt))
                 yield break;
 
             // Lock further dragon input while the projectile + impact resolve.
             DragonPhase.PendingHit = opt;
             DragonPhase.PendingEnemies = null;
 
-            yield return PlayDragonImpactSequence(opt.Dragon, opt.TargetHex);
+            yield return PlayDragonImpactSequence(GetStrikeSourceHex(opt), opt.TargetHex, opt.Dragon);
 
             if (DragonPhase == null)
                 yield break;
             DragonPhase.PendingHit = null;
             DragonPhase.PendingEnemies = null;
-            RemoveAllDragonOptions(opt.Dragon);
+            RemoveAllStrikeOptionsForSource(opt);
         }
 
         IEnumerator ResolveDragonHitAfterImpact(DragonStrikeOption opt, List<UnitInstance> enemies)
         {
-            if (DragonPhase == null || opt == null || opt.Dragon == null || enemies == null || enemies.Count == 0)
+            if (DragonPhase == null || opt == null || !StrikeOptionHasValidSource(opt) || enemies == null ||
+                enemies.Count == 0)
                 yield break;
 
             // Lock further dragon-target taps while the projectile resolves.
             DragonPhase.PendingHit = opt;
             DragonPhase.PendingEnemies = null;
 
-            yield return PlayDragonImpactSequence(opt.Dragon, opt.TargetHex);
+            yield return PlayDragonImpactSequence(GetStrikeSourceHex(opt), opt.TargetHex, opt.Dragon);
 
             if (DragonPhase == null)
                 yield break;
@@ -1442,9 +1462,9 @@ namespace NexusGame
             DragonPhase.PendingEnemies = enemies;
         }
 
-        IEnumerator PlayDragonImpactSequence(UnitInstance dragon, BoardTile targetHex)
+        IEnumerator PlayDragonImpactSequence(BoardTile fromHex, BoardTile targetHex, UnitInstance dragonForScale)
         {
-            var fireball = PlayDragonFireballVfx(dragon, targetHex);
+            var fireball = PlayDragonFireballVfx(fromHex, targetHex, dragonForScale);
             if (fireball != null)
                 yield return fireball;
 
@@ -1452,13 +1472,13 @@ namespace NexusGame
             yield return new WaitForSeconds(DragonPostImpactPauseSeconds);
         }
 
-        Coroutine PlayDragonFireballVfx(UnitInstance dragon, BoardTile targetHex)
+        Coroutine PlayDragonFireballVfx(BoardTile fromHex, BoardTile targetHex, UnitInstance dragonForScale)
         {
-            if (dragon == null || dragon.Tile == null || targetHex == null)
+            if (fromHex == null || targetHex == null)
                 return null;
             if (!TryGetDragonFireballSprite(out var fireballSprite) || fireballSprite == null)
                 return null;
-            return StartCoroutine(PlayDragonFireballVfxRoutine(dragon, dragon.Tile, targetHex, fireballSprite));
+            return StartCoroutine(PlayDragonFireballVfxRoutine(fromHex, targetHex, fireballSprite, dragonForScale));
         }
 
         bool TryGetDragonFireballSprite(out Sprite sprite)
@@ -1505,7 +1525,8 @@ namespace NexusGame
             return Mathf.Max(0.01f, (dragonWidth / fireballBaseWidth) * 0.5f);
         }
 
-        IEnumerator PlayDragonFireballVfxRoutine(UnitInstance dragon, BoardTile fromHex, BoardTile toHex, Sprite fireballSprite)
+        IEnumerator PlayDragonFireballVfxRoutine(BoardTile fromHex, BoardTile toHex, Sprite fireballSprite,
+            UnitInstance dragonForScale)
         {
             if (fromHex == null || toHex == null || fireballSprite == null)
                 yield break;
@@ -1529,7 +1550,9 @@ namespace NexusGame
             // follows the travel direction.
             Vector3 upForLook = Vector3.Cross(Vector3.up, dirN);
             fireballGo.transform.rotation = Quaternion.LookRotation(Vector3.up, upForLook);
-            float fireballScale = GetDragonFireballScale(dragon, fireballSprite);
+            float fireballScale = dragonForScale != null
+                ? GetDragonFireballScale(dragonForScale, fireballSprite)
+                : Board != null ? Board.HexRadius * 0.22f : 0.15f;
             fireballGo.transform.localScale = Vector3.one * fireballScale;
 
             const float travelSeconds = 0.28f;
@@ -1578,11 +1601,14 @@ namespace NexusGame
             t.position = basePos;
         }
 
-        void RemoveAllDragonOptions(UnitInstance dragon)
+        void RemoveAllStrikeOptionsForSource(DragonStrikeOption opt)
         {
-            if (DragonPhase?.Options == null || dragon == null)
+            if (DragonPhase?.Options == null || opt == null)
                 return;
-            DragonPhase.Options.RemoveAll(o => o.Dragon == dragon);
+            if (opt.FortressSourceHex != null)
+                DragonPhase.Options.RemoveAll(o => o.FortressSourceHex == opt.FortressSourceHex);
+            else if (opt.Dragon != null)
+                DragonPhase.Options.RemoveAll(o => o.Dragon == opt.Dragon);
             if (DragonPhase.Options.Count == 0)
                 FinishDragonPhase();
         }
@@ -1594,25 +1620,27 @@ namespace NexusGame
             if (!DragonPhase.PendingEnemies.Contains(victim))
                 return;
 
-            var dragon = DragonPhase.PendingHit.Dragon;
+            var pending = DragonPhase.PendingHit;
+            string breathName = pending.FortressSourceHex != null ? "Fortress" : "Dragon";
             RemoveUnit(victim);
             DragonPhase.LastLog =
-                $"Dragon ranged: roll {DragonPhase.PendingHit.LastRoll} — hit, removed {victim.Definition.Type}.";
+                $"{breathName} breath: roll {pending.LastRoll} — hit, removed {victim.Definition.Type}.";
             Debug.Log(
-                $"[Battle] Dragon hit: removed {victim.Definition.Type} (P{victim.Owner.PlayerIndex + 1}), roll was {DragonPhase.PendingHit.LastRoll}");
+                $"[Battle] {breathName} hit: removed {victim.Definition.Type} (P{victim.Owner.PlayerIndex + 1}), roll was {pending.LastRoll}");
 
             DragonPhase.PendingHit = null;
             DragonPhase.PendingEnemies = null;
-            RemoveAllDragonOptions(dragon);
+            RemoveAllStrikeOptionsForSource(pending);
         }
 
         public void SkipDragonStrikeOption(DragonStrikeOption opt)
         {
-            if (DragonPhase == null || opt?.Dragon == null)
+            if (DragonPhase == null || opt == null || !StrikeOptionHasValidSource(opt))
                 return;
+            var src = GetStrikeSourceHex(opt);
             Debug.Log(
-                $"[Battle] Dragon: skipped strike from ({opt.Dragon.Tile.Q},{opt.Dragon.Tile.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R})");
-            RemoveAllDragonOptions(opt.Dragon);
+                $"[Battle] Breath: skipped strike from ({src.Q},{src.R}) → ({opt.TargetHex.Q},{opt.TargetHex.R})");
+            RemoveAllStrikeOptionsForSource(opt);
         }
 
         public void SkipAllDragonStrikes()
@@ -1709,11 +1737,15 @@ namespace NexusGame
         public List<UnitInstance> PendingEnemies;
         public string LastLog;
         public Action OnComplete;
+        /// <summary>Fortress breath during Deployment; finishing does not advance the turn.</summary>
+        public bool DuringDeployment;
+        public BoardTile ActiveFortressHex;
     }
 
     public class DragonStrikeOption
     {
         public UnitInstance Dragon;
+        public BoardTile FortressSourceHex;
         public BoardTile TargetHex;
         public int LastRoll;
     }

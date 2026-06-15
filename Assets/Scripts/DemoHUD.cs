@@ -1372,6 +1372,7 @@ namespace NexusGame
             ApplyMainHudScaledStyles();
             MaybeQueueContestedRetreatToast(player);
 
+            DrawFortressPlacementHint();
             DrawDragonPhaseOverlay();
 
             var hp = _hudLayoutPanel;
@@ -1963,7 +1964,9 @@ namespace NexusGame
                     return;
                 }
 
-                bool showAiTag = Game.IsAiControlled(subject) && !NexusSession.StealthBotOpponent;
+                bool showAiTag = (Game.IsAiControlled(subject) ||
+                                  (NexusSession.IsOnline && NexusSession.IsBotSeat(subject.PlayerIndex))) &&
+                                 !NexusSession.StealthBotOpponent;
                 GUILayout.Label(
                     $"P{subject.PlayerIndex + 1}{(showAiTag ? " (AI)" : "")} - Energize in hand",
                     _energizeHelpSectionLabelStyle);
@@ -2399,7 +2402,11 @@ namespace NexusGame
             {
                 if (GUI.Button(new Rect(win.x + (win.width - closeW) * 0.5f, closeY, closeW, closeH), "Close",
                         closePileStyle))
+                {
+                    if (Game != null)
+                        Game.CancelFortressPlacement();
                     _handPileViewer = HandPileViewerKind.None;
+                }
             }
         }
 
@@ -2794,7 +2801,10 @@ namespace NexusGame
                 normal = { textColor = new Color(0.94f, 0.96f, 1f, 1f) }
             };
             ApplyTileInfoFont(summaryStyle);
-            GUILayout.Label($"DRAGON STRIKE  ·  Roll {dp.PendingHit.LastRoll}  ·  Tap a target", summaryStyle);
+            string strikeTitle = dp.PendingHit.FortressSourceHex != null
+                ? $"FORTRESS BREATH  ·  Roll {dp.PendingHit.LastRoll}  ·  Tap a target"
+                : $"DRAGON STRIKE  ·  Roll {dp.PendingHit.LastRoll}  ·  Tap a target";
+            GUILayout.Label(strikeTitle, summaryStyle);
 
             var reqStyle = new GUIStyle(GUI.skin.label)
             {
@@ -3545,10 +3555,42 @@ namespace NexusGame
                     var grp = deployGroups[i++];
                     float x = startX + j * (cardW + g);
                     string full = EnergizeDeploymentCatalog.GetName(grp.Key);
-                    DrawPlayingCard(new Rect(x, cardY, cardW, cardH), _pileDeployCardFace,
+                    var cardRect = new Rect(x, cardY, cardW, cardH);
+                    DrawPlayingCard(cardRect, _pileDeployCardFace,
                         CardShortTitle(full), CardDetailFromName(full), grp.Count());
+                    TryHandleDeployPileCardTap(cardRect, player, grp.Key);
                 }
             }
+        }
+
+        void TryHandleDeployPileCardTap(Rect cardRect, PlayerState player, EnergizeDeploymentId id)
+        {
+            if (Game == null || player == null || Event.current.type != EventType.MouseUp)
+                return;
+            if (!cardRect.Contains(Event.current.mousePosition))
+                return;
+            if (!Game.CanUseDeploymentEnergizeNow())
+                return;
+            if (player.DeployEnergize == null || !player.DeployEnergize.Contains(id))
+                return;
+
+            Event.current.Use();
+            if (id == EnergizeDeploymentId.FreeHuman)
+            {
+                var home = InputController != null ? InputController.SelectedTile : null;
+                if (home != null)
+                    Game.TryPlayDeploymentEnergize(id, home);
+                return;
+            }
+
+            if (id == EnergizeDeploymentId.Fortress)
+            {
+                Game.TryPlayDeploymentEnergize(EnergizeDeploymentId.Fortress, null);
+                _handPileViewer = HandPileViewerKind.None;
+                return;
+            }
+
+            Game.TryPlayDeploymentEnergize(id, null);
         }
 
         void DrawHandPileModalSecret(Rect content, PlayerState player, bool forcingOverdrawDiscard = false)
@@ -3595,7 +3637,7 @@ namespace NexusGame
                     fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale))
                 };
                 GUI.Label(new Rect(content.x + pad, content.y + pad, content.width - pad * 2f, HudS(16f)),
-                    "Hand limit reached (5). Choose one card to discard, then draw the pending secret.",
+                    $"Hand limit reached ({GameController.MaxSecretMissionsInHand}). Choose one card to discard, then draw the pending secret.",
                     msgStyle);
 
                 var declineStyle = new GUIStyle(GUI.skin.button)
@@ -3715,7 +3757,7 @@ namespace NexusGame
             bool suppressEndTurn = handPileModalOpen || _showCenterBuyModal || PointerOverBottomHudInteractives();
             GUI.enabled = !blockEndTurn && !suppressEndTurn;
 
-            string endTurnLabel = dragonSkipButton ? "SKIP DRAGON'S BREATH" : EndTurnAdvanceLabel(player);
+            string endTurnLabel = dragonSkipButton ? DragonBreathSkipLabel() : EndTurnAdvanceLabel(player);
             EnsureEndTurnAdvanceButtonTextures();
             var endTurnVisual = GetEndTurnButtonVisualKind(player, dragonSkipButton);
             Texture2D endTurnBg = GetEndTurnAdvanceButtonTexture(endTurnVisual);
@@ -5816,7 +5858,7 @@ namespace NexusGame
             var p = state.Player;
             int pendingCount = state.PendingDraws?.Count ?? 0;
             GUILayout.Label(
-                $"Secret hand limit reached (5). P{p.PlayerIndex + 1}: discard one mission to draw the new one.",
+                $"Secret hand limit reached ({GameController.MaxSecretMissionsInHand}). P{p.PlayerIndex + 1}: discard one mission to draw the new one.",
                 bodyStyle);
             if (pendingCount > 1)
                 GUILayout.Label($"Pending secret draws: {pendingCount}", bodyStyle);
@@ -5847,6 +5889,34 @@ namespace NexusGame
             };
         }
 
+        string DragonBreathSkipLabel()
+        {
+            var dp = Game?.DragonPhase;
+            if (dp != null && dp.DuringDeployment)
+                return "SKIP FORTRESS BREATH";
+            return "SKIP DRAGON'S BREATH";
+        }
+
+        void DrawFortressPlacementHint()
+        {
+            if (Game == null || !Game.PendingFortressPlacement || !Game.CanLocalPlayerActNow())
+                return;
+
+            var hp = _hudLayoutPanel;
+            float edge = HudS(20f);
+            float panelH = HudS(72f);
+            var panelRect = new Rect(hp.x + edge, hp.y + HudS(12f), hp.width - edge * 2f, panelH);
+            var style = new GUIStyle(GUI.skin.box)
+            {
+                fontSize = Mathf.Max(12, Mathf.RoundToInt(14f * _hudFontScale)),
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true
+            };
+            ApplyTileInfoFont(style);
+            GUI.Box(panelRect,
+                "Fortress — tap a hex you solely occupy (not home base). Close the pile viewer to cancel.");
+        }
+
         void DrawDragonPhaseOverlay()
         {
             var dp = Game.DragonPhase;
@@ -5861,7 +5931,12 @@ namespace NexusGame
 
             if (Game.IsAiControlled(dp.Player))
             {
-                GUI.Box(panelRect, "Rubium Dragon — AI is choosing…");
+                string aiTitle = dp.DuringDeployment
+                    ? "Fortress breath — opponent is choosing…"
+                    : NexusSession.StealthBotOpponent
+                        ? "Rubium Dragon — opponent is choosing…"
+                        : "Rubium Dragon — AI is choosing…";
+                GUI.Box(panelRect, aiTitle);
                 if (!string.IsNullOrEmpty(dp.LastLog))
                     GUI.Label(new Rect(hp.x + HudS(30f), hp.yMax - HudS(175f), hp.width - HudS(60f), HudS(22f)),
                         dp.LastLog);
@@ -6194,6 +6269,25 @@ namespace NexusGame
             }
 
             GUILayout.EndHorizontal();
+            if (popupTile.FortressOwnerPlayerIndex >= 0)
+            {
+                var fortStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.Max(10, Mathf.RoundToInt(11f * _hudFontScale * bhMul)),
+                    fontStyle = FontStyle.Italic,
+                    wordWrap = true
+                };
+                ApplyTileInfoFont(fortStyle);
+                int fp = popupTile.FortressOwnerPlayerIndex + 1;
+                bool canBreath = Game != null && Game.CurrentPlayer != null &&
+                                 Game.TileHasFortressForPlayer(popupTile, Game.CurrentPlayer) &&
+                                 Game.CanBeginFortressBreathDuringDeploy(popupTile);
+                string fortLine = canBreath
+                    ? $"Fortress (P{fp}) — tap hex to use breath"
+                    : $"Fortress (P{fp})";
+                GUILayout.Label(fortLine, fortStyle);
+            }
+
             GUILayout.Space(BottomHudS(20f));
 
             var displayCounts = GetUnitCountsOnTileForOwner(popupTile, viewOwner);

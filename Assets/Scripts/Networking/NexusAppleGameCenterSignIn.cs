@@ -59,6 +59,7 @@ namespace NexusGame
                 await AuthenticationService.Instance.SignInWithAppleGameCenterAsync(
                     signature, teamPlayerId, publicKeyUrl, salt, timestamp);
 
+                NexusPlatformSignIn.MarkPlatformSignedIn(NexusPlatformSignIn.PlatformKind.AppleGameCenter);
                 Debug.Log($"[UGS] UGS signed in with Game Center. PlayerId={AuthenticationService.Instance.PlayerId}");
                 return true;
             }

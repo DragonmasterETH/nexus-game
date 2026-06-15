@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Unity.Netcode;
@@ -7,9 +8,7 @@ using UnityEngine;
 
 namespace NexusGame
 {
-    /// <summary>
-    /// Lobby + session flow. Uses Unity Multiplayer Services when signed in; falls back to local stubs otherwise.
-    /// </summary>
+    /// <summary>Lobby + session flow via Unity Multiplayer Services (requires platform sign-in).</summary>
     public static class NexusLobbyService
     {
         public enum LobbyPhase
@@ -20,10 +19,11 @@ namespace NexusGame
             Error
         }
 
-        const int MaxPlayers = 2;
-        public const int MaxPlayersForMatch = MaxPlayers;
+        public const int MaxRoomSize = 4;
         public const float MatchmakingBotTimeoutSeconds = 30f;
         const string SessionName = "Nexus Ops";
+        const string BotCountPropertyKey = "nexusBotCount";
+        const string MatchSizePropertyKey = "nexusMatchSize";
 
         public static LobbyPhase Phase { get; private set; } = LobbyPhase.Idle;
         public static string JoinCode { get; private set; } = "";
@@ -32,8 +32,26 @@ namespace NexusGame
         public static bool IsHost { get; private set; }
         public static bool IsBusy { get; private set; }
         public static bool UseLiveServices { get; private set; }
+
+        /// <summary>Room capacity for the current flow (2 = 1v1, 4 = four-player). Set by create/find, mirrored from the live session.</summary>
+        public static int RoomSize { get; private set; } = 2;
+
+        /// <summary>AI seats in the room (host-added in private rooms, or matchmaking backfill).</summary>
+        public static int BotCount { get; private set; }
+
+        /// <summary>Occupied seats: humans + bots.</summary>
+        public static int SeatedCount => PlayersInRoom + BotCount;
+
+        /// <summary>This device's seat (join order in the live session; host = 0).</summary>
+        public static int LocalSeatIndex { get; private set; }
+
+        /// <summary>Matchmaking queue timed out with other humans present — online match with disguised host-run bots.</summary>
+        public static bool IsStealthBackfillMatch { get; private set; }
+
+        /// <summary>Matchmaking requires a full room; private rooms can start with any 2+ seats filled.</summary>
         public static bool IsReadyToStart =>
-            (Phase == LobbyPhase.InRoom || Phase == LobbyPhase.Searching) && PlayersInRoom >= MaxPlayers;
+            (Phase == LobbyPhase.InRoom || Phase == LobbyPhase.Searching) &&
+            SeatedCount >= (FromMatchmakingQueue ? RoomSize : 2);
 
         /// <summary>True while waiting in the public matchmaking queue for a second player.</summary>
         public static bool IsInMatchmakingQueue { get; private set; }
@@ -54,6 +72,9 @@ namespace NexusGame
         public static string PlayersLine { get; private set; } = "Players: 0/2";
 
         public static event Action OnLobbyUpdated;
+
+        /// <summary>Raised when multiplayer is blocked until Game Center / Play Games sign-in succeeds.</summary>
+        public static event Action OnSignInRequired;
 
         /// <summary>Host: queue filled — Bootstrap should start the online match.</summary>
         public static event Action OnMatchmakingMatchReady;
@@ -90,16 +111,27 @@ namespace NexusGame
 
             if (IsInMatchmakingQueue && QueueWaitSeconds >= MatchmakingBotTimeoutSeconds)
             {
-                TriggerStealthBotMatch();
-                return;
+                if (UseLiveServices && _activeSession != null && PlayersInRoom > 1)
+                {
+                    // Other humans found but the room never filled: the host quietly tops the
+                    // lobby up with bots. Non-hosts keep polling — the host's timer starts the match.
+                    if (IsHost)
+                    {
+                        TriggerStealthBackfill();
+                        return;
+                    }
+                }
+                else
+                {
+                    TriggerStealthBotMatch();
+                    return;
+                }
             }
 
             if (IsInMatchmakingQueue && (!UseLiveServices || _activeSession == null))
             {
                 int waitSec = Mathf.FloorToInt(QueueWaitSeconds);
-                StatusMessage = UseLiveServices || !AllowStubFallback
-                    ? $"Searching for opponent… ({waitSec}s)"
-                    : $"Searching for opponent… ({waitSec}s)\n(Editor stub — use Simulate match found.)";
+                StatusMessage = $"Searching for opponent… ({waitSec}s)";
                 PlayersLine = "Searching…";
                 Notify();
                 return;
@@ -111,7 +143,7 @@ namespace NexusGame
             int before = PlayersInRoom;
             ApplySessionSnapshot(_activeSession);
             if (PlayersInRoom != before)
-                Debug.Log($"[Lobby] Presence poll: {PlayersInRoom}/{MaxPlayers} players.");
+                Debug.Log($"[Lobby] Presence poll: {PlayersInRoom}/{RoomSize} players.");
             Notify();
         }
 
@@ -133,7 +165,9 @@ namespace NexusGame
             JoinCode = "";
             StatusMessage = "";
             PlayersInRoom = 0;
-            PlayersLine = "Players: 0/2";
+            BotCount = 0;
+            LocalSeatIndex = 0;
+            PlayersLine = $"Players: 0/{RoomSize}";
             IsHost = false;
             IsBusy = false;
             UseLiveServices = false;
@@ -144,6 +178,7 @@ namespace NexusGame
             MatchFound = false;
             FromMatchmakingQueue = false;
             IsStealthBotMatch = false;
+            IsStealthBackfillMatch = false;
             _presencePollTimer = 0f;
             Notify();
 
@@ -166,13 +201,18 @@ namespace NexusGame
             });
         }
 
-        public static void CreateRoom()
+        public static void CreateRoom(int roomSize = 2)
         {
+            if (!EnsureAuthorizedForAction())
+                return;
+
             Leave();
+            RoomSize = Mathf.Clamp(roomSize, 2, MaxRoomSize);
             IsInMatchmakingQueue = false;
             IsHost = true;
             Phase = LobbyPhase.InRoom;
             PlayersInRoom = 1;
+            LocalSeatIndex = 0;
             IsBusy = true;
             StatusMessage = "Creating room…";
             Notify();
@@ -192,6 +232,9 @@ namespace NexusGame
                 return false;
             }
 
+            if (!EnsureAuthorizedForAction())
+                return false;
+
             Leave();
             IsInMatchmakingQueue = false;
             IsHost = false;
@@ -207,13 +250,18 @@ namespace NexusGame
             return true;
         }
 
-        public static bool StartFindMatch()
+        public static bool StartFindMatch(int matchSize = 2)
         {
+            if (!EnsureAuthorizedForAction())
+                return false;
+
             Leave();
+            RoomSize = Mathf.Clamp(matchSize, 2, MaxRoomSize);
             IsInMatchmakingQueue = true;
             FromMatchmakingQueue = true;
             MatchFound = false;
             IsStealthBotMatch = false;
+            IsStealthBackfillMatch = false;
             _autoStartScheduled = false;
             _botFallbackTriggered = false;
             _queueStartedAt = Time.unscaledTime;
@@ -234,37 +282,115 @@ namespace NexusGame
         /// <summary>Leave the matchmaking queue (same as <see cref="Leave"/>).</summary>
         public static void CancelMatchmaking() => Leave();
 
-        public static void SimulateOpponentJoined()
+        static bool EnsureAuthorizedForAction()
         {
-            if (UseLiveServices || (Phase != LobbyPhase.InRoom && Phase != LobbyPhase.Searching))
-                return;
+            if (NexusUgsAuth.IsMultiplayerAuthorized)
+                return true;
 
-            if (Phase == LobbyPhase.Searching)
-            {
-                Phase = LobbyPhase.InRoom;
-                IsHost = true;
-                JoinCode = GenerateStubJoinCode();
-            }
-
-            PlayersInRoom = Mathf.Max(PlayersInRoom, MaxPlayers);
-            MatchFound = FromMatchmakingQueue;
-            JoinCode = FromMatchmakingQueue ? "" : JoinCode;
-            PlayersLine = FromMatchmakingQueue ? "Match found" : $"Players: {PlayersInRoom}/{MaxPlayers} — room full (stub)";
-            StatusMessage = FromMatchmakingQueue
-                ? "Match found!"
-                : IsHost
-                    ? "Opponent joined. You can start the match."
-                    : "Opponent joined. Waiting for host to start.";
-            Debug.Log("[Lobby] SimulateOpponentJoined (stub).");
-            Notify();
-            TryAutoStartMatchmaking();
+            FailAuthRequired(FormatAuthFailureMessage());
+            return false;
         }
 
-        public static void SimulateMatchFound()
+        /// <summary>Start interactive platform sign-in. Shows the error modal only if sign-in fails.</summary>
+        public static void RequestSignInForMultiplayer()
         {
-            if (UseLiveServices || Phase != LobbyPhase.Searching)
+            EnsureSignedIn(interactive: true, force: true);
+        }
+
+        /// <summary>Abort an in-flight sign-in attempt (e.g. player closed the modal).</summary>
+        public static void CancelSignInAttempt()
+        {
+            IsBusy = false;
+            Notify();
+        }
+
+        static void FailAuthRequired(string message)
+        {
+            Phase = LobbyPhase.Error;
+            StatusMessage = message;
+            UseLiveServices = false;
+            IsBusy = false;
+            OnSignInRequired?.Invoke();
+            Notify();
+        }
+
+        /// <summary>Host can fill empty private-room seats with AI opponents.</summary>
+        public static bool CanAddBot =>
+            IsHost && !FromMatchmakingQueue && Phase == LobbyPhase.InRoom &&
+            SeatedCount < RoomSize && !IsBusy;
+
+        public static void AddBot()
+        {
+            if (!CanAddBot)
                 return;
-            SimulateOpponentJoined();
+
+            BotCount++;
+            AfterBotCountChanged();
+        }
+
+        public static void RemoveBot()
+        {
+            if (!IsHost || FromMatchmakingQueue || BotCount <= 0)
+                return;
+
+            BotCount--;
+            AfterBotCountChanged();
+        }
+
+        static void AfterBotCountChanged()
+        {
+            RefreshPrivateRoomPresentation();
+            Notify();
+            PushBotCountToSession();
+        }
+
+        static string BotLineSuffix()
+        {
+            if (BotCount <= 0 || FromMatchmakingQueue)
+                return "";
+            return BotCount == 1 ? " (1 bot)" : $" ({BotCount} bots)";
+        }
+
+        static void RefreshPrivateRoomPresentation()
+        {
+            bool full = SeatedCount >= RoomSize;
+            PlayersLine = $"Players: {SeatedCount}/{RoomSize}{BotLineSuffix()}" +
+                          (full ? " — room full" : IsHost ? " — waiting for join" : "");
+
+            if (IsHost)
+                StatusMessage = SeatedCount >= 2
+                    ? full
+                        ? "Room full. You can start the match."
+                        : "You can start the match, or wait for more players."
+                    : "Waiting for opponent… Share the code below.";
+            else
+                StatusMessage = "Joined room. Waiting for host to start.";
+        }
+
+        /// <summary>
+        /// Host: mirror bot seats into the live session so clients see them. Private rooms stay
+        /// unlocked — humans joining displace bots (see the clamp in <see cref="ApplySessionSnapshot"/>).
+        /// </summary>
+        static void PushBotCountToSession()
+        {
+            if (!UseLiveServices || _activeSession == null || !_activeSession.IsHost)
+                return;
+
+            var session = _activeSession;
+            int bots = BotCount;
+            NexusUgsRunner.Instance?.Run(async () =>
+            {
+                try
+                {
+                    var host = session.AsHost();
+                    host.SetProperty(BotCountPropertyKey, new SessionProperty(bots.ToString()));
+                    await host.SavePropertiesAsync();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Lobby] Bot count sync failed: {ex.Message}");
+                }
+            });
         }
 
         /// <summary>Host starts Relay + NGO, then runs <paramref name="onSuccess"/>.</summary>
@@ -371,7 +497,7 @@ namespace NexusGame
         {
             if (!await TryBeginLiveSessionAsync())
             {
-                FailLiveOrStub(CreateRoomStub, FormatAuthFailureMessage());
+                FailLiveSession(FormatAuthFailureMessage(), authFailure: true);
                 return;
             }
 
@@ -381,7 +507,7 @@ namespace NexusGame
                 var options = new SessionOptions
                 {
                     Name = SessionName,
-                    MaxPlayers = MaxPlayers,
+                    MaxPlayers = RoomSize,
                     IsPrivate = true,
                     IsLocked = false
                 };
@@ -395,7 +521,7 @@ namespace NexusGame
             {
                 var msg = FriendlyError(ex);
                 Debug.LogWarning($"[Lobby] CreateSession failed: {ex.Message}");
-                FailLiveOrStub(CreateRoomStub, msg);
+                FailLiveSession(msg);
             }
             finally
             {
@@ -408,7 +534,7 @@ namespace NexusGame
         {
             if (!await TryBeginLiveSessionAsync())
             {
-                FailLiveOrStub(() => JoinRoomStub(code), FormatAuthFailureMessage());
+                FailLiveSession(FormatAuthFailureMessage(), authFailure: true);
                 return;
             }
 
@@ -437,9 +563,7 @@ namespace NexusGame
         {
             if (!await TryBeginLiveSessionAsync())
             {
-                FailLiveOrStub(
-                    () => StatusMessage = "Searching for opponent… (Editor stub — simulate match found.)",
-                    FormatAuthFailureMessage());
+                FailLiveSession(FormatAuthFailureMessage(), authFailure: true);
                 IsBusy = false;
                 Notify();
                 return;
@@ -448,13 +572,22 @@ namespace NexusGame
             try
             {
                 NexusNetworkSetup.EnsureNetworkManager();
+                // Indexed "match size" property keeps the 1v1 and 4-player queues separate pools.
+                // (FilterField.MaxPlayers is rejected by the lobby backend — the SDK never maps it.)
                 var quickJoin = new QuickJoinOptions { CreateSession = true };
+                quickJoin.Filters.Add(new FilterOption(
+                    FilterField.StringIndex1, RoomSize.ToString(), FilterOperation.Equal));
                 var sessionOptions = new SessionOptions
                 {
                     Name = SessionName,
-                    MaxPlayers = MaxPlayers,
+                    MaxPlayers = RoomSize,
                     IsPrivate = false,
-                    IsLocked = false
+                    IsLocked = false,
+                    SessionProperties = new Dictionary<string, SessionProperty>
+                    {
+                        [MatchSizePropertyKey] = new SessionProperty(RoomSize.ToString(),
+                            VisibilityPropertyOptions.Public, PropertyIndex.String1)
+                    }
                 };
 
                 StatusMessage = "Searching for opponent…";
@@ -472,9 +605,20 @@ namespace NexusGame
                 if (_botFallbackTriggered)
                     return;
 
-                Phase = LobbyPhase.Error;
-                StatusMessage = FriendlyError(ex);
                 UseLiveServices = false;
+                if (IsInMatchmakingQueue)
+                {
+                    // Don't dead-end the queue on a service error — keep "searching" so the
+                    // 30s stealth-bot fallback in TickPresence still gives the player a match.
+                    Debug.LogWarning($"[Lobby] Matchmake failed ({ex.Message}) — staying in queue for bot fallback.");
+                    Phase = LobbyPhase.Searching;
+                    StatusMessage = "Searching for opponent…";
+                }
+                else
+                {
+                    Phase = LobbyPhase.Error;
+                    StatusMessage = FriendlyError(ex);
+                }
             }
             finally
             {
@@ -489,8 +633,7 @@ namespace NexusGame
             if (!await NexusUgsAuth.EnsureReadyAsync())
             {
                 UseLiveServices = false;
-                Phase = LobbyPhase.Error;
-                StatusMessage = FormatAuthFailureMessage();
+                FailAuthRequired(FormatAuthFailureMessage());
                 Debug.LogWarning($"[Lobby] Live services unavailable: {StatusMessage}");
                 return false;
             }
@@ -504,24 +647,31 @@ namespace NexusGame
             if (!string.IsNullOrEmpty(NexusUgsAuth.LastError))
                 return NexusUgsAuth.LastError;
 
-            return "Sign-in failed. Enable Anonymous + Google Play Games in the Unity Dashboard (Authentication).";
+            return $"Sign in with {NexusPlatformSignIn.RequiredPlatformLabel} to play online.";
         }
 
         /// <summary>Call when opening multiplayer UI — signs in before create/join/queue.</summary>
-        public static void EnsureSignedIn()
+        public static void EnsureSignedIn(bool interactive = false, bool force = false)
         {
-            if (NexusUgsAuth.IsReady || IsBusy)
+            if (NexusUgsAuth.IsMultiplayerAuthorized)
+                return;
+
+            if (IsBusy && !force)
                 return;
 
             IsBusy = true;
-            StatusMessage = "Signing in…";
+            StatusMessage = interactive
+                ? $"Opening {NexusPlatformSignIn.RequiredPlatformLabel} sign-in…"
+                : "Signing in…";
+            if (Phase == LobbyPhase.Error)
+                Phase = LobbyPhase.Idle;
             Notify();
             NexusUgsRunner.EnsureExists();
             NexusUgsRunner.Instance.Run(async () =>
             {
                 try
                 {
-                    if (await NexusUgsAuth.TrySignInAsync())
+                    if (await NexusUgsAuth.TrySignInAsync(interactive))
                     {
                         UseLiveServices = true;
                         StatusMessage = NexusUgsAuth.MultiplayerStatusLine();
@@ -530,8 +680,7 @@ namespace NexusGame
                     else
                     {
                         UseLiveServices = false;
-                        Phase = LobbyPhase.Error;
-                        StatusMessage = FormatAuthFailureMessage();
+                        FailAuthRequired(FormatAuthFailureMessage());
                     }
                 }
                 finally
@@ -542,23 +691,13 @@ namespace NexusGame
             });
         }
 
-#if UNITY_EDITOR
-        static bool AllowStubFallback => true;
-#else
-        static bool AllowStubFallback => false;
-#endif
-
-        static void FailLiveOrStub(Action stubAction, string liveFailureContext)
+        static void FailLiveSession(string message, bool authFailure = false)
         {
-            if (AllowStubFallback)
-            {
-                Debug.LogWarning($"[Lobby] {liveFailureContext} — using Editor stub.");
-                stubAction();
-                return;
-            }
-
             Phase = LobbyPhase.Error;
-            StatusMessage = liveFailureContext;
+            StatusMessage = message;
+            UseLiveServices = false;
+            if (authFailure)
+                OnSignInRequired?.Invoke();
         }
 
         static void AttachSession(ISession session)
@@ -569,6 +708,7 @@ namespace NexusGame
                 return;
 
             session.Changed += OnSessionChanged;
+            session.SessionPropertiesChanged += OnSessionChanged;
             session.PlayerJoined += OnSessionPlayerChanged;
             session.PlayerHasLeft += OnSessionPlayerChanged;
             session.Deleted += OnSessionDeleted;
@@ -582,6 +722,7 @@ namespace NexusGame
                 return;
 
             session.Changed -= OnSessionChanged;
+            session.SessionPropertiesChanged -= OnSessionChanged;
             session.PlayerJoined -= OnSessionPlayerChanged;
             session.PlayerHasLeft -= OnSessionPlayerChanged;
             session.Deleted -= OnSessionDeleted;
@@ -661,20 +802,40 @@ namespace NexusGame
 
             UseLiveServices = true;
             JoinCode = session.Code ?? JoinCode;
+            RoomSize = Mathf.Clamp(session.MaxPlayers, 2, MaxRoomSize);
             int count = Mathf.Max(1, session.PlayerCount);
-            PlayersInRoom = Mathf.Clamp(count, 1, MaxPlayers);
+            PlayersInRoom = Mathf.Clamp(count, 1, RoomSize);
             IsHost = session.IsHost;
+            LocalSeatIndex = ComputeLocalSeatIndex(session);
 
-            if (IsInMatchmakingQueue && PlayersInRoom < MaxPlayers)
+            // Host: humans joining a private room displace bots (UGS only counts humans toward MaxPlayers).
+            if (session.IsHost && BotCount > 0 && SeatedCount > RoomSize)
+            {
+                BotCount = Mathf.Max(0, RoomSize - PlayersInRoom);
+                PushBotCountToSession();
+            }
+
+            // Non-hosts mirror the host's bot seats from the session properties.
+            if (!session.IsHost &&
+                session.Properties != null &&
+                session.Properties.TryGetValue(BotCountPropertyKey, out var botProp) &&
+                int.TryParse(botProp?.Value, out int bots))
+            {
+                BotCount = Mathf.Clamp(bots, 0, RoomSize - PlayersInRoom);
+            }
+
+            if (IsInMatchmakingQueue && PlayersInRoom < RoomSize)
             {
                 Phase = LobbyPhase.Searching;
                 PlayersLine = "Searching…";
                 int waitSec = Mathf.FloorToInt(QueueWaitSeconds);
-                StatusMessage = $"Searching for opponent… ({waitSec}s)";
+                StatusMessage = RoomSize > 2
+                    ? $"Searching for players… {PlayersInRoom}/{RoomSize} ({waitSec}s)"
+                    : $"Searching for opponent… ({waitSec}s)";
                 return;
             }
 
-            if (IsInMatchmakingQueue && PlayersInRoom >= MaxPlayers)
+            if (IsInMatchmakingQueue && PlayersInRoom >= RoomSize)
             {
                 Phase = LobbyPhase.InRoom;
                 MatchFound = true;
@@ -685,18 +846,39 @@ namespace NexusGame
                 return;
             }
 
-            Phase = LobbyPhase.InRoom;
-            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers}" +
-                          (PlayersInRoom >= MaxPlayers ? " — room full" : IsHost ? " — waiting for join" : "");
+            // A matchmaking client whose host backfilled with bots: present it as a found match.
+            if (FromMatchmakingQueue)
+            {
+                Phase = LobbyPhase.InRoom;
+                PlayersLine = MatchFound ? "Match found" : PlayersLine;
+                return;
+            }
 
-            if (PlayersInRoom >= MaxPlayers && IsHost)
-                StatusMessage = "Opponent joined. You can start the match.";
-            else if (PlayersInRoom >= MaxPlayers)
-                StatusMessage = "Opponent joined. Waiting for host to start.";
-            else if (IsHost)
-                StatusMessage = "Waiting for opponent… Share the code below.";
-            else
-                StatusMessage = "Joined room. Waiting for host to start.";
+            Phase = LobbyPhase.InRoom;
+            RefreshPrivateRoomPresentation();
+        }
+
+        static int ComputeLocalSeatIndex(ISession session)
+        {
+            try
+            {
+                string selfId = session.CurrentPlayer?.Id;
+                var players = session.Players;
+                if (selfId == null || players == null)
+                    return session.IsHost ? 0 : 1;
+
+                for (int i = 0; i < players.Count; i++)
+                {
+                    if (players[i] != null && players[i].Id == selfId)
+                        return i;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Lobby] Seat lookup failed: {ex.Message}");
+            }
+
+            return session.IsHost ? 0 : 1;
         }
 
         static void TryAutoStartMatchmaking()
@@ -735,7 +917,8 @@ namespace NexusGame
             IsInMatchmakingQueue = false;
             IsHost = true;
             Phase = LobbyPhase.InRoom;
-            PlayersInRoom = MaxPlayers;
+            PlayersInRoom = 1;
+            BotCount = RoomSize - 1;
             PlayersLine = "Match found";
             StatusMessage = "Match found!";
             JoinCode = "";
@@ -743,9 +926,60 @@ namespace NexusGame
             UseLiveServices = false;
             _autoStartScheduled = true;
             DetachFromLiveSessionQuietly();
-            Debug.Log("[Lobby] Matchmaking queue timeout — starting disguised bot opponent.");
+            Debug.Log($"[Lobby] Matchmaking queue timeout — starting disguised local match vs {BotCount} bot(s).");
             Notify();
             NexusUgsRunner.RunOnMainThread(() => OnMatchmakingMatchReady?.Invoke());
+        }
+
+        /// <summary>
+        /// Host: queue timed out with 2-3 humans in a 4-player room. Keep the live session,
+        /// fill the empty seats with host-run bots, and start — clients see a normal match.
+        /// </summary>
+        static void TriggerStealthBackfill()
+        {
+            if (_botFallbackTriggered || !IsInMatchmakingQueue || _activeSession == null || !IsHost)
+                return;
+
+            _botFallbackTriggered = true;
+            IsStealthBackfillMatch = true;
+            MatchFound = true;
+            IsInMatchmakingQueue = false;
+            Phase = LobbyPhase.InRoom;
+            BotCount = Mathf.Max(1, RoomSize - PlayersInRoom);
+            PlayersLine = "Match found";
+            StatusMessage = "Match found!";
+            JoinCode = "";
+            IsBusy = false;
+            _autoStartScheduled = true;
+            Debug.Log($"[Lobby] Queue timeout with {PlayersInRoom} players — backfilling {BotCount} disguised bot seat(s).");
+            Notify();
+
+            // Publish bot seats + lock before relay start so late session updates can't admit more humans.
+            var session = _activeSession;
+            int bots = BotCount;
+            var runner = NexusUgsRunner.Instance;
+            if (runner == null)
+            {
+                OnMatchmakingMatchReady?.Invoke();
+                return;
+            }
+
+            runner.Run(async () =>
+            {
+                try
+                {
+                    var host = session.AsHost();
+                    host.SetProperty(BotCountPropertyKey, new SessionProperty(bots.ToString()));
+                    host.IsLocked = true;
+                    await host.SavePropertiesAsync();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Lobby] Backfill session sync failed: {ex.Message}");
+                }
+
+                NexusUgsRunner.RunOnMainThread(() => OnMatchmakingMatchReady?.Invoke());
+            });
         }
 
         static void DetachFromLiveSessionQuietly()
@@ -817,32 +1051,6 @@ namespace NexusGame
             }
         }
 
-        static void CreateRoomStub()
-        {
-            UseLiveServices = false;
-            IsHost = true;
-            Phase = LobbyPhase.InRoom;
-            PlayersInRoom = 1;
-            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} (stub)";
-            JoinCode = GenerateStubJoinCode();
-            StatusMessage =
-                "Waiting for opponent… Share the code. (Offline stub — both devices need Play Games + UGS for live sync.)";
-            Debug.Log($"[Lobby] Created room (stub). Code: {JoinCode}");
-        }
-
-        static void JoinRoomStub(string code)
-        {
-            UseLiveServices = false;
-            IsHost = false;
-            Phase = LobbyPhase.InRoom;
-            PlayersInRoom = 1;
-            PlayersLine = $"Players: {PlayersInRoom}/{MaxPlayers} (stub — other device cannot see you)";
-            JoinCode = code;
-            StatusMessage =
-                "Joined stub room. Use live UGS + sign-in on both devices to sync. Host: Simulate opponent (dev).";
-            Debug.Log($"[Lobby] Joined room (stub). Code: {JoinCode}");
-        }
-
         static string FriendlyError(Exception ex)
         {
             if (ex is AggregateException agg && agg.InnerException != null)
@@ -867,16 +1075,6 @@ namespace NexusGame
                 SessionError.NetworkSetupFailed => "Relay setup failed. Check Relay is enabled in the dashboard.",
                 _ => string.IsNullOrEmpty(fallback) ? "Online service error." : fallback
             };
-        }
-
-        static string GenerateStubJoinCode()
-        {
-            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-            var rng = new System.Random(Environment.TickCount);
-            char[] buf = new char[6];
-            for (int i = 0; i < buf.Length; i++)
-                buf[i] = chars[rng.Next(chars.Length)];
-            return new string(buf);
         }
     }
 }

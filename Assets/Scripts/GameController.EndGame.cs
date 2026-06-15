@@ -87,6 +87,7 @@ namespace NexusGame
             FocusFirePicker = null;
             SecretMissionOffer = null;
             DragonPhase = null;
+            CancelFortressPlacement();
             _liveBattleLines = null;
             BattlePlan.Clear();
         }

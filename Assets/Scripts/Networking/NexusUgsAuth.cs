@@ -12,6 +12,10 @@ namespace NexusGame
         public static bool IsServicesInitialized { get; private set; }
         public static bool IsSignedIn => AuthenticationService.Instance.IsSignedIn;
         public static bool IsReady => IsServicesInitialized && IsSignedIn;
+
+        /// <summary>True when signed in with Game Center, Play Games, or Editor dev UGS.</summary>
+        public static bool IsMultiplayerAuthorized =>
+            IsReady && NexusPlatformSignIn.IsAuthorizedPlatformSignIn;
         public static string LastError { get; private set; } = "";
         public static string PlayerId => IsSignedIn ? AuthenticationService.Instance.PlayerId : "";
         public static string PlatformLabel => NexusPlatformSignIn.PlatformLabel;
@@ -48,19 +52,26 @@ namespace NexusGame
         }
 
         /// <summary>Try sign-in without throwing; updates <see cref="LastError"/> on failure.</summary>
-        public static async Task<bool> TrySignInAsync()
+        public static async Task<bool> TrySignInAsync(bool interactive = false)
         {
-            if (IsSignedIn)
+            if (IsMultiplayerAuthorized)
                 return true;
 
             if (!await EnsureServicesInitializedAsync())
                 return false;
 
+            if (IsSignedIn && !NexusPlatformSignIn.IsAuthorizedPlatformSignIn)
+            {
+                AuthenticationService.Instance.SignOut(true);
+                NexusPlatformSignIn.MarkPlatformSignedIn(NexusPlatformSignIn.PlatformKind.Unknown);
+            }
+
             try
             {
-                if (await NexusPlatformSignIn.TrySignInAsync())
+                if (await NexusPlatformSignIn.TrySignInAsync(interactive))
                 {
                     SetLastError("");
+                    NexusUgsRunner.RunOnMainThread(() => OnAuthStateChanged?.Invoke());
                     return true;
                 }
 
@@ -78,7 +89,7 @@ namespace NexusGame
         /// <summary>Initialize UGS (if needed) and sign in with the platform account for this build.</summary>
         public static async Task<bool> EnsureReadyAsync()
         {
-            if (IsReady)
+            if (IsMultiplayerAuthorized)
                 return true;
 
             if (!await EnsureServicesInitializedAsync())
@@ -92,16 +103,16 @@ namespace NexusGame
 
         public static string MultiplayerStatusLine()
         {
-            if (IsReady)
+            if (IsMultiplayerAuthorized)
                 return NexusPlatformSignIn.MultiplayerStatusLine();
 
             if (!IsServicesInitialized && !string.IsNullOrEmpty(LastError))
-                return $"UGS offline: {LastError}";
+                return $"Sign-in unavailable: {LastError}";
 
             if (!string.IsNullOrEmpty(LastError))
                 return $"Not signed in: {LastError}";
 
-            return NexusPlatformSignIn.MultiplayerStatusLine();
+            return $"Sign in with {NexusPlatformSignIn.RequiredPlatformLabel} to play online.";
         }
     }
 }

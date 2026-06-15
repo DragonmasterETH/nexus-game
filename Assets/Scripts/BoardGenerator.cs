@@ -17,6 +17,9 @@ namespace NexusGame
         public GameObject ExplorationMarker;
         public GameObject Highlight;
         public GameObject MineLabel;
+        /// <summary>Player index that built a fortress here, or -1.</summary>
+        public int FortressOwnerPlayerIndex = -1;
+        public GameObject FortressMarker;
 
         /// <summary>Original hex fill color before selection dim; used by <see cref="MobileInputController"/>.</summary>
         public Color HexFillBaseColor;

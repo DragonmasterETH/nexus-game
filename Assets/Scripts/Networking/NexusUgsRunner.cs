@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -33,6 +34,16 @@ namespace NexusGame
 
             _instance = this;
             DontDestroyOnLoad(gameObject);
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                GooglePlayGames.PlayGamesPlatform.Activate();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UGS] PlayGamesPlatform.Activate at startup failed: {ex.Message}");
+            }
+#endif
             _ = WarmUpAsync();
         }
 
@@ -63,6 +74,21 @@ namespace NexusGame
 
             lock (_instance._mainThreadQueue)
                 _instance._mainThreadQueue.Enqueue(action);
+        }
+
+        /// <summary>Run on main thread after a few frames (lets Unity dismiss overlays before Android UI).</summary>
+        public void RunDeferred(Action action, int frameDelay = 3)
+        {
+            if (action == null)
+                return;
+            StartCoroutine(DeferredRoutine(action, Mathf.Max(1, frameDelay)));
+        }
+
+        static IEnumerator DeferredRoutine(Action action, int frameDelay)
+        {
+            for (int i = 0; i < frameDelay; i++)
+                yield return null;
+            action?.Invoke();
         }
 
         static async Task WarmUpAsync()

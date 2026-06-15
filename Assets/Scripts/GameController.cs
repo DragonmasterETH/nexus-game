@@ -137,11 +137,24 @@ namespace NexusGame
 
             if (Players.Count == 0)
             {
-                // VS AI is always a 2-player match on the current board layout.
                 var layout = Board != null ? Board.LayoutMode : BoardLayoutMode.OneVOne;
-                int playerCount = VsAiMode
-                    ? 2
-                    : (layout == BoardLayoutMode.TwoToFour || layout == BoardLayoutMode.TwoToFourSmall ? 4 : 2);
+                int playerCount;
+                if (NexusSession.IsOnline || (VsAiMode && NexusSession.StealthBotOpponent))
+                {
+                    // Online and disguised-bot matches: seats are decided by the lobby (humans + bots).
+                    playerCount = Mathf.Clamp(NexusSession.TotalSeats, 2, 4);
+                }
+                else if (VsAiMode)
+                {
+                    // Menu VS AI is always a 2-player match on the current board layout.
+                    playerCount = 2;
+                }
+                else
+                {
+                    playerCount = layout == BoardLayoutMode.TwoToFour || layout == BoardLayoutMode.TwoToFourSmall
+                        ? 4
+                        : 2;
+                }
 
                 if (playerCount >= 1)
                     Players.Add(new PlayerState { PlayerIndex = 0, Color = Color.blue, Rubium = StartingRubium });
@@ -876,9 +889,22 @@ namespace NexusGame
         internal bool NormalMovementOccurredThisTurn => _normalMovementOccurredThisTurn;
         public bool AnyMovementOccurredThisTurn => _anyMovementOccurredThisTurn;
 
-        /// <summary>True if this player seat is run by the AI in VsAiMode.</summary>
-        public bool IsAiControlled(PlayerState p) =>
-            VsAiMode && p != null && (WatchAiVsAiMode || p.PlayerIndex == AiPlayerIndex);
+        /// <summary>True if this seat is driven by the local AI: VsAi/stealth matches, or host-run online bots.</summary>
+        public bool IsAiControlled(PlayerState p)
+        {
+            if (p == null)
+                return false;
+
+            if (NexusSession.IsOnline)
+                return NexusSession.IsHost && NexusSession.IsBotSeat(p.PlayerIndex);
+
+            return VsAiMode &&
+                   (WatchAiVsAiMode || p.PlayerIndex == AiPlayerIndex || NexusSession.IsBotSeat(p.PlayerIndex));
+        }
+
+        /// <summary>True when SimpleAiController has any seat to run on this device.</summary>
+        public bool AnyAiSeatActive =>
+            VsAiMode || (NexusSession.IsOnline && NexusSession.IsHost && NexusSession.BotSeatCount > 0);
 
         /// <summary>True if the human on this device may control the given seat (online: only your seat).</summary>
         public bool CanLocalPlayerActFor(PlayerState p)
@@ -1052,6 +1078,7 @@ namespace NexusGame
             _activeRetreatSourceThisTurn = null;
             _normalMovementOccurredThisTurn = false;
             _anyMovementOccurredThisTurn = false;
+            ClearFortressTurnState();
 
             if (RunBattlePhaseAtTurnStart && Config != null)
             {
@@ -1209,6 +1236,7 @@ namespace NexusGame
 
             Destroy(unit.gameObject);
             UnitInstance.RelayoutTile(tile);
+            RefreshFortressControlOnTile(tile);
         }
 
         internal void NotifyUnitMoved(PlayerState owner, BoardTile from, BoardTile to)
@@ -1216,6 +1244,7 @@ namespace NexusGame
             if (owner == null || owner != CurrentPlayer || from == null || to == null)
                 return;
             _anyMovementOccurredThisTurn = true;
+            PendingFortressPlacement = false;
 
             bool fromContested = TileHasEnemyForOwner(from, owner);
             bool toHasEnemy = TileHasEnemyForOwner(to, owner);
@@ -1232,6 +1261,9 @@ namespace NexusGame
             {
                 _normalMovementOccurredThisTurn = true;
             }
+
+            RefreshFortressControlOnTile(from);
+            RefreshFortressControlOnTile(to);
         }
 
         bool TileHasEnemyForOwner(BoardTile tile, PlayerState owner)

@@ -32,14 +32,66 @@ namespace NexusGame
             _ => "platform account"
         };
 
-        public static async Task<bool> TrySignInAsync()
+        /// <summary>Platform name shown when multiplayer requires sign-in.</summary>
+        public static string RequiredPlatformLabel
+        {
+            get
+            {
+#if UNITY_IOS
+                return "Game Center";
+#elif UNITY_ANDROID
+                return "Google Play Games";
+#elif UNITY_EDITOR
+                return "Unity Gaming Services";
+#else
+                return PlatformLabel;
+#endif
+            }
+        }
+
+        /// <summary>True when signed in with Game Center, Play Games, or Editor dev anonymous.</summary>
+        public static bool IsAuthorizedPlatformSignIn
+        {
+            get
+            {
+                if (!AuthenticationService.Instance.IsSignedIn)
+                    return false;
+
+#if UNITY_EDITOR
+                return ActivePlatform == PlatformKind.EditorDev;
+#elif UNITY_IOS
+                return HasLinkedAppleGameCenterIdentity();
+#elif UNITY_ANDROID
+                return HasLinkedGooglePlayGamesIdentity();
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>Called after a successful platform → UGS sign-in completes.</summary>
+        public static void MarkPlatformSignedIn(PlatformKind kind)
+        {
+            ActivePlatform = kind;
+        }
+
+        public static async Task<bool> TrySignInAsync(bool interactive = false)
         {
             LastSignInError = "";
 
             if (AuthenticationService.Instance.IsSignedIn)
             {
-                ResolveActivePlatformFromBuild();
-                return true;
+                await RefreshPlayerInfoAsync();
+                if (IsAuthorizedPlatformSignIn)
+                {
+                    ResolveActivePlatformFromBuild();
+                    return true;
+                }
+
+#if !UNITY_EDITOR
+                AuthenticationService.Instance.SignOut(true);
+                ActivePlatform = PlatformKind.Unknown;
+#endif
             }
 
 #if UNITY_EDITOR
@@ -60,25 +112,15 @@ namespace NexusGame
             ActivePlatform = PlatformKind.GooglePlayGames;
             if (NexusGooglePlayGamesSignIn.IsConfigured && NexusGooglePlayGamesSignIn.IsAvailable)
             {
-                if (await NexusGooglePlayGamesSignIn.TrySignInAsync())
+                if (await NexusGooglePlayGamesSignIn.TrySignInAsync(interactive))
                     return true;
 
                 LastSignInError = NexusGooglePlayGamesSignIn.LastError ?? "Google Play Games sign-in failed.";
-                Debug.LogWarning($"[UGS] Play Games failed: {LastSignInError}. Trying anonymous UGS sign-in…");
-            }
-            else
-            {
-                LastSignInError = NexusGooglePlayGamesSignIn.LastError ??
-                                  "GPGS not configured — run Nexus → Multiplayer → Google Play Games Setup.";
-                Debug.LogWarning($"[UGS] {LastSignInError} Trying anonymous UGS sign-in…");
+                return false;
             }
 
-            if (await SignInAnonymousAsync())
-            {
-                ActivePlatform = PlatformKind.AnonymousFallback;
-                return true;
-            }
-
+            LastSignInError = NexusGooglePlayGamesSignIn.LastError ??
+                              "GPGS not configured — run Nexus → Multiplayer → Google Play Games Setup.";
             return false;
 #else
             LastSignInError = "Platform sign-in is not configured for this build target.";
@@ -99,14 +141,10 @@ namespace NexusGame
                 return "Open Multiplayer to sign in with Game Center.";
             return "Game Center: install Apple Game Kit + NEXUS_APPLE_GAMEKIT.";
 #elif UNITY_ANDROID
-            if (AuthenticationService.Instance.IsSignedIn)
-            {
-                if (ActivePlatform == PlatformKind.AnonymousFallback)
-                    return "Signed in (anonymous dev). Enable Play Games in UGS dashboard for production.";
+            if (AuthenticationService.Instance.IsSignedIn && IsAuthorizedPlatformSignIn)
                 return $"Signed in with {PlatformLabel}. Live rooms enabled.";
-            }
 
-            return "Open Multiplayer to sign in (Play Games or anonymous fallback).";
+            return "Sign in with Google Play Games to play online.";
 #else
             return "Platform sign-in is not available on this build.";
 #endif
@@ -117,16 +155,54 @@ namespace NexusGame
 #if UNITY_EDITOR
             ActivePlatform = PlatformKind.EditorDev;
 #elif UNITY_IOS
-            ActivePlatform = PlatformKind.AppleGameCenter;
+            if (HasLinkedAppleGameCenterIdentity())
+                ActivePlatform = PlatformKind.AppleGameCenter;
 #elif UNITY_ANDROID
-            if (ActivePlatform == PlatformKind.Unknown)
+            if (HasLinkedGooglePlayGamesIdentity())
                 ActivePlatform = PlatformKind.GooglePlayGames;
 #else
             ActivePlatform = PlatformKind.Unknown;
 #endif
         }
 
-#if UNITY_EDITOR || UNITY_ANDROID
+        static async Task RefreshPlayerInfoAsync()
+        {
+            if (!AuthenticationService.Instance.IsSignedIn)
+                return;
+
+            try
+            {
+                await AuthenticationService.Instance.GetPlayerInfoAsync();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[UGS] GetPlayerInfoAsync failed: {ex.Message}");
+            }
+        }
+
+#if UNITY_ANDROID
+        static bool HasLinkedGooglePlayGamesIdentity()
+        {
+            var info = AuthenticationService.Instance.PlayerInfo;
+            if (info == null)
+                return false;
+
+            string id = info.GetGooglePlayGamesId();
+            return !string.IsNullOrEmpty(id);
+        }
+#elif UNITY_IOS
+        static bool HasLinkedAppleGameCenterIdentity()
+        {
+            var info = AuthenticationService.Instance.PlayerInfo;
+            if (info == null)
+                return false;
+
+            string id = info.GetAppleGameCenterId();
+            return !string.IsNullOrEmpty(id);
+        }
+#endif
+
+#if UNITY_EDITOR
         static async Task<bool> SignInAnonymousAsync()
         {
             try
@@ -151,7 +227,7 @@ namespace NexusGame
         {
             if (await SignInAnonymousAsync())
             {
-                ActivePlatform = PlatformKind.EditorDev;
+                MarkPlatformSignedIn(PlatformKind.EditorDev);
                 return true;
             }
 

@@ -37,7 +37,7 @@ namespace NexusGame
             }
         }
 
-        public static async Task<bool> TrySignInAsync()
+        public static async Task<bool> TrySignInAsync(bool interactive = false)
         {
 #if UNITY_ANDROID
             LastError = "";
@@ -47,7 +47,7 @@ namespace NexusGame
                 return false;
             }
 
-            return await SignInWithPlayGamesAsync();
+            return await SignInWithPlayGamesAsync(interactive);
 #else
             LastError = "Play Games sign-in only runs on Android device builds.";
             await Task.CompletedTask;
@@ -56,54 +56,110 @@ namespace NexusGame
         }
 
 #if UNITY_ANDROID
-        static Task<bool> SignInWithPlayGamesAsync()
+        static Task<bool> SignInWithPlayGamesAsync(bool interactive)
         {
             var tcs = new TaskCompletionSource<bool>();
+            NexusUgsRunner.EnsureExists();
 
-            try
+            void BeginPlayGamesAuth()
             {
-                GooglePlayGames.PlayGamesPlatform.Activate();
-
-                GooglePlayGames.PlayGamesPlatform.Instance.Authenticate(status =>
+                try
                 {
-                    if (status != GooglePlayGames.BasicApi.SignInStatus.Success)
-                    {
-                        LastError = $"Play Games authenticate failed: {status}. Sign into Play Games on the device.";
-                        Debug.LogWarning($"[UGS] {LastError}");
-                        tcs.TrySetResult(false);
-                        return;
-                    }
+                    GooglePlayGames.PlayGamesPlatform.Activate();
 
-                    GooglePlayGames.PlayGamesPlatform.Instance.RequestServerSideAccess(true, authCode =>
+                    void onPlayGamesReady(GooglePlayGames.BasicApi.SignInStatus status)
                     {
-                        if (string.IsNullOrEmpty(authCode))
+                        Debug.Log($"[UGS] Play Games authenticate status={status} interactive={interactive}");
+                        if (status != GooglePlayGames.BasicApi.SignInStatus.Success)
                         {
-                            LastError =
-                                "Play Games auth code empty. Add your keystore SHA-1 to the Android OAuth client in Google Cloud Console.";
+                            LastError = PlayGamesStatusMessage(status, interactive);
                             Debug.LogWarning($"[UGS] {LastError}");
                             tcs.TrySetResult(false);
                             return;
                         }
 
-                        CompleteUgsSignIn(authCode, tcs);
-                    });
-                });
+                        RequestAuthCodeAndCompleteUgs(tcs);
+                    }
+
+                    if (interactive)
+                    {
+                        Debug.Log("[UGS] ManuallyAuthenticate — opening Play Games sign-in UI");
+                        GooglePlayGames.PlayGamesPlatform.Instance.ManuallyAuthenticate(onPlayGamesReady);
+                    }
+                    else
+                    {
+                        GooglePlayGames.PlayGamesPlatform.Instance.Authenticate(silentStatus =>
+                        {
+                            if (silentStatus == GooglePlayGames.BasicApi.SignInStatus.Success)
+                                RequestAuthCodeAndCompleteUgs(tcs);
+                            else
+                                tcs.TrySetResult(false);
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LastError = ex.Message;
+                    Debug.LogWarning($"[UGS] Play Games sign-in failed: {ex.Message}");
+                    tcs.TrySetResult(false);
+                }
             }
-            catch (Exception ex)
+
+            if (interactive)
             {
-                LastError = ex.Message;
-                Debug.LogWarning($"[UGS] Play Games sign-in failed: {ex.Message}");
-                tcs.TrySetResult(false);
+                // Dismiss Unity overlays first; fullscreen IMGUI modals break the Play Games activity handoff.
+                NexusUgsRunner.Instance.RunDeferred(BeginPlayGamesAuth, 4);
+            }
+            else
+            {
+                NexusUgsRunner.RunOnMainThread(BeginPlayGamesAuth);
             }
 
             return tcs.Task;
+        }
+
+        static void RequestAuthCodeAndCompleteUgs(TaskCompletionSource<bool> tcs)
+        {
+            Debug.Log("[UGS] Play Games authenticated — requesting server auth code");
+            GooglePlayGames.PlayGamesPlatform.Instance.RequestServerSideAccess(true, authCode =>
+            {
+                if (string.IsNullOrEmpty(authCode))
+                {
+                    LastError =
+                        "Play Games auth code empty. Add your build keystore SHA-1 to the Android OAuth client " +
+                        "(package com.clankergames.nexus) in Google Cloud Console, and enable Google Play Games in Unity Dashboard → Authentication.";
+                    Debug.LogWarning($"[UGS] {LastError}");
+                    tcs.TrySetResult(false);
+                    return;
+                }
+
+                CompleteUgsSignIn(authCode, tcs);
+            });
+        }
+
+        static string PlayGamesStatusMessage(GooglePlayGames.BasicApi.SignInStatus status, bool interactive)
+        {
+            return status switch
+            {
+                GooglePlayGames.BasicApi.SignInStatus.Canceled when interactive =>
+                    "Play Games did not finish sign-in after Continue. Verify Google Cloud OAuth has the correct " +
+                    "SHA-1 for this build's keystore and package com.clankergames.nexus, and that Google Play Games is enabled in Unity Dashboard → Authentication.",
+                GooglePlayGames.BasicApi.SignInStatus.Canceled =>
+                    "Play Games sign-in required. Tap Try Again to open the sign-in screen.",
+                GooglePlayGames.BasicApi.SignInStatus.InternalError =>
+                    "Play Games sign-in failed (internal error). Update the Play Games app, check network, and retry.",
+                _ => $"Play Games authenticate failed: {status}. Sign into Play Games on the device."
+            };
         }
 
         static async void CompleteUgsSignIn(string authCode, TaskCompletionSource<bool> tcs)
         {
             try
             {
+                Debug.Log("[UGS] Signing into Unity Authentication with Play Games auth code");
                 await AuthenticationService.Instance.SignInWithGooglePlayGamesAsync(authCode);
+                await AuthenticationService.Instance.GetPlayerInfoAsync();
+                NexusPlatformSignIn.MarkPlatformSignedIn(NexusPlatformSignIn.PlatformKind.GooglePlayGames);
                 Debug.Log($"[UGS] UGS signed in with Play Games. PlayerId={AuthenticationService.Instance.PlayerId}");
                 tcs.TrySetResult(true);
             }

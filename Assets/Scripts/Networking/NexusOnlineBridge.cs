@@ -16,6 +16,18 @@ namespace NexusGame
         /// <summary>Client receives <see cref="BeginMatchClientRpc"/> after host starts relay.</summary>
         public static event Action MatchStartRequested;
 
+        /// <summary>Match setup the host sent with the start RPC (0 = none received; lobby values are the fallback).</summary>
+        public static int PendingMatchTotalSeats { get; private set; }
+        public static int PendingMatchHumanSeats { get; private set; }
+        public static bool PendingMatchStealthBots { get; private set; }
+
+        public static void ClearPendingMatchSetup()
+        {
+            PendingMatchTotalSeats = 0;
+            PendingMatchHumanSeats = 0;
+            PendingMatchStealthBots = false;
+        }
+
         byte[] _pendingClientPayload;
         uint _pendingClientVersion;
         Coroutine _clientSyncWatchdog;
@@ -597,11 +609,22 @@ namespace NexusGame
         }
 
         [ClientRpc(Delivery = RpcDelivery.Reliable)]
-        void BeginMatchClientRpc(ClientRpcParams clientRpcParams = default)
+        void BeginMatchClientRpc(int totalSeats, int humanSeats, bool stealthBots,
+            ClientRpcParams clientRpcParams = default)
         {
             if (IsServer)
                 return;
+
+            PendingMatchTotalSeats = totalSeats;
+            PendingMatchHumanSeats = humanSeats;
+            PendingMatchStealthBots = stealthBots;
             MatchStartRequested?.Invoke();
+        }
+
+        void SendBeginMatchFromSession(ClientRpcParams rpcParams = default)
+        {
+            BeginMatchClientRpc(NexusSession.TotalSeats, NexusSession.HumanSeatCount,
+                NexusSession.StealthBotOpponent, rpcParams);
         }
 
         void SendMatchStartToClient(ulong clientId)
@@ -610,14 +633,14 @@ namespace NexusGame
             {
                 Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
             };
-            BeginMatchClientRpc(rpcParams);
+            SendBeginMatchFromSession(rpcParams);
         }
 
         public void NotifyClientsMatchStarting()
         {
             if (!IsServer)
                 return;
-            BeginMatchClientRpc();
+            SendBeginMatchFromSession();
             PushGameStateToClients();
             if (_matchStartRetryRoutine == null)
                 _matchStartRetryRoutine = StartCoroutine(RetryMatchStartNotifications());
@@ -633,7 +656,7 @@ namespace NexusGame
                 if (!IsServer)
                     yield break;
 
-                BeginMatchClientRpc();
+                SendBeginMatchFromSession();
                 if (NexusGameCommands.Game != null)
                     PushGameStateToClients();
             }

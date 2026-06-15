@@ -251,7 +251,8 @@ namespace NexusGame
             if (!IsMonitoringMatch || !NexusSession.IsOnline)
                 return;
 
-            if (playersInRoom < NexusLobbyService.MaxPlayersForMatch &&
+            // Bots don't occupy session slots — only compare against the humans this match expects.
+            if (playersInRoom < NexusSession.HumanSeatCount &&
                 Phase == ConnectionPhase.Connected)
             {
                 NotifyOpponentDisconnected();

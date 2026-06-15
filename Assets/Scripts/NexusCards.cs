@@ -100,7 +100,9 @@ namespace NexusGame
         /// <summary>Place 1 Human on a home-base hex you select (free).</summary>
         FreeHuman = 4,
         /// <summary>Gain 1 rubium and draw 1 Energize.</summary>
-        SupplyRun = 5
+        SupplyRun = 5,
+        /// <summary>Place a fortress on a hex you solely occupy (not home base). Breath adjacent enemies during Deployment.</summary>
+        Fortress = 6
     }
 
     public static class EnergizeDeploymentCatalog
@@ -114,6 +116,7 @@ namespace NexusGame
                 EnergizeDeploymentId.RushOrder => "Rush Order (-2 next buy, min 1)",
                 EnergizeDeploymentId.FreeHuman => "Free Human (deploy on home hex)",
                 EnergizeDeploymentId.SupplyRun => "Supply Run (+1 Rubium, draw 1)",
+                EnergizeDeploymentId.Fortress => "Fortress (deploy + breath)",
                 _ => id.ToString()
             };
         }
@@ -133,6 +136,9 @@ namespace NexusGame
                     "Place 1 Human on a home-base hex you control for free (select the hex, then play this card). Humans cannot be placed on invalid terrain.",
                 EnergizeDeploymentId.SupplyRun =>
                     "Gain 1 Rubium and draw 1 Energize card from the deck.",
+                EnergizeDeploymentId.Fortress =>
+                    "During Deployment, place one fortress on a hex you solely occupy (not your home base). " +
+                    "While you still control that hex, you may use Dragon's Breath on adjacent enemy hexes during Deployment (1d6, hit on 4+).",
                 _ => ""
             };
         }
@@ -198,6 +204,7 @@ namespace NexusGame
             for (int i = 0; i < 5; i++) AddDeploy(EnergizeDeploymentId.RushOrder);
             for (int i = 0; i < 4; i++) AddDeploy(EnergizeDeploymentId.FreeHuman);
             for (int i = 0; i < 4; i++) AddDeploy(EnergizeDeploymentId.SupplyRun);
+            for (int i = 0; i < 3; i++) AddDeploy(EnergizeDeploymentId.Fortress);
 
             Shuffle(list, rng);
             var q = new Queue<UnifiedEnergizeDraw>();

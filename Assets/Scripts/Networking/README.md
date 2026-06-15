@@ -7,7 +7,11 @@
 3. Enable **Authentication** + ID providers (see **[AUTH_SETUP.md](AUTH_SETUP.md)** for Game Center / Play Games).
 4. Enable **Lobby** and **Relay** (via **Multiplayer Services**).
 
-**Find Match (Queue)** — public quick-join session; waits in queue until a second player joins, then the host auto-starts the match.
+**Find Match (Queue)** — public quick-join session in a 1v1 or 4-player pool (separate queues via a `MaxPlayers` filter); auto-starts when the room fills. If the queue runs ~30s without filling, empty seats are quietly backfilled with host-run bots disguised as players (alone in queue → fully local disguised match).
+
+**Private rooms** — host picks 1v1 or 4-player capacity; empty seats can be filled with bots (**Add Bot** in the lobby). Bot count syncs to clients via the session property `nexusBotCount`; humans joining displace bots. Host can start once 2+ seats are filled.
+
+**Seats** — host is seat 0, clients take their join-order index in the session player list; bots occupy the top seats (`NexusSession.HumanSeatCount..TotalSeats-1`). The host runs `SimpleAiController` for bot seats; clients see them as remote players. Match setup (total seats, human seats, stealth flag) travels with the `BeginMatchClientRpc` start signal.
 
 ## Platform sign-in (production)
 
@@ -48,7 +52,7 @@ Full step-by-step (Apple, Google, Unity dashboard, plugins, defines): **[AUTH_SE
 1. **Main menu → Multiplayer** — initializes UGS; signs in on first room action.
 2. **Create room** — `MultiplayerService.CreateSessionAsync` (lobby only; Relay deferred).
 3. **Join room** — `JoinSessionByCodeAsync`.
-4. **Find match (queue)** — `MatchmakeSessionAsync` (quick join); lobby stays in **Matchmaking Queue** until 2/2 players, then host auto-starts.
+4. **Find match (queue)** — `MatchmakeSessionAsync` (quick join, filtered by room size); lobby stays in **Matchmaking Queue** until the room fills, then host auto-starts. At ~30s the host backfills empty seats with disguised bots and starts anyway.
 5. **Start match (host)** — `StartRelayNetworkAsync`, spawn bridge, client enters via RPC (manual start still works for private rooms).
 6. **End turn (client)** — `RequestEndTurnServerRpc` → host runs `GameController.EndTurn()`.
 

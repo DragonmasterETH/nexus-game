@@ -68,7 +68,7 @@ namespace NexusGame
             while (enabled)
             {
                 yield return null;
-                if (Game == null || !Game.VsAiMode || Game.IsGameOver)
+                if (Game == null || !Game.AnyAiSeatActive || Game.IsGameOver)
                     continue;
 
                 // AI may need to answer battle prompts even when it is not CurrentPlayer
@@ -360,6 +360,12 @@ namespace NexusGame
                     continue;
                 }
 
+                if (Game.TryAiFortressBreathDuringDeploy())
+                {
+                    yield return new WaitForSeconds(SampleActionDelay());
+                    continue;
+                }
+
                 if (TryBuySomething())
                 {
                     yield return new WaitForSeconds(SampleActionDelay());
@@ -397,13 +403,21 @@ namespace NexusGame
                 EnergizeDeploymentId.SupplyRun,
                 EnergizeDeploymentId.Convoy,
                 EnergizeDeploymentId.RushOrder,
-                EnergizeDeploymentId.FreeHuman
+                EnergizeDeploymentId.FreeHuman,
+                EnergizeDeploymentId.Fortress
             };
 
             foreach (var id in ordered)
             {
                 if (!p.DeployEnergize.Contains(id))
                     continue;
+                if (id == EnergizeDeploymentId.Fortress)
+                {
+                    if (Game.TryAiPlaceFortress())
+                        return true;
+                    continue;
+                }
+
                 if (Game.TryPlayDeploymentEnergize(id, id == EnergizeDeploymentId.FreeHuman ? home : null))
                     return true;
             }
@@ -453,24 +467,20 @@ namespace NexusGame
             return n;
         }
 
-        static int MinAxialDistToPlayerUnits(BoardTile t, PlayerState targetPlayer)
+        /// <summary>Distance to the nearest unit owned by any other player (works for 2-4 seat matches).</summary>
+        static int MinAxialDistToEnemyUnits(BoardTile t, PlayerState me)
         {
-            if (t == null || targetPlayer == null)
+            if (t == null || me == null)
                 return 999;
             var best = 999;
             foreach (var u in Object.FindObjectsOfType<UnitInstance>())
             {
-                if (u.Owner != targetPlayer || u.Tile == null)
+                if (u.Owner == null || u.Owner == me || u.Tile == null)
                     continue;
                 best = Mathf.Min(best, AxialDist(t, u.Tile));
             }
 
             return best;
-        }
-
-        static PlayerState OpponentOf(PlayerState me, GameController game)
-        {
-            return game.Players.FirstOrDefault(pl => pl != me);
         }
 
         bool TryOneBestMove()
@@ -479,7 +489,6 @@ namespace NexusGame
                 return false;
 
             var p = Game.CurrentPlayer;
-            var opp = OpponentOf(p, Game);
             var mono = FindMonolithTile();
 
             var units = Object.FindObjectsOfType<UnitInstance>()
@@ -495,7 +504,7 @@ namespace NexusGame
             {
                 foreach (var t in Input.GetReachableTiles(u))
                 {
-                    int dEnemy = opp != null ? MinAxialDistToPlayerUnits(t, opp) : 20;
+                    int dEnemy = MinAxialDistToEnemyUnits(t, p);
                     if (dEnemy >= 900)
                         dEnemy = 24;
                     int dMono = mono != null ? AxialDist(t, mono) : 0;
