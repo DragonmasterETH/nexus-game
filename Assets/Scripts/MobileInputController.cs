@@ -80,6 +80,13 @@ namespace NexusGame
         void Update()
         {
             if (Game != null && Game.IsGameOver)
+            {
+                ProcessPinchZoomIfActive();
+                return;
+            }
+
+            // Two-finger pinch — always, including during battle modals and when it's not your turn.
+            if (ProcessPinchZoomIfActive())
                 return;
 
             bool canAct = Game == null || Game.CanLocalPlayerActNow();
@@ -96,19 +103,7 @@ namespace NexusGame
                 return;
             }
 
-            // Touch: pinch zoom / single-finger pan (BoardCameraPanZoom) before board taps / unit drags
-            if (Input.touchCount >= 2)
-            {
-                if (_boardCam != null)
-                    _boardCam.ProcessTouchesBlockingGame(out _);
-                _pendingTap = false;
-                _dragging = false;
-                _dragPrepared = false;
-                _dragSourceTile = null;
-                _dragStartUnit = null;
-                return;
-            }
-
+            // Touch: single-finger pan (BoardCameraPanZoom) before board taps / unit drags
             if (Input.touchCount == 1)
             {
                 var touch = Input.GetTouch(0);
@@ -239,6 +234,20 @@ namespace NexusGame
                 _dragStartUnit = null;
             }
 #endif
+        }
+
+        bool ProcessPinchZoomIfActive()
+        {
+            if (Input.touchCount < 2 || _boardCam == null || !_boardCam.enabled)
+                return false;
+
+            _boardCam.ProcessPinchZoomTouches();
+            _pendingTap = false;
+            _dragging = false;
+            _dragPrepared = false;
+            _dragSourceTile = null;
+            _dragStartUnit = null;
+            return true;
         }
 
         void PrepareDragFromPointer(Vector2 screenPos)
@@ -650,6 +659,17 @@ namespace NexusGame
 
         public void UpdateMineLabel(BoardTile tile)
         {
+            if (tile == null)
+                return;
+
+            // Home bases always use the refinery overlay (income still uses ExtraMineYield).
+            if (tile.Type == TileType.HomeBase)
+            {
+                if (Game?.Board != null)
+                    Game.Board.EnsureHomeRefineryVisual(tile);
+                return;
+            }
+
             // Remove label if no bonus.
             if (tile.ExtraMineYield <= 0)
             {

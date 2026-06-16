@@ -165,7 +165,9 @@ namespace NexusGame
                         tile.ExplorationRevealed = false;
                     }
 
-                    if (input != null && mineYield > 0)
+                    if (tile.Type == TileType.HomeBase)
+                        Board?.EnsureHomeRefineryVisual(tile);
+                    else if (input != null)
                         input.UpdateMineLabel(tile);
                 }
 

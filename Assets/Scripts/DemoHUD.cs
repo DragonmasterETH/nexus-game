@@ -3163,67 +3163,40 @@ namespace NexusGame
             GUI.color = p;
         }
 
-        static Sprite _tileInfoRefinerySprite;
-        static bool _tileInfoRefinerySpriteTried;
-
-        static Sprite TileInfoRefinerySprite()
+        static bool TileHasRefineryOverlay(BoardTile tile)
         {
-            if (!_tileInfoRefinerySpriteTried)
-            {
-                _tileInfoRefinerySpriteTried = true;
-                _tileInfoRefinerySprite = Resources.Load<Sprite>("Sprites/Refinery")
-                                        ?? Resources.Load<Sprite>("Sprites/refinery");
-            }
-
-            return _tileInfoRefinerySprite;
-        }
-
-        /// <summary>Board overlay on the hex (e.g. home-base refinery <see cref="SpriteRenderer"/>).</summary>
-        static bool TryResolveTileBoardOverlay(BoardTile tile, out Sprite sprite, out Color tint)
-        {
-            sprite = null;
-            tint = Color.white;
             if (tile == null)
                 return false;
-
-            if (tile.View != null)
-            {
-                var renderers = tile.View.GetComponentsInChildren<SpriteRenderer>(true);
-                for (int i = 0; i < renderers.Length; i++)
-                {
-                    var sr = renderers[i];
-                    if (sr == null || sr.sprite == null)
-                        continue;
-                    sprite = sr.sprite;
-                    tint = sr.color;
-                    return true;
-                }
-            }
-
             if (tile.Type == TileType.HomeBase)
-            {
-                sprite = TileInfoRefinerySprite();
-                if (sprite != null)
-                {
-                    tint = new Color(1f, 1f, 1f, 0.25f);
-                    return true;
-                }
-            }
+                return true;
+            return tile.View != null && tile.View.transform.Find("Refinery") != null;
+        }
 
-            return false;
+        static bool TryResolveTileBoardOverlay(BoardTile tile, out NexusGuiImage image, out Color tint)
+        {
+            image = default;
+            tint = Color.white;
+            if (tile == null || !TileHasRefineryOverlay(tile))
+                return false;
+
+            image = NexusGuiArt.LoadRefinery();
+            if (image.IsEmpty)
+                return false;
+
+            tint = new Color(1f, 1f, 1f, NexusGuiArt.RefineryOverlayAlpha);
+            return true;
         }
 
         void DrawTileBoardOverlayOnModalHex(Rect hexR, BoardTile tile)
         {
-            if (!TryResolveTileBoardOverlay(tile, out Sprite sprite, out Color tint) || sprite == null)
+            if (!TryResolveTileBoardOverlay(tile, out NexusGuiImage image, out Color tint) || image.IsEmpty)
                 return;
 
-            // Match board placement (~72% of hex width); lift alpha slightly so it reads in the modal UI.
-            float targetW = hexR.width * 0.72f;
-            float aspect = Mathf.Max(0.01f, sprite.rect.width / sprite.rect.height);
+            float targetW = hexR.width * 0.85f;
+            float aspect = image.AspectRatio;
             float w = targetW;
             float h = w / aspect;
-            float maxH = hexR.height * 0.72f;
+            float maxH = hexR.height * 0.85f;
             if (h > maxH)
             {
                 h = maxH;
@@ -3232,9 +3205,8 @@ namespace NexusGame
 
             var overlayR = new Rect(hexR.x + (hexR.width - w) * 0.5f, hexR.y + (hexR.height - h) * 0.5f, w, h);
             Color prev = GUI.color;
-            float a = Mathf.Clamp(tint.a < 0.4f ? tint.a * 2.8f : tint.a, 0.35f, 1f);
-            GUI.color = new Color(tint.r, tint.g, tint.b, a);
-            new NexusGuiImage(sprite).DrawAspectFit(overlayR);
+            GUI.color = tint;
+            image.DrawAspectFit(overlayR);
             GUI.color = prev;
         }
 

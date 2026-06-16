@@ -610,6 +610,36 @@ namespace NexusGame
             }
         }
 
+        static Material _sharedWorldRefineryMat;
+
+        public const float RefineryOverlayAlpha = 0.5f;
+
+        /// <summary>Home-base refinery imprint from Resources/Sprites/Refinery.png only.</summary>
+        public static NexusGuiImage LoadRefinery()
+        {
+            return Load(
+                "Sprites/Refinery_0",
+                "Sprites/Refinery");
+        }
+
+        /// <summary>Shared world material for home-base refinery quads (same pipeline as ore chips).</summary>
+        public static Material GetSharedWorldRefineryMaterial()
+        {
+            if (_sharedWorldRefineryMat != null)
+                return _sharedWorldRefineryMat;
+
+            var img = LoadRefinery();
+            if (img.IsEmpty)
+                return null;
+
+            var m = new Material(Shader.Find("Sprites/Default"));
+            ApplyImageToMaterial(m, img, new Color(0.85f, 0.75f, 0.4f, RefineryOverlayAlpha));
+            if (!img.IsEmpty)
+                m.color = new Color(1f, 1f, 1f, RefineryOverlayAlpha);
+            _sharedWorldRefineryMat = m;
+            return m;
+        }
+
         static Material[] _sharedWorldOreChipMats;
 
         /// <summary>

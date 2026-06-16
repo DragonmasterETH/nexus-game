@@ -395,15 +395,80 @@ namespace NexusGame
             tile.Highlight = t.Find("Highlight")?.gameObject;
         }
 
-        Sprite _refinerySprite;
-        bool _refinerySpriteTried;
+        const float RefineryLocalY = 0.075f;
+        /// <summary>Refinery width as a fraction of hex radius (~75% of hex diameter).</summary>
+        const float RefineryWidthMul = 1.5f;
 
-        void EnsureRefinerySprite()
+        /// <summary>Home bases show the refinery imprint — never ore-chip quads or number labels.</summary>
+        public void EnsureHomeRefineryVisual(BoardTile tile)
         {
-            if (_refinerySpriteTried)
+            if (tile == null || tile.Type != TileType.HomeBase || tile.View == null)
                 return;
-            _refinerySpriteTried = true;
-            _refinerySprite = Resources.Load<Sprite>("Sprites/Refinery") ?? Resources.Load<Sprite>("Sprites/refinery");
+
+            if (tile.MineLabel != null)
+            {
+                Destroy(tile.MineLabel);
+                tile.MineLabel = null;
+            }
+
+            AttachRefineryToTileView(tile.View.transform);
+        }
+
+        void AttachRefineryToTileView(Transform tileView)
+        {
+            if (tileView == null)
+                return;
+
+            var mat = NexusGuiArt.GetSharedWorldRefineryMaterial();
+            if (mat == null)
+                return;
+
+            Transform existing = tileView.Find("Refinery");
+            GameObject root;
+            Transform quadTf;
+            if (existing != null)
+            {
+                root = existing.gameObject;
+                var legacySr = root.GetComponent<SpriteRenderer>();
+                if (legacySr != null)
+                    Destroy(legacySr);
+                quadTf = root.transform.Find("RefineryQuad");
+                if (quadTf == null)
+                {
+                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    quad.name = "RefineryQuad";
+                    Destroy(quad.GetComponent<Collider>());
+                    quad.transform.SetParent(root.transform, worldPositionStays: false);
+                    quad.transform.localPosition = Vector3.zero;
+                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    quadTf = quad.transform;
+                }
+            }
+            else
+            {
+                root = new GameObject("Refinery");
+                root.transform.SetParent(tileView, worldPositionStays: false);
+                var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                quad.name = "RefineryQuad";
+                Destroy(quad.GetComponent<Collider>());
+                quad.transform.SetParent(root.transform, worldPositionStays: false);
+                quad.transform.localPosition = Vector3.zero;
+                quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                quadTf = quad.transform;
+            }
+
+            root.transform.localPosition = new Vector3(0f, RefineryLocalY, 0f);
+            root.transform.localRotation = Quaternion.identity;
+            root.transform.localScale = Vector3.one;
+
+            var rend = quadTf.GetComponent<Renderer>();
+            if (rend != null)
+                rend.sharedMaterial = mat;
+
+            float targetW = HexRadius * RefineryWidthMul;
+            float aspect = NexusGuiArt.LoadRefinery().AspectRatio;
+            float targetH = targetW / Mathf.Max(0.01f, aspect);
+            quadTf.localScale = new Vector3(targetW, targetW, targetH);
         }
 
         GameObject CreateHexVisual(Vector3 position, TileType type)
@@ -479,29 +544,7 @@ namespace NexusGame
 
             // Home base overlay: refinery sprite as a quick “2 Rubium/turn” reminder.
             if (type == TileType.HomeBase)
-            {
-                EnsureRefinerySprite();
-                if (_refinerySprite != null)
-                {
-                    var icon = new GameObject("Refinery");
-                    icon.transform.SetParent(go.transform, worldPositionStays: false);
-                    icon.transform.localPosition = new Vector3(0f, 0.065f, 0f); // above outlines/highlights
-                    // SpriteRenderer is an XY plane; rotate to lie on XZ so a top-down camera can see it.
-                    icon.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-
-                    var sr = icon.AddComponent<SpriteRenderer>();
-                    sr.sprite = _refinerySprite;
-                    sr.sortingOrder = 50;
-                    // Subtle imprint on home bases (~25% opacity).
-                    sr.color = new Color(1f, 1f, 1f, 0.25f);
-
-                    // Scale to fit inside the hex.
-                    float target = HexRadius * 1.15f * 0.75f;
-                    float w = Mathf.Max(0.001f, _refinerySprite.bounds.size.x);
-                    float s = target / w;
-                    icon.transform.localScale = new Vector3(s, s, s);
-                }
-            }
+                AttachRefineryToTileView(go.transform);
 
             // Dedicated click collider slightly above the hex so raycasts always hit,
             // independent of the render mesh details.

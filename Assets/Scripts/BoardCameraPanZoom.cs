@@ -21,6 +21,9 @@ namespace NexusGame
         public float MinDistanceFromTarget = 5f;
         public float MaxDistanceFromTarget = 24f;
 
+        [Tooltip("Pinch responsiveness (>1 = faster zoom).")]
+        public float PinchZoomSensitivity = 1.15f;
+
         [Header("Spectate / turn focus")]
         [Tooltip("Seconds to ease the look target when focusing another seat's home cluster.")]
         public float SmoothLookTargetSeconds = 0.55f;
@@ -120,6 +123,43 @@ namespace NexusGame
             _startedOnMovableUnit = startedOnMovableUnit;
         }
 
+        /// <summary>Two-finger pinch zoom. Ignores UI so the board can be zoomed during modals.</summary>
+        public bool ProcessPinchZoomTouches()
+        {
+            if (!enabled)
+            {
+                _lastPinchSeparation = 0f;
+                return false;
+            }
+
+            if (_cam == null)
+                _cam = GetComponent<Camera>();
+
+            if (Input.touchCount < 2)
+            {
+                _lastPinchSeparation = 0f;
+                return false;
+            }
+
+            _singleTouchTracked = false;
+            _panning = false;
+
+            var a = Input.GetTouch(0);
+            var b = Input.GetTouch(1);
+            float sep = Vector2.Distance(a.position, b.position);
+
+            if (_lastPinchSeparation > 0.01f)
+            {
+                float ratio = sep / _lastPinchSeparation;
+                if (Mathf.Abs(ratio - 1f) > 0.001f)
+                    ApplyPinchZoom(ratio);
+            }
+
+            _lastPinchSeparation = sep;
+            ApplyTopDownPose();
+            return true;
+        }
+
         /// <summary>
         /// Process mobile touches for this frame. Returns true if game should not handle board taps/drags this frame.
         /// </summary>
@@ -129,36 +169,16 @@ namespace NexusGame
             if (_cam == null)
                 _cam = GetComponent<Camera>();
 
-            // UI consumes touches
+            if (ProcessPinchZoomTouches())
+                return true;
+
+            // UI consumes single-finger touches only.
             if (Input.touchCount > 0)
             {
                 var t0 = Input.GetTouch(0);
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(t0.fingerId))
                     return false;
             }
-
-            // Two-finger pinch
-            if (Input.touchCount >= 2)
-            {
-                _singleTouchTracked = false;
-                _panning = false;
-
-                var a = Input.GetTouch(0);
-                var b = Input.GetTouch(1);
-                float sep = Vector2.Distance(a.position, b.position);
-
-                if (_lastPinchSeparation > 0.01f)
-                {
-                    float ratio = sep / _lastPinchSeparation;
-                    ApplyPinchZoom(ratio);
-                }
-
-                _lastPinchSeparation = sep;
-                ApplyTopDownPose();
-                return true;
-            }
-
-            _lastPinchSeparation = 0f;
 
             if (Input.touchCount != 1)
                 return false;
@@ -244,7 +264,8 @@ namespace NexusGame
         {
             if (separationRatioThisFrame < 1e-5f)
                 return;
-            _heightAboveGround /= separationRatioThisFrame;
+            float adjusted = Mathf.Pow(separationRatioThisFrame, PinchZoomSensitivity);
+            _heightAboveGround /= adjusted;
             ApplyTopDownPose();
         }
 

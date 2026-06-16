@@ -294,9 +294,8 @@ namespace NexusGame
                 strip[0].ExtraMineYield = 2;
                 strip[1].ExtraMineYield = 3;
                 strip[2].ExtraMineYield = 2;
-                CreateHomeMineLabel(strip[0]);
-                CreateHomeMineLabel(strip[1]);
-                CreateHomeMineLabel(strip[2]);
+                foreach (var t in strip)
+                    Board.EnsureHomeRefineryVisual(t);
             }
 
             // No starting units; players must purchase and deploy during their turns.
@@ -413,63 +412,6 @@ namespace NexusGame
                     break;
                 int idx = _cardRng.Next(0, options.Count);
                 player.BattleEnergize.Add(options[idx]);
-            }
-        }
-
-        void CreateHomeMineLabel(BoardTile tile)
-        {
-            if (tile == null || tile.ExtraMineYield <= 0)
-                return;
-
-            if (tile.MineLabel == null)
-            {
-                var labelRoot = new GameObject("HomeMineLabel");
-                labelRoot.transform.SetParent(tile.View.transform, worldPositionStays: false);
-                labelRoot.transform.localPosition = new Vector3(0f, 0.04f, 0f);
-                labelRoot.transform.localRotation = Quaternion.identity;
-                labelRoot.transform.localScale = Vector3.one * 0.2f;
-
-                var bg = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                bg.name = "HomeMineBg";
-                bg.transform.SetParent(labelRoot.transform, worldPositionStays: false);
-                bg.transform.localPosition = Vector3.zero;
-                bg.transform.localRotation = Quaternion.identity;
-                bg.transform.localScale = Vector3.one * 0.6f;
-                var bgRenderer = bg.GetComponent<Renderer>();
-                if (bgRenderer != null)
-                {
-                    bgRenderer.material = new Material(Shader.Find("Sprites/Default"));
-                    bgRenderer.material.color = new Color(0f, 0f, 0f, 0.6f);
-                }
-
-                var textGo = new GameObject("HomeMineText");
-                textGo.transform.SetParent(labelRoot.transform, worldPositionStays: false);
-                textGo.transform.localPosition = new Vector3(0f, 0f, -0.02f);
-                textGo.transform.localRotation = Quaternion.identity;
-                textGo.transform.localScale = Vector3.one * 0.4f;
-
-                var text = textGo.AddComponent<TextMesh>();
-                text.anchor = TextAnchor.MiddleCenter;
-                text.alignment = TextAlignment.Center;
-                text.fontSize = 64;
-                text.color = Color.yellow;
-
-                tile.MineLabel = labelRoot;
-            }
-
-            var tm = tile.MineLabel.GetComponentInChildren<TextMesh>();
-            if (tm != null)
-            {
-                string mineYield = tile.ExtraMineYield.ToString();
-                tm.text = mineYield;
-                tm.characterSize = mineYield.Length >= 3 ? 0.18f : 0.22f;
-            }
-
-            var bgTransform = tile.MineLabel.transform.Find("HomeMineBg");
-            if (bgTransform != null)
-            {
-                float widthMul = tile.ExtraMineYield >= 100 ? 1.15f : tile.ExtraMineYield >= 10 ? 1.0f : 0.85f;
-                bgTransform.localScale = new Vector3(0.6f * widthMul, 0.6f, 1f);
             }
         }
 
