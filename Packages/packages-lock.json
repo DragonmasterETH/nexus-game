@@ -1,13 +1,13 @@
 {
   "dependencies": {
     "com.apple.unityplugin.core": {
-      "version": "file:D:/Stefan/Downloads/com.apple.unityplugin.core-3.2.0.tgz",
+      "version": "file:../Assets/Resources/Plugins/com.apple.unityplugin.core-3.2.0.tgz",
       "depth": 0,
       "source": "local-tarball",
       "dependencies": {}
     },
     "com.apple.unityplugin.gamekit": {
-      "version": "file:D:/Stefan/Downloads/com.apple.unityplugin.gamekit-4.0.1.tgz",
+      "version": "file:../Assets/Resources/Plugins/com.apple.unityplugin.gamekit-4.0.1.tgz",
       "depth": 0,
       "source": "local-tarball",
       "dependencies": {
