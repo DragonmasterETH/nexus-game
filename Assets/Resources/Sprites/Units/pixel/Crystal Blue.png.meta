@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 7e5204ecd0e3a7946b11e832e398ab56
+guid: e37d0b275b8c5c7448be01e4e3d75030
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 5511889952617559028
-    second: Crystal Red_0
+      213: -3005687788372768950
+    second: Crystal Blue_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -139,13 +139,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Crystal Red_0
+      name: Crystal Blue_0
       rect:
         serializedVersion: 2
-        x: 65
-        y: 142
-        width: 895
-        height: 740
+        x: 29
+        y: 79
+        width: 582
+        height: 482
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +154,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 4f370da65ba2e7c40800000000000000
-      internalID: 5511889952617559028
+      spriteID: a47cf4c91e6a946d0800000000000000
+      internalID: -3005687788372768950
       vertices: []
       indices: 
       edges: []
@@ -174,7 +174,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      Crystal Red_0: 5511889952617559028
+      Crystal Blue_0: -3005687788372768950
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

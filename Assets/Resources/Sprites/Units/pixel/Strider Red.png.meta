@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: bb67362b3963b2046a049f4003bdd3cb
+guid: 98861f9715edb6949a8a3bf0fcfc0147
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -3335076653187215864
-    second: Fungus Red_0
+      213: -6581178576656746403
+    second: Strider Red_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -139,13 +139,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Fungus Red_0
+      name: Strider Red_0
       rect:
         serializedVersion: 2
-        x: 77
-        y: 42
-        width: 854
-        height: 948
+        x: 9
+        y: 59
+        width: 612
+        height: 522
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +154,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 80ec314347d67b1d0800000000000000
-      internalID: -3335076653187215864
+      spriteID: d58b6fef3f4faa4a0800000000000000
+      internalID: -6581178576656746403
       vertices: []
       indices: 
       edges: []
@@ -174,7 +174,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      Fungus Red_0: -3335076653187215864
+      Strider Red_0: -6581178576656746403
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

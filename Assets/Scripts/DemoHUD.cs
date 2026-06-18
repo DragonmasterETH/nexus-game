@@ -2166,7 +2166,7 @@ namespace NexusGame
             ApplyTileInfoFont(numStyle);
             numStyle.normal.textColor = new Color(0.96f, 0.97f, 1f, 1f);
 
-            string numStr = myYield > 0 ? myYield.ToString() : "—";
+            string numStr = myYield > 0 ? myYield.ToString() : "-";
             float iconSz = Mathf.Min(r.height - BottomHudS(6f), BottomHudS(26f));
             iconSz = Mathf.Max(BottomHudS(20f), iconSz);
             float gap = BottomHudS(8f);
@@ -3072,7 +3072,7 @@ namespace NexusGame
             ApplyTileInfoFont(rubYieldStyle);
 
             int yield = DisplayRubiumPerTurn(tile);
-            string yieldText = yield > 0 ? yield.ToString() : "—";
+            string yieldText = yield > 0 ? yield.ToString() : "-";
             var rubGui = GetRubiumGui();
 
             float rubLineGap = S(10f);

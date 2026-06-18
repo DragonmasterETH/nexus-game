@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 01bc2fe011d20f84788f3b42c711994f
+guid: c4aa658f2892cb844b761ad27040d4db
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -183079876127710380
-    second: Dragon Red_0
+      213: 1750836096064248894
+    second: army container_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -139,13 +139,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Dragon Red_0
+      name: army container_0
       rect:
         serializedVersion: 2
-        x: 38
-        y: 96
-        width: 953
-        height: 823
+        x: 0
+        y: 0
+        width: 1576
+        height: 1590
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +154,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 453a2e992d1957df0800000000000000
-      internalID: -183079876127710380
+      spriteID: e3c57dd27283c4810800000000000000
+      internalID: 1750836096064248894
       vertices: []
       indices: 
       edges: []
@@ -174,7 +174,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      Dragon Red_0: -183079876127710380
+      army container_0: 1750836096064248894
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

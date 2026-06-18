@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: cd3af6d55e1937544a68e0589ecb7b03
+guid: d9bb5bcc3e87b7e4b9ea7f201c1e9baa
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 3504875158198587542
-    second: Human Red_0
+      213: -3108630959473630561
+    second: Human Blue_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -139,13 +139,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Human Red_0
+      name: Human Blue_0
       rect:
         serializedVersion: 2
-        x: 212
-        y: 176
-        width: 606
-        height: 666
+        x: 0
+        y: 0
+        width: 1024
+        height: 1024
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +154,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 69094820361d3a030800000000000000
-      internalID: 3504875158198587542
+      spriteID: f92eac2dc9cebd4d0800000000000000
+      internalID: -3108630959473630561
       vertices: []
       indices: 
       edges: []
@@ -174,7 +174,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      Human Red_0: 3504875158198587542
+      Human Blue_0: -3108630959473630561
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
