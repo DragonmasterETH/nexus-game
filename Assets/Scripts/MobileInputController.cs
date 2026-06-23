@@ -241,7 +241,7 @@ namespace NexusGame
             if (Input.touchCount < 2 || _boardCam == null || !_boardCam.enabled)
                 return false;
 
-            _boardCam.ProcessPinchZoomTouches();
+            // Pinch zoom runs in BoardCameraPanZoom.Update — here we only block taps/drags.
             _pendingTap = false;
             _dragging = false;
             _dragPrepared = false;
@@ -1060,13 +1060,7 @@ namespace NexusGame
         {
             if (Game == null)
                 return false;
-            if (Game.BattleClashIntroActive)
-                return true;
-            if (Game.PendingBattleArrangement || Game.BattlePhaseBlockingPlay || Game.ActiveBattleHex != null)
-                return true;
-            if (Game.EnergizePromptPlayer != null || Game.FocusFirePicker != null || Game.CasualtyPick != null)
-                return true;
-            if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
+            if (Game.IsBattleScreenActive)
                 return true;
             return Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting;
         }

@@ -5,7 +5,7 @@ namespace NexusGame
 {
     /// <summary>
     /// Mobile: one-finger pan on empty board / non-unit drag; two-finger pinch zoom.
-    /// Orthographic-style top-down view (fixed pitch) so flat sprites stay undistorted; zoom adjusts height only.
+    /// Orthographic top-down view (fixed pitch). Pinch zoom adjusts orthographic size (or camera height if perspective).
     /// </summary>
     [DisallowMultipleComponent]
     public class BoardCameraPanZoom : MonoBehaviour
@@ -34,8 +34,10 @@ namespace NexusGame
         Camera _cam;
         Vector3 _lookTarget = Vector3.zero;
 
-        /// <summary>Vertical distance from ground plane to camera (strict top-down).</summary>
+        /// <summary>Zoom scalar: camera height (perspective) or orthographic size (ortho top-down).</summary>
         float _heightAboveGround = 12f;
+
+        const float OrthoCameraHeight = 12f;
 
         float _lastPinchSeparation;
 
@@ -62,16 +64,25 @@ namespace NexusGame
         {
             var p = transform.position;
             _lookTarget = new Vector3(p.x, GroundPlaneY, p.z);
-            _heightAboveGround = Mathf.Max(0.5f, p.y - GroundPlaneY);
-            _heightAboveGround = Mathf.Clamp(_heightAboveGround, MinDistanceFromTarget, MaxDistanceFromTarget);
+            if (_cam != null && _cam.orthographic)
+                _heightAboveGround = Mathf.Clamp(_cam.orthographicSize, MinDistanceFromTarget, MaxDistanceFromTarget);
+            else
+            {
+                _heightAboveGround = Mathf.Max(0.5f, p.y - GroundPlaneY);
+                _heightAboveGround = Mathf.Clamp(_heightAboveGround, MinDistanceFromTarget, MaxDistanceFromTarget);
+            }
         }
 
         void ApplyTopDownPose()
         {
             _heightAboveGround = Mathf.Clamp(_heightAboveGround, MinDistanceFromTarget, MaxDistanceFromTarget);
+            bool ortho = _cam != null && _cam.orthographic;
+            float camY = GroundPlaneY + (ortho ? OrthoCameraHeight : _heightAboveGround);
             transform.SetPositionAndRotation(
-                new Vector3(_lookTarget.x, GroundPlaneY + _heightAboveGround, _lookTarget.z),
+                new Vector3(_lookTarget.x, camY, _lookTarget.z),
                 Quaternion.Euler(90f, 0f, 0f));
+            if (ortho)
+                _cam.orthographicSize = _heightAboveGround;
         }
 
         /// <summary>
@@ -257,6 +268,15 @@ namespace NexusGame
                 ApplyPanScreenDelta(_singleLastScreen, cur);
                 _singleLastScreen = cur;
             }
+        }
+#else
+        void Update()
+        {
+            if (!enabled)
+                return;
+            if (_cam == null)
+                _cam = GetComponent<Camera>();
+            ProcessPinchZoomTouches();
         }
 #endif
 

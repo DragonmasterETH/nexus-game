@@ -1640,10 +1640,8 @@ namespace NexusGame
             DrawFlyingRubiumIncome();
             DrawFlyingVictoryPoints();
 
-            // Battle modal above main HUD; clash intro flashes on top of it for a short beat.
+            // Battle modal above main HUD (clash intro is drawn inside the modal — no extra full-screen flash).
             DrawFullBattleOverlays(player);
-            if (Game.BattleClashIntroActive)
-                DrawBattleClashIntroOverlay();
 
             // Dragon's Breath casualty pick: full tile-style modal on top of the HUD.
             var dpEnd = Game.DragonPhase;
@@ -1742,17 +1740,15 @@ namespace NexusGame
             }
         }
 
-        void DrawBattleClashIntroOverlay()
+        void DrawBattleClashIntroBanner(Rect area)
         {
-            var dim = new Color(0f, 0f, 0f, 0.65f);
             Color prev = GUI.color;
-            GUI.color = dim;
-            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill);
+            GUI.color = new Color(0.02f, 0.03f, 0.06f, 0.55f);
+            GUI.DrawTexture(area, Texture2D.whiteTexture, ScaleMode.StretchToFill);
             GUI.color = prev;
 
-            float s = _hudFontScale;
             var pulse = 0.85f + 0.15f * Mathf.Sin(Time.realtimeSinceStartup * 8f);
-            int titleFs = Mathf.Clamp(Mathf.Max(28, Mathf.RoundToInt(40f * s)), 28, 56);
+            int titleFs = Mathf.Clamp(Mathf.Max(28, Mathf.RoundToInt(40f * _hudFontScale)), 28, 56);
             var title = new GUIStyle(GUI.skin.label)
             {
                 fontSize = titleFs,
@@ -1760,14 +1756,16 @@ namespace NexusGame
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = new Color(1f, 0.92f, 0.35f, pulse) }
             };
-            GUI.Label(new Rect(0f, Screen.height * 0.38f, Screen.width, HudS(120f)), "⚔  ⚔  ⚔", title);
+            ApplyTileInfoFont(title);
+            GUI.Label(new Rect(area.x, area.y + area.height * 0.38f, area.width, BattleS(120f)), "⚔  ⚔  ⚔", title);
             var sub = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.Max(14, Mathf.RoundToInt(16f * s)),
+                fontSize = Mathf.Max(14, Mathf.RoundToInt(16f * _hudFontScale)),
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = new Color(0.9f, 0.9f, 0.95f, 0.85f) }
             };
-            GUI.Label(new Rect(0f, Screen.height * 0.38f + HudS(72f), Screen.width, HudS(36f)),
+            ApplyTileInfoFont(sub);
+            GUI.Label(new Rect(area.x, area.y + area.height * 0.38f + BattleS(72f), area.width, BattleS(36f)),
                 "(Sword clash animation — art TBD)", sub);
         }
 
@@ -1799,6 +1797,8 @@ namespace NexusGame
 
         void DrawSettingsOverlay()
         {
+            NexusAudioSettings.EnsureLoaded();
+
             var dim = new Color(0.02f, 0.02f, 0.06f, 0.78f);
             var prev = GUI.color;
             GUI.color = dim;
@@ -1807,7 +1807,7 @@ namespace NexusGame
 
             float s = _hudFontScale;
             float w = Mathf.Min(HudS(380f), Screen.width - HudS(32f));
-            float h = HudS(280f);
+            float h = HudS(420f);
             var panel = new Rect((Screen.width - w) * 0.5f, (Screen.height - h) * 0.5f, w, h);
             DrawModalPerimeterClickBlockers(panel);
             GUI.Box(panel, "");
@@ -1820,6 +1820,17 @@ namespace NexusGame
             };
             GUI.Label(new Rect(panel.x, panel.y + HudS(12f), panel.width, HudS(28f)), "Settings", titleStyle);
 
+            var labelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Max(12, Mathf.RoundToInt(14f * s)),
+                alignment = TextAnchor.MiddleLeft
+            };
+            var valueStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Max(12, Mathf.RoundToInt(14f * s)),
+                alignment = TextAnchor.MiddleRight
+            };
+
             var btnStyle = new GUIStyle(GUI.skin.button)
             {
                 fontSize = Mathf.Max(13, Mathf.RoundToInt(16f * s)),
@@ -1827,9 +1838,23 @@ namespace NexusGame
                 alignment = TextAnchor.MiddleCenter
             };
 
-            float by = panel.y + HudS(56f);
+            float by = panel.y + HudS(52f);
             float bw = panel.width - HudS(32f);
             float bx = panel.x + HudS(16f);
+            float rowH = HudS(34f);
+            float labelW = bw * 0.28f;
+            float valueW = bw * 0.14f;
+            float sliderW = bw - labelW - valueW - HudS(8f);
+            float sliderX = bx + labelW;
+            float sliderYOff = rowH * 0.55f;
+            float sliderH = HudS(16f);
+
+            by = DrawSettingsVolumeRow(bx, by, bw, rowH, labelW, sliderX, sliderW, valueW, sliderYOff, sliderH,
+                "Music", NexusAudioSettings.MusicVolume, NexusAudioSettings.SetMusicVolume, labelStyle, valueStyle);
+            by = DrawSettingsVolumeRow(bx, by + HudS(6f), bw, rowH, labelW, sliderX, sliderW, valueW, sliderYOff, sliderH,
+                "SFX", NexusAudioSettings.SfxVolume, NexusAudioSettings.SetSfxVolume, labelStyle, valueStyle);
+
+            by += HudS(18f);
             float bh = HudS(48f);
 
             if (GUI.Button(new Rect(bx, by, bw, bh), "LEAVE GAME", btnStyle))
@@ -1849,6 +1874,21 @@ namespace NexusGame
             };
             if (GUI.Button(new Rect(bx, by, bw, HudS(42f)), "Close", closeStyle))
                 _showSettingsMenu = false;
+        }
+
+        static float DrawSettingsVolumeRow(
+            float bx, float by, float bw, float rowH, float labelW, float sliderX, float sliderW, float valueW,
+            float sliderYOff, float sliderH, string label, float current, Action<float> setter, GUIStyle labelStyle,
+            GUIStyle valueStyle)
+        {
+            GUI.Label(new Rect(bx, by, labelW, rowH), label, labelStyle);
+            float next = GUI.HorizontalSlider(
+                new Rect(sliderX, by + sliderYOff, sliderW, sliderH),
+                current, 0f, 1f);
+            GUI.Label(new Rect(bx + bw - valueW, by, valueW, rowH), $"{Mathf.RoundToInt(next * 100f)}%", valueStyle);
+            if (!Mathf.Approximately(next, current))
+                setter(next);
+            return by + rowH;
         }
 
         void EnsureQuickRefBodyStyle()
@@ -4385,43 +4425,8 @@ namespace NexusGame
         /// <summary>
         /// Same gating as <see cref="DrawFullBattleOverlays"/> — when true, the full-screen battle modal is painted.
         /// </summary>
-        bool ShouldPaintFullBattleOverlay(PlayerState currentPlayer)
-        {
-            if (Game == null)
-                return false;
-
-            // Online: always show the full battle modal for any active battle phase (view-only for the other seat).
-            if (NexusSession.IsOnline)
-            {
-                if (Game.BattlePhaseBlockingPlay || Game.PendingBattleArrangement)
-                    return true;
-                if (Game.BattleClashIntroActive || Game.HasActiveBattleStep ||
-                    Game.EnergizePromptPlayer != null || Game.FocusFirePicker != null ||
-                    Game.CasualtyPick != null || Game.ActiveBattleHex != null)
-                    return true;
-                if (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting)
-                    return true;
-            }
-
-            bool active = Game.PendingBattleArrangement ||
-                          Game.BattlePhaseBlockingPlay ||
-                          Game.BattleClashIntroActive ||
-                          Game.HasActiveBattleStep ||
-                          Game.EnergizePromptPlayer != null ||
-                          Game.FocusFirePicker != null ||
-                          Game.CasualtyPick != null ||
-                          (Game.SecretMissionOffer != null && Game.SecretMissionOffer.Waiting) ||
-                          Game.ActiveBattleHex != null;
-            if (!active)
-                return false;
-
-            var actor = Game.EnergizePromptPlayer ?? Game.FocusFirePicker ?? Game.CasualtyPick?.Owner ??
-                        Game.SecretMissionOffer?.Player ?? currentPlayer;
-            if (!NexusSession.IsOnline && actor != null && Game.IsAiControlled(actor))
-                return false;
-
-            return true;
-        }
+        bool ShouldPaintFullBattleOverlay(PlayerState currentPlayer) =>
+            Game != null && Game.IsBattleScreenActive;
 
         void TryAutoPassEmptyEnergizeStep()
         {
@@ -4455,6 +4460,8 @@ namespace NexusGame
             DrawBattleScreenModalBackground();
             GUI.BeginGroup(panel);
             BattleMainWindow(currentPlayer, panel);
+            if (Game.BattleClashIntroActive)
+                DrawBattleClashIntroBanner(new Rect(0f, 0f, panel.width, panel.height));
             GUI.EndGroup();
 
             if (Game.CasualtyPick?.Owner != null)
@@ -7000,13 +7007,7 @@ namespace NexusGame
 
         void DrawBattleFocusOverlay()
         {
-            if (Game == null || Game.ActiveBattleHex == null)
-                return;
-            if (Game.BattlePhaseBlockingPlay || Game.PendingBattleArrangement || Game.BattleClashIntroActive ||
-                Game.HasActiveBattleStep || Game.EnergizePromptPlayer != null || Game.FocusFirePicker != null ||
-                Game.CasualtyPick != null)
-                return;
-            if (ShouldPaintFullBattleOverlay(Game.CurrentPlayer))
+            if (Game == null || Game.ActiveBattleHex == null || Game.IsBattleScreenActive)
                 return;
             var cam = Camera.main;
             if (cam == null)

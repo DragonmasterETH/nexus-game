@@ -140,6 +140,18 @@ namespace NexusGame
         /// <summary>Shown between battle confirmation and Energize (placeholder until sword art exists).</summary>
         public bool BattleClashIntroActive => _battleClashIntroActive;
 
+        /// <summary>True while the full-screen battle modal should stay visible for every seat (view-only when not acting).</summary>
+        public bool IsBattleScreenActive =>
+            PendingBattleArrangement ||
+            BattlePhaseBlockingPlay ||
+            BattleClashIntroActive ||
+            HasActiveBattleStep ||
+            EnergizePromptPlayer != null ||
+            FocusFirePicker != null ||
+            CasualtyPick != null ||
+            (SecretMissionOffer != null && SecretMissionOffer.Waiting) ||
+            ActiveBattleHex != null;
+
         public BattleUiDiceRoll? LastBattleUiDiceRoll => _lastBattleUiDiceRoll;
 
         /// <summary>Battle HUD cycles random pip faces for this long before showing the real roll.</summary>
@@ -595,6 +607,8 @@ namespace NexusGame
         {
             if (_battleCoroutine != null)
                 StopCoroutine(_battleCoroutine);
+            BattlePhaseBlockingPlay = true;
+            BattleUiStateChanged();
             _battleCoroutine = StartCoroutine(BattlePhaseCoroutine(attacker));
         }
 

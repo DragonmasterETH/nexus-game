@@ -48,6 +48,7 @@ namespace NexusGame
             EnsureCamera();
             EnsureLight();
             NexusUgsRunner.EnsureExists();
+            NexusAudioSettings.EnsureLoaded();
             _ = NexusUgsAuth.EnsureServicesInitializedAsync();
             NexusOnlineBridge.MatchStartRequested += OnNetworkMatchStartRequested;
             NexusLobbyService.OnMatchmakingMatchReady += OnMatchmakingMatchReady;
