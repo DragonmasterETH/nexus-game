@@ -614,6 +614,22 @@ namespace NexusGame
 
         public const float RefineryOverlayAlpha = 0.5f;
 
+        /// <summary>Draw order for flat board decals — all in the Transparent band (3000+).</summary>
+        public enum WorldBoardRenderLayer
+        {
+            Terrain = 3000,
+            Exploration = 3010,
+            OreChip = 3020,
+            Refinery = 3040,
+            UnitSprite = 3060,
+        }
+
+        public static void SetWorldBoardRenderLayer(Material mat, WorldBoardRenderLayer layer)
+        {
+            if (mat != null)
+                mat.renderQueue = (int)layer;
+        }
+
         /// <summary>Home-base refinery imprint from Resources/Sprites/Refinery.png only.</summary>
         public static NexusGuiImage LoadRefinery()
         {
@@ -626,7 +642,10 @@ namespace NexusGame
         public static Material GetSharedWorldRefineryMaterial()
         {
             if (_sharedWorldRefineryMat != null)
+            {
+                SetWorldBoardRenderLayer(_sharedWorldRefineryMat, WorldBoardRenderLayer.Refinery);
                 return _sharedWorldRefineryMat;
+            }
 
             var img = LoadRefinery();
             if (img.IsEmpty)
@@ -636,7 +655,58 @@ namespace NexusGame
             ApplyImageToMaterial(m, img, new Color(0.85f, 0.75f, 0.4f, RefineryOverlayAlpha));
             if (!img.IsEmpty)
                 m.color = new Color(1f, 1f, 1f, RefineryOverlayAlpha);
+            SetWorldBoardRenderLayer(m, WorldBoardRenderLayer.Refinery);
             _sharedWorldRefineryMat = m;
+            return m;
+        }
+
+        static readonly System.Collections.Generic.Dictionary<TileType, Material> _terrainOverlayMats =
+            new System.Collections.Generic.Dictionary<TileType, Material>();
+
+        /// <summary>Terrain imprint for board hexes (Resources/Sprites/Terrain/*.png).</summary>
+        public static NexusGuiImage LoadTerrainForTile(TileType type)
+        {
+            return type switch
+            {
+                TileType.Lava => Load("Sprites/Terrain/Magma"),
+                TileType.CrystalField => Load("Sprites/Terrain/Crystals", "Sprites/Terrain/Crystal"),
+                TileType.Forest => Load("Sprites/Terrain/Fungal"),
+                TileType.Plains => Load("Sprites/Terrain/Vortex"),
+                TileType.Monolith => Load("Sprites/Terrain/Monolith"),
+                TileType.Rock => Load("Sprites/Terrain/Rocks", "Sprites/Terrain/Rock"),
+                _ => default
+            };
+        }
+
+        /// <summary>Shared hex-masked material per terrain type (same opacity as refinery overlays).</summary>
+        public static Material GetTerrainOverlayMaterial(TileType type)
+        {
+            if (type == TileType.HomeBase)
+                return null;
+
+            if (_terrainOverlayMats.TryGetValue(type, out var cached) && cached != null)
+            {
+                SetWorldBoardRenderLayer(cached, WorldBoardRenderLayer.Terrain);
+                return cached;
+            }
+
+            var img = LoadTerrainForTile(type);
+            if (img.IsEmpty)
+                return null;
+
+            var shader = Shader.Find("Nexus/HexMaskedSprite");
+            if (shader == null)
+                shader = Shader.Find("Sprites/Default");
+
+            var m = new Material(shader);
+            ApplyImageToMaterial(m, img, Color.white);
+            m.color = new Color(1f, 1f, 1f, RefineryOverlayAlpha);
+            if (m.HasProperty("_Aspect"))
+                m.SetFloat("_Aspect", img.AspectRatio);
+            if (m.HasProperty("_HexRadius"))
+                m.SetFloat("_HexRadius", 0.46f);
+            SetWorldBoardRenderLayer(m, WorldBoardRenderLayer.Terrain);
+            _terrainOverlayMats[type] = m;
             return m;
         }
 
@@ -668,6 +738,7 @@ namespace NexusGame
 
             var m = new Material(Shader.Find("Sprites/Default"));
             ApplyImageToMaterial(m, img, new Color(1f, 0.92f, 0.25f, 0.95f));
+            SetWorldBoardRenderLayer(m, WorldBoardRenderLayer.OreChip);
             _sharedWorldOreChipMats[key] = m;
             return m;
         }

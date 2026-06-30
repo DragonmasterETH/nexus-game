@@ -115,7 +115,7 @@ namespace NexusGame
             // Minimal 3-hex lane for quick 1v1 battle testing.
             RingRadius = 1;
             CreateBattleTestTile(-1, 0, TileType.HomeBase);
-            CreateBattleTestTile(0, 0, TileType.Plains);
+            CreateBattleTestTile(0, 0, TileType.Rock);
             CreateBattleTestTile(1, 0, TileType.HomeBase);
         }
 
@@ -395,9 +395,10 @@ namespace NexusGame
             tile.Highlight = t.Find("Highlight")?.gameObject;
         }
 
-        const float RefineryLocalY = 0.075f;
+        const float RefineryLocalY = 0.10f;
         /// <summary>Refinery width as a fraction of hex radius (~75% of hex diameter).</summary>
         const float RefineryWidthMul = 1.5f;
+        const float TerrainOverlayLocalY = 0.008f;
 
         /// <summary>Home bases show the refinery imprint — never ore-chip quads or number labels.</summary>
         public void EnsureHomeRefineryVisual(BoardTile tile)
@@ -423,52 +424,102 @@ namespace NexusGame
             if (mat == null)
                 return;
 
-            Transform existing = tileView.Find("Refinery");
-            GameObject root;
-            Transform quadTf;
-            if (existing != null)
+            // Home bases never use terrain decals.
+            var strayTerrain = tileView.Find("TerrainQuad");
+            if (strayTerrain != null)
+                Destroy(strayTerrain.gameObject);
+            var legacyTerrainWrap = tileView.Find("TerrainOverlay");
+            if (legacyTerrainWrap != null)
+                Destroy(legacyTerrainWrap.gameObject);
+
+            Transform quadTf = tileView.Find("RefineryQuad");
+            var legacyRoot = tileView.Find("Refinery");
+            if (legacyRoot != null)
             {
-                root = existing.gameObject;
-                var legacySr = root.GetComponent<SpriteRenderer>();
-                if (legacySr != null)
-                    Destroy(legacySr);
-                quadTf = root.transform.Find("RefineryQuad");
-                if (quadTf == null)
-                {
-                    var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                    quad.name = "RefineryQuad";
-                    Destroy(quad.GetComponent<Collider>());
-                    quad.transform.SetParent(root.transform, worldPositionStays: false);
-                    quad.transform.localPosition = Vector3.zero;
-                    quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-                    quadTf = quad.transform;
-                }
+                Destroy(legacyRoot.gameObject);
+                quadTf = null;
             }
-            else
+
+            if (quadTf == null)
             {
-                root = new GameObject("Refinery");
-                root.transform.SetParent(tileView, worldPositionStays: false);
                 var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
                 quad.name = "RefineryQuad";
                 Destroy(quad.GetComponent<Collider>());
-                quad.transform.SetParent(root.transform, worldPositionStays: false);
-                quad.transform.localPosition = Vector3.zero;
-                quad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
                 quadTf = quad.transform;
             }
 
-            root.transform.localPosition = new Vector3(0f, RefineryLocalY, 0f);
-            root.transform.localRotation = Quaternion.identity;
-            root.transform.localScale = Vector3.one;
-
-            var rend = quadTf.GetComponent<Renderer>();
-            if (rend != null)
-                rend.sharedMaterial = mat;
+            quadTf.SetParent(tileView, worldPositionStays: false);
+            quadTf.SetAsLastSibling();
+            quadTf.localPosition = new Vector3(0f, RefineryLocalY, 0f);
+            quadTf.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
             float targetW = HexRadius * RefineryWidthMul;
             float aspect = NexusGuiArt.LoadRefinery().AspectRatio;
             float targetH = targetW / Mathf.Max(0.01f, aspect);
-            quadTf.localScale = new Vector3(targetW, targetW, targetH);
+            quadTf.localScale = new Vector3(targetW, targetH, 1f);
+
+            var rend = quadTf.GetComponent<Renderer>();
+            if (rend != null)
+            {
+                rend.sharedMaterial = mat;
+                NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.Refinery);
+            }
+        }
+
+        /// <summary>Terrain art from Resources/Sprites/Terrain — hex-masked, 50% opacity.</summary>
+        public void EnsureTerrainVisual(BoardTile tile)
+        {
+            if (tile == null || tile.Type == TileType.HomeBase || tile.View == null)
+                return;
+
+            AttachTerrainOverlayToTileView(tile.View.transform, tile.Type);
+        }
+
+        void AttachTerrainOverlayToTileView(Transform tileView, TileType type)
+        {
+            if (tileView == null || type == TileType.HomeBase)
+                return;
+
+            // Refineries belong on home bases only.
+            var strayRefinery = tileView.Find("RefineryQuad");
+            if (strayRefinery != null)
+                Destroy(strayRefinery.gameObject);
+            var legacyRefinery = tileView.Find("Refinery");
+            if (legacyRefinery != null)
+                Destroy(legacyRefinery.gameObject);
+
+            var mat = NexusGuiArt.GetTerrainOverlayMaterial(type);
+            if (mat == null)
+                return;
+
+            Transform quadTf = tileView.Find("TerrainQuad");
+            var legacyRoot = tileView.Find("TerrainOverlay");
+            if (legacyRoot != null)
+            {
+                Destroy(legacyRoot.gameObject);
+                quadTf = null;
+            }
+
+            if (quadTf == null)
+            {
+                var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                quad.name = "TerrainQuad";
+                Destroy(quad.GetComponent<Collider>());
+                quadTf = quad.transform;
+            }
+
+            quadTf.SetParent(tileView, worldPositionStays: false);
+            quadTf.SetAsFirstSibling();
+            quadTf.localPosition = new Vector3(0f, TerrainOverlayLocalY, 0f);
+            quadTf.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            quadTf.localScale = Vector3.one * (HexRadius * 1.92f);
+
+            var rend = quadTf.GetComponent<Renderer>();
+            if (rend != null)
+            {
+                rend.sharedMaterial = mat;
+                NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.Terrain);
+            }
         }
 
         GameObject CreateHexVisual(Vector3 position, TileType type)
@@ -476,7 +527,9 @@ namespace NexusGame
             GameObject go;
             if (HexPrefab != null)
             {
-                go = Instantiate(HexPrefab, position, Quaternion.identity, transform);
+                go = Instantiate(HexPrefab, transform);
+                go.transform.position = position;
+                go.transform.rotation = Quaternion.identity;
             }
             else
             {
@@ -541,6 +594,9 @@ namespace NexusGame
                     rend.material.color = Color.gray;
                 }
             }
+
+            if (type != TileType.HomeBase)
+                AttachTerrainOverlayToTileView(go.transform, type);
 
             // Home base overlay: refinery sprite as a quick “2 Rubium/turn” reminder.
             if (type == TileType.HomeBase)
@@ -647,17 +703,16 @@ namespace NexusGame
             if (q == 0 && r == 0)
                 return TileType.Monolith;
 
-            // crude deterministic pattern based on coordinates
+            // Procedural mainland types (Plains/Vortex reserved — not generated yet).
             int hash = (q * 73856093) ^ (r * 19349663);
             hash = Mathf.Abs(hash);
-            int v = hash % 5;
+            int v = hash % 4;
 
             return v switch
             {
-                0 => TileType.Plains,
-                1 => TileType.Forest,
-                2 => TileType.CrystalField,
-                3 => TileType.Lava,
+                0 => TileType.Forest,
+                1 => TileType.CrystalField,
+                2 => TileType.Lava,
                 _ => TileType.Rock
             };
         }
@@ -744,6 +799,8 @@ namespace NexusGame
                 NexusGuiArt.ApplyImageToMaterial(_explorationUnrevealedSharedMat,
                     NexusGuiArt.Load("Sprites/Ore Unrevealed", "Sprites/OreUnrevealed"),
                     new Color(1f, 1f, 0.4f, 0.9f));
+                NexusGuiArt.SetWorldBoardRenderLayer(_explorationUnrevealedSharedMat,
+                    NexusGuiArt.WorldBoardRenderLayer.Exploration);
             }
 
             int count = Mathf.Min(rewards.Count, eligible.Count);

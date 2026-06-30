@@ -1060,6 +1060,8 @@ namespace NexusGame
         {
             if (Game == null)
                 return false;
+            if (Game.PendingBattleArrangement)
+                return true;
             if (Game.IsBattleScreenActive)
                 return true;
             return Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting;

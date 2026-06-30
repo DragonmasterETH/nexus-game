@@ -8,7 +8,8 @@ namespace NexusGame
     /// <summary>
     /// Nexus Ops battle rules (see rulebook Battle section):
     /// - Battle order (strongest first): Rubium Dragon → Lava Leaper → Rock Strider → Crystalline → Fungoid → Human.
-    /// - For each step, only units of that type that are still alive may roll; each unit rolls once using AttackDice d6 (Energize adds extra dice).
+        /// - For each step, units of that type alive at the start of the step roll once (same-step hits do not cancel their attack).
+        ///   Units killed in a previous step do not roll in later steps.
     /// - Attacker removes casualties from defender's hits first, then defender removes casualties from attacker's hits.
     /// - Only the active player (attacker) and chosen defender fight; other factions in the hex do not roll or take hits.
     /// - Attacker wins if all defender units in the battle are destroyed (including mutual destruction). +1 VP.
@@ -252,14 +253,25 @@ namespace NexusGame
                     break;
                 }
 
-                var attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
-                var defOfType = aliveDef.FindAll(u => u.Definition.Type == unitType);
+                var attStep = new List<UnitInstance>();
+                var defStep = new List<UnitInstance>();
+                foreach (var u in aliveAtt)
+                {
+                    if (u != null && u.Tile == hex && u.Owner == attacker && u.Definition.Type == unitType)
+                        attStep.Add(u);
+                }
 
-                if (attOfType.Count == 0 && defOfType.Count == 0)
+                foreach (var u in aliveDef)
+                {
+                    if (u != null && u.Tile == hex && u.Owner == defender && u.Definition.Type == unitType)
+                        defStep.Add(u);
+                }
+
+                if (attStep.Count == 0 && defStep.Count == 0)
                     continue;
 
                 int hitsOnAttacker = 0;
-                foreach (var u in defOfType)
+                foreach (var u in defStep)
                 {
                     var roll = RollDiceForUnit(u.Definition, rng, 0, 0);
                     hitsOnAttacker += roll.Hits;
@@ -269,6 +281,19 @@ namespace NexusGame
                         log.AppendLine($"  {unitType} (def P{defender.PlayerIndex + 1}): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
                     else
                         log.AppendLine($"  {unitType} (def P{defender.PlayerIndex + 1}): {roll.Dice} dice => 0 hit(s)");
+                }
+
+                int hitsOnDefender = 0;
+                foreach (var u in attStep)
+                {
+                    var roll = RollDiceForUnit(u.Definition, rng, 0, 0);
+                    hitsOnDefender += roll.Hits;
+                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
+                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
+                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
+                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
+                    else
+                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice} dice => 0 hit(s)");
                 }
 
                 RefreshPools();
@@ -281,28 +306,6 @@ namespace NexusGame
                         log.AppendLine($"    → P{attacker.PlayerIndex + 1} dies: {v.Definition.Type}");
                         destroyUnit(v);
                     }
-                }
-
-                RefreshPools();
-                if (aliveAtt.Count == 0)
-                {
-                    log.AppendLine("Attacker has no units left — battle lost.");
-                    break;
-                }
-
-                attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
-
-                int hitsOnDefender = 0;
-                foreach (var u in attOfType)
-                {
-                    var roll = RollDiceForUnit(u.Definition, rng, 0, 0);
-                    hitsOnDefender += roll.Hits;
-                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
-                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
-                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
-                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
-                    else
-                        log.AppendLine($"  {unitType} (atk P{attacker.PlayerIndex + 1}): {roll.Dice} dice => 0 hit(s)");
                 }
 
                 RefreshPools();

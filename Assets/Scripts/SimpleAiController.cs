@@ -90,6 +90,14 @@ namespace NexusGame
                     yield return new WaitForSeconds(SamplePromptDelay());
                 else
                     yield return wait;
+
+                while (Game.BattleArrangementPickCount < Game.BattlePlan.Count)
+                {
+                    int remaining = Game.BattlePlan.Count - Game.BattleArrangementPickCount;
+                    int pick = Game.BattleArrangementPickCount + UnityEngine.Random.Range(0, remaining);
+                    Game.PickBattleAsNext(pick);
+                }
+
                 Game.ConfirmBattleArrangement();
                 yield return tick;
             }

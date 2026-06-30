@@ -65,10 +65,26 @@ namespace NexusGame
             }
             catch (Exception ex)
             {
-                LastError = ex.Message;
-                Debug.LogWarning($"[UGS] Game Center sign-in failed: {ex.Message}");
+                LastError = DescribeGameCenterFailure(ex);
+                Debug.LogWarning($"[UGS] Game Center sign-in failed: {LastError}");
                 return false;
             }
+        }
+
+        static string DescribeGameCenterFailure(Exception ex)
+        {
+            string msg = ex.Message ?? "";
+            if (msg.IndexOf("error=15", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                msg.IndexOf("not recognized", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                msg.IndexOf("not recognised", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Game Center error 15: Apple does not recognize this build. Confirm App Store Connect has an app "
+                       + "with bundle ID com.clankergames.nexus, Game Center is enabled on the app version, and the App ID "
+                       + "has the Game Center capability. Add at least one leaderboard or achievement if the app is new. "
+                       + "See Assets/Scripts/Networking/AUTH_SETUP.md.";
+            }
+
+            return string.IsNullOrEmpty(msg) ? "Game Center sign-in failed." : msg;
         }
 #endif
     }

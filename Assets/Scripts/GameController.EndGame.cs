@@ -80,6 +80,7 @@ namespace NexusGame
             // Do not StopCoroutine — <see cref="BattlePhaseCoroutine"/> may be the caller; it exits via break.
             BattlePhaseBlockingPlay = false;
             PendingBattleArrangement = false;
+            _battleArrangementPickCount = 0;
             EnergizePromptPlayer = null;
             EnergizeBattleContext = null;
             _energizeRoundActive = false;

@@ -99,12 +99,14 @@ namespace NexusGame
             }
 
             w.Write(LiveBattlePhaseLog ?? "");
+            w.Write(_battleArrangementPickCount);
         }
 
         /// <summary>Reset battle UI fields before applying a new extension block (avoids stale hex / casualty state on clients).</summary>
         internal void ClearOnlineBattleUiState()
         {
             BattlePlan.Clear();
+            _battleArrangementPickCount = 0;
             _battleHex = null;
             _battleAttacker = null;
             _battleDefender = null;
@@ -268,6 +270,11 @@ namespace NexusGame
             _liveBattleLines = string.IsNullOrEmpty(liveLog)
                 ? null
                 : liveLog.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+
+            if (r.BaseStream.Position < r.BaseStream.Length)
+                _battleArrangementPickCount = r.ReadInt32();
+            else
+                _battleArrangementPickCount = PendingBattleArrangement && BattlePlan.Count == 1 ? 1 : 0;
         }
 
         static void WriteTileRef(BinaryWriter w, BoardTile tile)

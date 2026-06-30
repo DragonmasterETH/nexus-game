@@ -450,6 +450,7 @@ namespace NexusGame
                     var qrend = quad.GetComponent<Renderer>();
                     var mat = new Material(Shader.Find("Sprites/Default"));
                     NexusGuiArt.ApplyImageToMaterial(mat, dragonArt, Color.magenta);
+                    NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.UnitSprite);
                     qrend.material = mat;
 
                     var dragonInstance = dragonRootGo.AddComponent<UnitInstance>();
@@ -482,6 +483,7 @@ namespace NexusGame
                     var qrend = quad.GetComponent<Renderer>();
                     var mat = new Material(Shader.Find("Sprites/Default"));
                     NexusGuiArt.ApplyImageToMaterial(mat, striderArt, Color.magenta);
+                    NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.UnitSprite);
                     qrend.material = mat;
 
                     var striderInstance = striderRootGo.AddComponent<UnitInstance>();
@@ -514,6 +516,7 @@ namespace NexusGame
                     var qrend = quad.GetComponent<Renderer>();
                     var mat = new Material(Shader.Find("Sprites/Default"));
                     NexusGuiArt.ApplyImageToMaterial(mat, fungusArt, Color.magenta);
+                    NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.UnitSprite);
                     qrend.material = mat;
 
                     var fungoidInstance = fungoidRootGo.AddComponent<UnitInstance>();
@@ -546,6 +549,7 @@ namespace NexusGame
                     var qrend = quad.GetComponent<Renderer>();
                     var mat = new Material(Shader.Find("Sprites/Default"));
                     NexusGuiArt.ApplyImageToMaterial(mat, humanArt, Color.magenta);
+                    NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.UnitSprite);
                     qrend.material = mat;
 
                     var humanInstance = humanRootGo.AddComponent<UnitInstance>();
@@ -578,6 +582,7 @@ namespace NexusGame
                     var qrend = quad.GetComponent<Renderer>();
                     var mat = new Material(Shader.Find("Sprites/Default"));
                     NexusGuiArt.ApplyImageToMaterial(mat, leaperArt, Color.magenta);
+                    NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.UnitSprite);
                     qrend.material = mat;
 
                     var leaperInstance = leaperRootGo.AddComponent<UnitInstance>();
@@ -610,6 +615,7 @@ namespace NexusGame
                     var qrend = quad.GetComponent<Renderer>();
                     var mat = new Material(Shader.Find("Sprites/Default"));
                     NexusGuiArt.ApplyImageToMaterial(mat, crystalArt, Color.magenta);
+                    NexusGuiArt.SetWorldBoardRenderLayer(mat, NexusGuiArt.WorldBoardRenderLayer.UnitSprite);
                     qrend.material = mat;
 
                     var crystalInstance = crystalRootGo.AddComponent<UnitInstance>();
@@ -1016,6 +1022,7 @@ namespace NexusGame
 
             LastBattlePhaseLog = "";
             PendingBattleArrangement = false;
+            _battleArrangementPickCount = 0;
             BattlePhaseBlockingPlay = false;
             _activeRetreatSourceThisTurn = null;
             _normalMovementOccurredThisTurn = false;

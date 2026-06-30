@@ -167,8 +167,12 @@ namespace NexusGame
 
                     if (tile.Type == TileType.HomeBase)
                         Board?.EnsureHomeRefineryVisual(tile);
-                    else if (input != null)
-                        input.UpdateMineLabel(tile);
+                    else
+                    {
+                        Board?.EnsureTerrainVisual(tile);
+                        if (input != null)
+                            input.UpdateMineLabel(tile);
+                    }
                 }
 
                 RebuildUnitsFromSnapshot(r);

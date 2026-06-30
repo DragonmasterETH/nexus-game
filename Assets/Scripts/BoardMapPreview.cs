@@ -173,7 +173,7 @@ namespace NexusGame
                     return new List<(int, int, TileType)>
                     {
                         (-1, 0, TileType.HomeBase),
-                        (0, 0, TileType.Plains),
+                        (0, 0, TileType.Rock),
                         (1, 0, TileType.HomeBase)
                     };
                 case BoardLayoutMode.TwoToFour:
@@ -230,7 +230,7 @@ namespace NexusGame
             else
             {
                 foreach (var (q, r) in ring2)
-                    list.Add((q, r, TileType.Plains));
+                    list.Add((q, r, TileType.Rock));
             }
 
             if (ring3Mix)
@@ -274,13 +274,12 @@ namespace NexusGame
 
             int hash = (q * 73856093) ^ (r * 19349663);
             hash = Mathf.Abs(hash);
-            int v = hash % 5;
+            int v = hash % 4;
             return v switch
             {
-                0 => TileType.Plains,
-                1 => TileType.Forest,
-                2 => TileType.CrystalField,
-                3 => TileType.Lava,
+                0 => TileType.Forest,
+                1 => TileType.CrystalField,
+                2 => TileType.Lava,
                 _ => TileType.Rock
             };
         }

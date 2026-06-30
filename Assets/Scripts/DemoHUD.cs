@@ -1640,6 +1640,9 @@ namespace NexusGame
             DrawFlyingRubiumIncome();
             DrawFlyingVictoryPoints();
 
+            // Battle arrangement: tap contested hexes on the board to set order.
+            DrawBattleArrangementOverlay();
+
             // Battle modal above main HUD (clash intro is drawn inside the modal — no extra full-screen flash).
             DrawFullBattleOverlays(player);
 
@@ -2995,6 +2998,7 @@ namespace NexusGame
             hexTop = Mathf.Min(hexTop, hexRowRect.yMax - hexSide - S(4f));
             var hexR = new Rect(row.x + (row.width - hexSide) * 0.5f, hexTop, hexSide, hexSide);
             DrawModalHexPreview(hexR, fill);
+            DrawTileTerrainOnModalHex(hexR, tile);
             DrawTileBoardOverlayOnModalHex(hexR, tile);
 
             string tileName = TileTypeDisplayName(tile.Type);
@@ -3203,13 +3207,30 @@ namespace NexusGame
             GUI.color = p;
         }
 
+        /// <summary>Hex-masked terrain art on the TILE INFO modal (same textures/opacity as the board).</summary>
+        void DrawTileTerrainOnModalHex(Rect hexR, BoardTile tile)
+        {
+            if (tile == null || tile.Type == TileType.HomeBase)
+                return;
+            if (Event.current.type != EventType.Repaint)
+                return;
+
+            var mat = NexusGuiArt.GetTerrainOverlayMaterial(tile.Type);
+            if (mat == null || mat.mainTexture == null)
+                return;
+
+            Graphics.DrawTexture(hexR, mat.mainTexture, mat);
+        }
+
         static bool TileHasRefineryOverlay(BoardTile tile)
         {
             if (tile == null)
                 return false;
             if (tile.Type == TileType.HomeBase)
                 return true;
-            return tile.View != null && tile.View.transform.Find("Refinery") != null;
+            return tile.View != null &&
+                   (tile.View.transform.Find("RefineryQuad") != null ||
+                    tile.View.transform.Find("Refinery") != null);
         }
 
         static bool TryResolveTileBoardOverlay(BoardTile tile, out NexusGuiImage image, out Color tint)
@@ -3708,6 +3729,8 @@ namespace NexusGame
             if (_handPileViewer != HandPileViewerKind.None)
                 return true;
             if (Game != null && Game.SecretMissionOverdraw != null && Game.SecretMissionOverdraw.Waiting)
+                return true;
+            if (Game != null && Game.PendingBattleArrangement)
                 return true;
 
             if (Game != null && Game.Players.Count > 0)
@@ -4844,9 +4867,7 @@ namespace NexusGame
             GUILayout.Space(BattleS(10f));
 
             GUILayout.BeginVertical(BattlePanelBoxStyle());
-            if (Game.PendingBattleArrangement)
-                BattleArrangeWindow();
-            else if (Game.FocusFirePicker != null)
+            if (Game.FocusFirePicker != null)
                 FocusFireWindow();
             else if (Game.EnergizePromptPlayer != null)
                 EnergizeWindow();
@@ -5368,7 +5389,195 @@ namespace NexusGame
 
         void WindowBattleArrange(int id)
         {
-            BattleArrangeWindow();
+            // Arrangement UI is drawn on the board via <see cref="DrawBattleArrangementOverlay"/>.
+        }
+
+        void DrawBattleArrangementOverlay()
+        {
+            if (Game == null || !Game.PendingBattleArrangement || Game.BattlePlan == null || Game.BattlePlan.Count == 0)
+                return;
+
+            EnsureBattleHudStyles();
+            bool canAct = Game.CurrentPlayer != null && Game.CanLocalPlayerActFor(Game.CurrentPlayer);
+            int pickCount = Game.BattleArrangementPickCount;
+            int planCount = Game.BattlePlan.Count;
+            bool orderComplete = Game.BattleArrangementOrderComplete;
+            var cam = Camera.main;
+            if (cam == null)
+                return;
+
+            DrawTintedRect(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0.02f, 0.03f, 0.06f, 0.42f));
+
+            int prevDepth = GUI.depth;
+            GUI.depth = -40;
+
+            for (int i = pickCount; i < planCount; i++)
+            {
+                var e = Game.BattlePlan[i];
+                if (e?.Hex == null || !TryGetTileScreenHexRect(cam, e.Hex, 2.15f, out Rect hexR))
+                    continue;
+                DrawBattleArrangementHexMarker(hexR, e, 0, canAct, canAct, i);
+            }
+
+            for (int i = 0; i < pickCount; i++)
+            {
+                var e = Game.BattlePlan[i];
+                if (e?.Hex == null || !TryGetTileScreenHexRect(cam, e.Hex, 2.15f, out Rect hexR))
+                    continue;
+                DrawBattleArrangementHexMarker(hexR, e, i + 1, false, canAct, i);
+            }
+
+            DrawBattleArrangementBottomBar(canAct, pickCount, planCount, orderComplete);
+            GUI.depth = prevDepth;
+        }
+
+        bool TryGetTileScreenHexRect(Camera cam, BoardTile tile, float sizeMul, out Rect guiRect)
+        {
+            guiRect = default;
+            if (tile?.View == null || cam == null)
+                return false;
+
+            var center = tile.View.transform.position;
+            float hexR = Game.Board != null ? Game.Board.HexRadius : 0.7f;
+            var spCenter = cam.WorldToScreenPoint(center);
+            var spEdge = cam.WorldToScreenPoint(center + cam.transform.right * hexR);
+            if (spCenter.z <= 0f)
+                return false;
+
+            float screenR = Mathf.Abs(spEdge.x - spCenter.x);
+            float size = Mathf.Clamp(screenR * sizeMul, HudS(52f), HudS(128f));
+            float gx = spCenter.x - size * 0.5f;
+            float gy = Screen.height - spCenter.y - size * 0.5f;
+            guiRect = new Rect(gx, gy, size, size);
+            return true;
+        }
+
+        void DrawBattleArrangementHexMarker(Rect hexR, PlannedBattleEntry entry, int orderNumber, bool canPick,
+            bool canInteract, int planIndex)
+        {
+            bool placed = orderNumber > 0;
+            Color fill = placed
+                ? new Color(0.18f, 0.72f, 0.38f, 0.62f)
+                : new Color(1f, 0.42f, 0.12f, 0.5f);
+            DrawModalHexPreview(hexR, fill);
+            DrawOutlineRect(hexR, placed
+                ? new Color(0.55f, 1f, 0.65f, 0.95f)
+                : new Color(1f, 0.62f, 0.2f, 0.9f), placed ? HudS(2.5f) : HudS(2f));
+
+            int badgeFs = Mathf.RoundToInt(Mathf.Clamp(hexR.height * 0.34f, 16f, 34f));
+            var badgeStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = badgeFs,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white }
+            };
+            ApplyTileInfoFont(badgeStyle);
+
+            if (placed)
+            {
+                GUI.Label(hexR, orderNumber.ToString(), badgeStyle);
+            }
+            else if (canPick)
+            {
+                bool prevEnabled = GUI.enabled;
+                GUI.enabled = true;
+                if (GUI.Button(hexR, GUIContent.none, GUIStyle.none))
+                    NexusGameCommands.RequestPickBattleAsNext(planIndex);
+                GUI.enabled = prevEnabled;
+
+                var hintStyle = new GUIStyle(badgeStyle) { fontSize = Mathf.Max(14, badgeFs - 4) };
+                GUI.Label(hexR, "?", hintStyle);
+            }
+
+            var opps = BattleResolver.OpponentsOnHex(entry.Hex, Game.CurrentPlayer);
+            int tagFs = Mathf.Max(10, Mathf.RoundToInt(hexR.height * 0.16f));
+            var tagStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = tagFs,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.UpperCenter,
+                normal = { textColor = new Color(0.95f, 0.97f, 1f, 0.95f) }
+            };
+            ApplyTileInfoFont(tagStyle);
+
+            var tagRect = new Rect(hexR.x, hexR.yMax + HudS(2f), hexR.width, HudS(18f));
+            if (opps.Count <= 1)
+            {
+                string vs = opps.Count == 1 ? "vs P" + (opps[0].PlayerIndex + 1) : "contested";
+                GUI.Label(tagRect, vs, tagStyle);
+            }
+            else
+            {
+                bool prevEnabled = GUI.enabled;
+                GUI.enabled = canInteract;
+                float btnW = Mathf.Max(HudS(34f), (hexR.width - HudS(4f)) / opps.Count);
+                for (int oi = 0; oi < opps.Count; oi++)
+                {
+                    var o = opps[oi];
+                    var br = new Rect(hexR.x + oi * (btnW + HudS(2f)), tagRect.y, btnW, HudS(20f));
+                    bool selected = entry.DefenderPlayerIndex == o.PlayerIndex;
+                    var prev = GUI.backgroundColor;
+                    GUI.backgroundColor = selected
+                        ? new Color(0.35f, 0.75f, 1f, 0.95f)
+                        : new Color(0.2f, 0.24f, 0.32f, 0.92f);
+                    if (GUI.Button(br, "P" + (o.PlayerIndex + 1), _battleSecondaryButtonStyleCached) &&
+                        entry.DefenderPlayerIndex != o.PlayerIndex)
+                        NexusGameCommands.RequestSetBattleDefender(planIndex, o.PlayerIndex);
+                    GUI.backgroundColor = prev;
+                }
+
+                GUI.enabled = prevEnabled;
+            }
+        }
+
+        void DrawBattleArrangementBottomBar(bool canAct, int pickCount, int planCount, bool orderComplete)
+        {
+            float barH = Mathf.Clamp(HudS(118f), 96f, 150f);
+            var bar = new Rect(HudS(12f), Screen.height - barH - HudS(12f), Screen.width - HudS(24f), barH);
+            DrawTintedRect(bar, new Color(0.05f, 0.07f, 0.12f, 0.94f));
+            DrawOutlineRect(bar, new Color(0.45f, 0.5f, 0.58f, 0.75f), HudS(1f));
+
+            float pad = HudS(14f);
+            var inner = new Rect(bar.x + pad, bar.y + pad, bar.width - pad * 2f, bar.height - pad * 2f);
+            int titleFs = Mathf.RoundToInt(Mathf.Clamp(HudS(18f), 14f, 22f));
+            var titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = titleFs,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = new Color(0.92f, 0.94f, 0.98f, 1f) }
+            };
+            ApplyTileInfoFont(titleStyle);
+
+            string title = planCount > 1
+                ? "Pick battle order — tap contested hexes (1st tap fights first)"
+                : "Choose defender, then confirm";
+            GUI.Label(new Rect(inner.x, inner.y, inner.width, HudS(24f)), title, titleStyle);
+
+            string progress = planCount > 1
+                ? pickCount + " / " + planCount + " battles ordered"
+                : "1 battle ready";
+            int subFs = Mathf.Max(11, titleFs - 3);
+            var subStyle = new GUIStyle(titleStyle) { fontSize = subFs, fontStyle = FontStyle.Normal };
+            GUI.Label(new Rect(inner.x, inner.y + HudS(26f), inner.width, HudS(20f)), progress, subStyle);
+
+            if (!canAct && Game.CurrentPlayer != null)
+            {
+                var waitStyle = new GUIStyle(subStyle)
+                {
+                    normal = { textColor = new Color(0.75f, 0.78f, 0.85f, 1f) }
+                };
+                GUI.Label(new Rect(inner.x, inner.y + HudS(48f), inner.width, HudS(20f)),
+                    "Waiting for P" + (Game.CurrentPlayer.PlayerIndex + 1) + "…", waitStyle);
+            }
+
+            float btnH = HudS(40f);
+            var btnRect = new Rect(inner.xMax - HudS(160f), inner.yMax - btnH, HudS(160f), btnH);
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct && orderComplete;
+            if (GUI.Button(btnRect, "CONFIRM", _battlePrimaryButtonStyleCached))
+                NexusGameCommands.RequestConfirmBattleArrangement();
+            GUI.enabled = prevEnabled;
         }
 
         void WindowEnergizeBattle(int id)
@@ -5393,78 +5602,7 @@ namespace NexusGame
 
         void BattleArrangeWindow()
         {
-            EnsureBattleHudStyles();
-            bool canAct = Game.CurrentPlayer != null && Game.CanLocalPlayerActFor(Game.CurrentPlayer);
-            bool prevEnabled = GUI.enabled;
-            GUI.enabled = canAct;
-            if (Game.BattlePlan == null || Game.BattlePlan.Count == 0)
-            {
-                GUILayout.Label("No battles to resolve.");
-                GUI.enabled = prevEnabled;
-                return;
-            }
-
-            if (Game.BattlePlan.Count == 1)
-            {
-                var e = Game.BattlePlan[0];
-                GUILayout.Label("Battle ready");
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("Battle vs", GUILayout.Width(90));
-                GUILayout.Label("P" + (e.DefenderPlayerIndex + 1), GUILayout.Width(48));
-                GUILayout.EndHorizontal();
-                GUILayout.Space(8);
-                if (GUILayout.Button("CONFIRM", _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
-                    NexusGameCommands.RequestConfirmBattleArrangement();
-                GUI.enabled = prevEnabled;
-                return;
-            }
-
-            bool canReorder = Game.BattlePlan.Count > 1;
-            GUILayout.Label(canReorder
-                ? "Battle order (top first). Reorder because multiple battles are active."
-                : "One battle active.");
-            float arrangeListH = Mathf.Clamp(GameUiScale.GetPaddedModalPanelGuiRect().height * 0.18f, 110f, 190f);
-            _scrollBattle = GUILayout.BeginScrollView(_scrollBattle, GUILayout.Height(arrangeListH));
-            for (int i = 0; i < Game.BattlePlan.Count; i++)
-            {
-                var e = Game.BattlePlan[i];
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("Battle " + (i + 1), GUILayout.Width(100));
-                if (canReorder)
-                {
-                    if (GUILayout.Button("^", GUILayout.Width(28)))
-                        NexusGameCommands.RequestMoveBattlePlanEntry(i, -1);
-                    if (GUILayout.Button("v", GUILayout.Width(28)))
-                        NexusGameCommands.RequestMoveBattlePlanEntry(i, 1);
-                }
-                else
-                    GUILayout.Space(56);
-
-                var opps = BattleResolver.OpponentsOnHex(e.Hex, Game.CurrentPlayer);
-                GUILayout.Label("vs", GUILayout.Width(24));
-                if (opps.Count <= 1)
-                {
-                    if (opps.Count == 1)
-                        GUILayout.Label("P" + (opps[0].PlayerIndex + 1), GUILayout.Width(48));
-                }
-                else
-                {
-                    foreach (var o in opps)
-                    {
-                        if (GUILayout.Button("P" + (o.PlayerIndex + 1), GUILayout.Width(48)) &&
-                            e.DefenderPlayerIndex != o.PlayerIndex)
-                            NexusGameCommands.RequestSetBattleDefender(i, o.PlayerIndex);
-                    }
-                }
-
-                GUILayout.EndHorizontal();
-            }
-
-            GUILayout.EndScrollView();
-            GUILayout.Space(8);
-            if (GUILayout.Button("CONFIRM", _battlePrimaryButtonStyleCached, GUILayout.ExpandWidth(true)))
-                NexusGameCommands.RequestConfirmBattleArrangement();
-            GUI.enabled = prevEnabled;
+            // Legacy list UI removed — arrangement uses board hex picker.
         }
 
         void EnergizeWindow()

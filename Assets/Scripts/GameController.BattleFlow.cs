@@ -74,6 +74,13 @@ namespace NexusGame
         public bool BattlePhaseBlockingPlay { get; private set; }
         public List<PlannedBattleEntry> BattlePlan { get; private set; } = new List<PlannedBattleEntry>();
         public bool PendingBattleArrangement { get; private set; }
+        int _battleArrangementPickCount;
+
+        /// <summary>How many battles have been placed in order during arrangement (0..BattlePlan.Count).</summary>
+        public int BattleArrangementPickCount => _battleArrangementPickCount;
+
+        public bool BattleArrangementOrderComplete =>
+            !PendingBattleArrangement || BattlePlan == null || _battleArrangementPickCount >= BattlePlan.Count;
 
         public PlayerState EnergizePromptPlayer { get; private set; }
         public string EnergizeBattleContext { get; private set; }
@@ -142,7 +149,6 @@ namespace NexusGame
 
         /// <summary>True while the full-screen battle modal should stay visible for every seat (view-only when not acting).</summary>
         public bool IsBattleScreenActive =>
-            PendingBattleArrangement ||
             BattlePhaseBlockingPlay ||
             BattleClashIntroActive ||
             HasActiveBattleStep ||
@@ -221,6 +227,7 @@ namespace NexusGame
             BattlePhaseBlockingPlay = false;
             PendingBattleArrangement = false;
             BattlePlan.Clear();
+            _battleArrangementPickCount = 0;
             EnergizePromptPlayer = null;
             EnergizeBattleContext = null;
             HasActiveBattleStep = false;
@@ -560,8 +567,23 @@ namespace NexusGame
                 }
             }
 
+            _battleArrangementPickCount = BattlePlan.Count == 1 ? 1 : 0;
             PendingBattleArrangement = true;
             BattlePhaseBlockingPlay = true;
+            BattleUiStateChanged();
+        }
+
+        /// <summary>Place the battle at <paramref name="planIndex"/> next in the resolution order.</summary>
+        public void PickBattleAsNext(int planIndex)
+        {
+            if (!PendingBattleArrangement || planIndex < _battleArrangementPickCount ||
+                planIndex < 0 || planIndex >= BattlePlan.Count)
+                return;
+
+            var entry = BattlePlan[planIndex];
+            BattlePlan.RemoveAt(planIndex);
+            BattlePlan.Insert(_battleArrangementPickCount, entry);
+            _battleArrangementPickCount++;
             BattleUiStateChanged();
         }
 
@@ -595,9 +617,10 @@ namespace NexusGame
 
         public void ConfirmBattleArrangement()
         {
-            if (!PendingBattleArrangement)
+            if (!PendingBattleArrangement || !BattleArrangementOrderComplete)
                 return;
             PendingBattleArrangement = false;
+            _battleArrangementPickCount = 0;
             Debug.Log("[Battle] Battle order confirmed — resolving");
             StartBattleCoroutine(CurrentPlayer);
             BattleUiStateChanged();
@@ -1030,19 +1053,29 @@ namespace NexusGame
                     yield break;
                 }
 
-                var attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
-                var defOfType = aliveDef.FindAll(u => u.Definition.Type == unitType);
-                attOfType.RemoveAll(u => u == null || u.Tile != hex || u.Owner != attacker);
-                defOfType.RemoveAll(u => u == null || u.Tile != hex || u.Owner != defender);
-                if (attOfType.Count == 0 && defOfType.Count == 0)
+                var attStep = new List<UnitInstance>();
+                var defStep = new List<UnitInstance>();
+                foreach (var u in aliveAtt)
+                {
+                    if (u != null && u.Tile == hex && u.Owner == attacker && u.Definition.Type == unitType)
+                        attStep.Add(u);
+                }
+
+                foreach (var u in aliveDef)
+                {
+                    if (u != null && u.Tile == hex && u.Owner == defender && u.Definition.Type == unitType)
+                        defStep.Add(u);
+                }
+
+                if (attStep.Count == 0 && defStep.Count == 0)
                     continue;
                 HasActiveBattleStep = true;
                 ActiveBattleStepUnitType = unitType;
                 BattleUiStateChanged();
 
-                // --- Defender strikes first for this unit type; resolve attacker casualties before attacker rolls ---
+                // Snapshot at step start: defender rolls, then attacker rolls, then casualties (same-step deaths still attack).
                 int hitsOnAttacker = 0;
-                foreach (var u in defOfType)
+                foreach (var u in defStep)
                 {
                     int extra = _mods.DefenderDiceBonus;
                     if (_mods.DefenderFocusFireType == unitType)
@@ -1064,6 +1097,32 @@ namespace NexusGame
                     else
                     {
                         Log($"  {unitType} (def): {roll.Dice} dice => 0 hit(s)");
+                    }
+                }
+
+                int hitsOnDefender = 0;
+                foreach (var u in attStep)
+                {
+                    int extra = _mods.AttackerDiceBonus;
+                    if (_mods.AttackerFocusFireType == unitType)
+                        extra += _mods.AttackerFocusFireExtraDice;
+                    int shift = _mods.HitThresholdBonusWhenAttackingDefender - _mods.AttackerHitThresholdReduction;
+                    var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
+                    hitsOnDefender += roll.Hits;
+                    SetBattleUiDiceRoll(roll, unitType, true);
+                    if (!AutoResolveBattlesQuick)
+                        yield return new WaitForSeconds(BattleDiceRollSpinSeconds + BattleDiceRollHoldSeconds);
+                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
+                    {
+                        Log($"  {unitType} (atk): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
+                    }
+                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
+                    {
+                        Log($"  {unitType} (atk): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
+                    }
+                    else
+                    {
+                        Log($"  {unitType} (atk): {roll.Dice} dice => 0 hit(s)");
                     }
                 }
 
@@ -1122,46 +1181,6 @@ namespace NexusGame
                 }
 
                 RefreshPoolsLocal(hex, attacker, defender, out aliveAtt, out aliveDef);
-                if (aliveAtt.Count == 0)
-                {
-                    HasActiveBattleStep = false;
-                    ActiveBattleHitsOnAttacker = 0;
-                    ActiveBattleHitsOnDefender = 0;
-                    Log("Attacker eliminated from hex.");
-                    yield break;
-                }
-
-                // Survivors of this type only — eliminated sides do not roll for this type.
-                attOfType = aliveAtt.FindAll(u => u.Definition.Type == unitType);
-                attOfType.RemoveAll(u => u == null || u.Tile != hex || u.Owner != attacker);
-
-                int hitsOnDefender = 0;
-                foreach (var u in attOfType)
-                {
-                    int extra = _mods.AttackerDiceBonus;
-                    if (_mods.AttackerFocusFireType == unitType)
-                        extra += _mods.AttackerFocusFireExtraDice;
-                    int shift = _mods.HitThresholdBonusWhenAttackingDefender - _mods.AttackerHitThresholdReduction;
-                    var roll = BattleResolver.RollDiceForUnit(u.Definition, rng, extra, shift);
-                    hitsOnDefender += roll.Hits;
-                    SetBattleUiDiceRoll(roll, unitType, true);
-                    if (!AutoResolveBattlesQuick)
-                        yield return new WaitForSeconds(BattleDiceRollSpinSeconds + BattleDiceRollHoldSeconds);
-                    if (roll.Dice > 0 && roll.Rolls != null && roll.Rolls.Count > 0)
-                    {
-                        Log($"  {unitType} (atk): rolled {roll.Dice}d6 [{string.Join(",", roll.Rolls)}], need >= {roll.Need} => {roll.Hits} hit(s)");
-                    }
-                    else if (roll.Dice > 0 && roll.ImpossibleToHit)
-                    {
-                        Log($"  {unitType} (atk): {roll.Dice}d6, need >= {roll.Need} (impossible) => 0 hit(s)");
-                    }
-                    else
-                    {
-                        Log($"  {unitType} (atk): {roll.Dice} dice => 0 hit(s)");
-                    }
-                }
-
-                RefreshPoolsLocal(hex, attacker, defender, out aliveAtt, out aliveDef);
                 int capDef = Mathf.Min(hitsOnDefender, aliveDef.Count);
                 if (aegisDef && capDef > 0)
                 {
@@ -1214,6 +1233,16 @@ namespace NexusGame
                                 yield return null;
                         }
                     }
+                }
+
+                RefreshPoolsLocal(hex, attacker, defender, out aliveAtt, out aliveDef);
+                if (aliveAtt.Count == 0)
+                {
+                    HasActiveBattleStep = false;
+                    ActiveBattleHitsOnAttacker = 0;
+                    ActiveBattleHitsOnDefender = 0;
+                    Log("Attacker eliminated from hex.");
+                    yield break;
                 }
             }
 
