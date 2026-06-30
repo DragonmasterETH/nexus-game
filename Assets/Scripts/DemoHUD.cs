@@ -4705,9 +4705,8 @@ namespace NexusGame
                         DrawOutlineRect(box, new Color(1f, 0.55f, 0.22f, 0.98f), BattleS(3f));
 
                     bool canPickHere = n > 0;
-                    float labelH = BattleS(14f);
                     float countH = !canPickHere && n > 1 ? BattleS(14f) : 0f;
-                    float innerH = box.height - labelH;
+                    float innerH = box.height;
                     float maxIcon = Mathf.Min(boxW * 0.92f, innerH - countH - BattleS(4f));
                     float iconSz = Mathf.Clamp(maxIcon, BattleS(26f), Mathf.Min(boxW * 0.95f, innerH));
                     float blockH = iconSz + countH;
@@ -5242,14 +5241,13 @@ namespace NexusGame
                 if (highlightRolling)
                     DrawOutlineRect(box, new Color(1f, 0.55f, 0.22f, 0.98f), BattleS(3f));
 
-                // Reserve bottom strip for type abbrev; optional stack count under icon when shown.
-                float labelH = BattleS(14f);
+                // Optional stack count under icon when shown.
                 float countH = n > 1 ? BattleS(14f) : 0f;
-                float innerH = box.height - labelH;
+                float innerH = box.height;
                 float maxIcon = Mathf.Min(boxW * 0.92f, innerH - countH - BattleS(4f));
                 float iconSz = Mathf.Clamp(maxIcon, BattleS(32f), Mathf.Min(boxW * 0.95f, innerH));
                 float blockH = iconSz + countH;
-                float blockY = box.yMax - labelH - blockH;
+                float blockY = box.y + (box.height - blockH) * 0.5f;
                 float ix = box.x + (box.width - iconSz) * 0.5f;
                 var iconR = new Rect(ix, blockY, iconSz, iconSz);
                 if (Event.current.type == EventType.Repaint)
@@ -5273,16 +5271,6 @@ namespace NexusGame
                             normal = { textColor = new Color(0.88f, 0.92f, 1f, 1f) }
                         });
                 }
-
-                GUI.Label(
-                    new Rect(box.x + BattleS(2f), box.yMax - BattleS(14f), box.width - BattleS(4f), BattleS(13f)),
-                    UnitTypeAbbrev(unitType),
-                    new GUIStyle(GUI.skin.label)
-                    {
-                        fontSize = Mathf.Max(10, Mathf.RoundToInt(11f * fs)),
-                        wordWrap = true,
-                        alignment = TextAnchor.LowerLeft
-                    });
 
                     GUILayout.EndVertical();
                 }
@@ -6482,6 +6470,15 @@ namespace NexusGame
                 {
                     _tilePanelDetailUnit = unitType;
                     _tilePanelHasDetailUnit = true;
+                    if (interactiveStacks && InputController != null)
+                    {
+                        movableCounts.TryGetValue(unitType, out int movable);
+                        if (movable > 0)
+                        {
+                            InputController.SetMoveSelection(unitType, movable);
+                            _moveAllChecked = false;
+                        }
+                    }
                 }
 
                 GUILayout.FlexibleSpace();
@@ -6728,12 +6725,6 @@ namespace NexusGame
             }
 
             GUILayout.EndHorizontal();
-        }
-
-        static string UnitTypeAbbrev(UnitType type)
-        {
-            string n = UnitUiName(type);
-            return n.Length <= 2 ? n : n.Substring(0, 2);
         }
 
         void DrawTileUnitIconOnly(Rect r, UnitType type, PlayerState stackOwner)
