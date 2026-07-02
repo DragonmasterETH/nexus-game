@@ -2,7 +2,7 @@
 
 Nexus Ops uses **Unity Gaming Services (UGS) Authentication** for player IDs. Game Center and Play Games prove identity; UGS still powers lobby, relay, and netcode.
 
-**Hook-up point in code:** `NexusAppleGameCenterSignIn.cs`, `NexusGooglePlayGamesSignIn.cs`, called from `NexusPlatformSignIn.TrySignInAsync()` when you open **Multiplayer**.
+**Hook-up point in code:** `NexusAppleGameCenterSignIn.cs`, `NexusGooglePlayGamesSignIn.cs`, called from `NexusPlatformSignIn.TrySignInAsync()` at launch and when you open **Multiplayer**.
 
 ---
 
@@ -106,7 +106,8 @@ Android GPGS does **not** need a scripting define once the plugin is under `Asse
 ## Verify sign-in
 
 1. Build to device (not Editor for platform auth).
-2. Open **Multiplayer** — `NexusUgsAuth.EnsureReadyAsync()` runs platform sign-in.
+2. Launch the app — `NexusUgsRunner` runs silent platform sign-in after UGS initializes.
+3. Open **Multiplayer** — retries interactively if launch sign-in did not complete.
 3. Check log for `[UGS] UGS signed in with Game Center` or `Play Games`.
 4. **Create Room** — if `UseLiveServices` is true (not stub), live room codes work.
 

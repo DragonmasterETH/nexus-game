@@ -100,7 +100,7 @@ namespace NexusGame
             ActivePlatform = PlatformKind.AppleGameCenter;
             if (NexusAppleGameCenterSignIn.IsAvailable)
             {
-                if (await NexusAppleGameCenterSignIn.TrySignInAsync())
+                if (await NexusAppleGameCenterSignIn.TrySignInAsync(interactive))
                     return true;
                 LastSignInError = NexusAppleGameCenterSignIn.LastError ?? "Game Center sign-in failed.";
                 return false;
@@ -138,7 +138,7 @@ namespace NexusGame
             if (AuthenticationService.Instance.IsSignedIn)
                 return $"Signed in with {PlatformLabel}. Live rooms enabled.";
             if (NexusAppleGameCenterSignIn.IsAvailable)
-                return "Open Multiplayer to sign in with Game Center.";
+                return "Signing in with Game Center at launch…";
             return "Game Center: install Apple Game Kit + NEXUS_APPLE_GAMEKIT.";
 #elif UNITY_ANDROID
             if (AuthenticationService.Instance.IsSignedIn && IsAuthorizedPlatformSignIn)

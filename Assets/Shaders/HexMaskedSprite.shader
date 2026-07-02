@@ -23,6 +23,7 @@ Shader "Nexus/HexMaskedSprite"
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma target 2.5
             #include "UnityCG.cginc"
 
             sampler2D _MainTex;
@@ -54,8 +55,8 @@ Shader "Nexus/HexMaskedSprite"
                     float2 v0 = float2(cos(a0), sin(a0)) * r;
                     float2 v1 = float2(cos(a1), sin(a1)) * r;
                     float2 edge = v1 - v0;
-                    float cross = edge.x * (p.y - v0.y) - edge.y * (p.x - v0.x);
-                    if (cross < -1e-5)
+                    float edgeSide = edge.x * (p.y - v0.y) - edge.y * (p.x - v0.x);
+                    if (edgeSide < -1e-5)
                         return false;
                 }
                 return true;

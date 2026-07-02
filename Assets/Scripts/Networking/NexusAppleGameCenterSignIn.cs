@@ -25,7 +25,7 @@ namespace NexusGame
             }
         }
 
-        public static async Task<bool> TrySignInAsync()
+        public static async Task<bool> TrySignInAsync(bool interactive = false)
         {
 #if UNITY_IOS && NEXUS_APPLE_GAMEKIT
             return await SignInWithGameKitAsync();
@@ -49,6 +49,9 @@ namespace NexusGame
                     localPlayer = Apple.GameKit.GKLocalPlayer.Local;
                 }
 
+                if (!localPlayer.IsAuthenticated)
+                    return false;
+
                 var fetchItems = await localPlayer.FetchItems();
                 string signature = Convert.ToBase64String(fetchItems.GetSignature());
                 string teamPlayerId = localPlayer.TeamPlayerId;
@@ -58,6 +61,7 @@ namespace NexusGame
 
                 await AuthenticationService.Instance.SignInWithAppleGameCenterAsync(
                     signature, teamPlayerId, publicKeyUrl, salt, timestamp);
+                await AuthenticationService.Instance.GetPlayerInfoAsync();
 
                 NexusPlatformSignIn.MarkPlatformSignedIn(NexusPlatformSignIn.PlatformKind.AppleGameCenter);
                 Debug.Log($"[UGS] UGS signed in with Game Center. PlayerId={AuthenticationService.Instance.PlayerId}");

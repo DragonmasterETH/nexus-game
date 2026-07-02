@@ -94,6 +94,20 @@ namespace NexusGame
         static async Task WarmUpAsync()
         {
             await NexusUgsAuth.EnsureServicesInitializedAsync();
+
+#if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
+            if (_instance == null)
+                return;
+
+            _instance.Run(async () =>
+            {
+                bool ok = await NexusUgsAuth.TrySignInAsync(interactive: false);
+                if (ok)
+                    Debug.Log($"[UGS] Platform sign-in at launch ({NexusPlatformSignIn.PlatformLabel}).");
+                else
+                    Debug.Log("[UGS] Platform sign-in at launch skipped or failed; multiplayer will retry.");
+            });
+#endif
         }
 
         public void Run(Func<Task> work)
