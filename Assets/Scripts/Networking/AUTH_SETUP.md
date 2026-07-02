@@ -37,7 +37,7 @@ Nexus Ops uses **Unity Gaming Services (UGS) Authentication** for player IDs. Ga
 3. Add scripting define for iOS builds:
    - **Edit → Project Settings → Player → iOS → Scripting Define Symbols**
    - Add: `NEXUS_APPLE_GAMEKIT`
-4. If you see `MissingMethodException` / stripped code: set **Managed Stripping Level** to **Minimal** for iOS, or add a link.xml preserving `Apple.GameKit`.
+4. Stripping: `Assets/link.xml` already preserves `Apple.Core` + `Apple.GameKit` so IL2CPP does not strip the reflection-constructed bridge types. If you still hit `default constructor not found for type Apple.Core.Runtime.*`, confirm `link.xml` shipped in the build (or lower **Managed Stripping Level** for iOS).
 
 ### D. Code (already in repo)
 
@@ -129,3 +129,4 @@ Android GPGS does **not** need a scripting define once the plugin is under `Asse
 | Play Games auth code empty | Wrong SHA-1 on Android OAuth client; Web client ID mismatch in GPGS setup |
 | `SessionNotFound` / rate limit | Lobby/Relay not enabled; wait and retry |
 | iOS strip / MissingMethodException | Minimal stripping or link.xml for `Apple.GameKit` |
+| `default constructor not found for type Apple.Core.Runtime.NSData` | IL2CPP stripped Apple bridge types — ensure `Assets/link.xml` is present (preserves `Apple.Core` + `Apple.GameKit`) |

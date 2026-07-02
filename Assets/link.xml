@@ -1,0 +1,14 @@
+<!--
+  Preserves reflection-instantiated types from IL2CPP managed stripping on device builds.
+
+  Apple's GameKit/Core plugins construct Objective-C bridge types (NSData, NSError, etc.)
+  via reflection from native callbacks. With managed stripping on (iPhone stripping level > 0)
+  IL2CPP removes their parameterless constructors, causing at runtime:
+    "default constructor not found for type Apple.Core.Runtime.NSData"
+  during Game Center sign-in / matchmaking. Preserving these assemblies keeps them intact.
+-->
+<linker>
+  <assembly fullname="Apple.Core" preserve="all"/>
+  <assembly fullname="Apple.GameKit" preserve="all"/>
+  <assembly fullname="Unity.Services.Authentication" preserve="all"/>
+</linker>
