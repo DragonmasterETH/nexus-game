@@ -10,6 +10,179 @@ namespace NexusGame
     {
         const int BattleExtensionMagic = 0x42545A31; // BTZ1
 
+        /// <summary>Stable board identity for a unit — survives snapshot unit rebuilds on clients.</summary>
+        internal readonly struct UnitBoardRef : IEquatable<UnitBoardRef>
+        {
+            public readonly int OwnerSeat;
+            public readonly UnitType Type;
+            public readonly int Q;
+            public readonly int R;
+
+            public UnitBoardRef(int ownerSeat, UnitType type, int q, int r)
+            {
+                OwnerSeat = ownerSeat;
+                Type = type;
+                Q = q;
+                R = r;
+            }
+
+            public static UnitBoardRef From(UnitInstance u)
+            {
+                if (u == null || u.Owner == null || u.Definition == null || u.Tile == null)
+                    return default;
+                return new UnitBoardRef(u.Owner.PlayerIndex, u.Definition.Type, u.Tile.Q, u.Tile.R);
+            }
+
+            public bool IsValid => OwnerSeat >= 0;
+
+            public bool Equals(UnitBoardRef other) =>
+                OwnerSeat == other.OwnerSeat && Type == other.Type && Q == other.Q && R == other.R;
+
+            public override bool Equals(object obj) => obj is UnitBoardRef other && Equals(other);
+
+            public override int GetHashCode() =>
+                HashCode.Combine(OwnerSeat, (int)Type, Q, R);
+        }
+
+        internal readonly struct CasualtyPickRemapState
+        {
+            public readonly bool Valid;
+            public readonly int OwnerSeat;
+            public readonly List<UnitBoardRef> PoolRefs;
+            public readonly List<UnitBoardRef> SelectedRefs;
+
+            public CasualtyPickRemapState(bool valid, int ownerSeat, List<UnitBoardRef> poolRefs,
+                List<UnitBoardRef> selectedRefs)
+            {
+                Valid = valid;
+                OwnerSeat = ownerSeat;
+                PoolRefs = poolRefs;
+                SelectedRefs = selectedRefs;
+            }
+        }
+
+        internal CasualtyPickRemapState CaptureCasualtyPickRemapState()
+        {
+            if (CasualtyPick?.Owner == null || !CanLocalPlayerActFor(CasualtyPick.Owner))
+                return default;
+
+            var poolRefs = new List<UnitBoardRef>();
+            if (CasualtyPick.Pool != null)
+            {
+                foreach (var u in CasualtyPick.Pool)
+                {
+                    var id = UnitBoardRef.From(u);
+                    if (id.IsValid)
+                        poolRefs.Add(id);
+                }
+            }
+
+            var selectedRefs = new List<UnitBoardRef>();
+            if (CasualtyPick.Selected != null)
+            {
+                foreach (var u in CasualtyPick.Selected)
+                {
+                    var id = UnitBoardRef.From(u);
+                    if (id.IsValid)
+                        selectedRefs.Add(id);
+                }
+            }
+
+            return new CasualtyPickRemapState(true, CasualtyPick.Owner.PlayerIndex, poolRefs, selectedRefs);
+        }
+
+        internal static void RemapCasualtyPickInPlace(CasualtyPickState cp)
+        {
+            if (cp == null)
+                return;
+
+            cp.Pool?.RemoveAll(u => u == null);
+            if (cp.Pool == null || cp.Pool.Count == 0)
+            {
+                cp.Selected?.Clear();
+                return;
+            }
+
+            var selectedRefs = new List<UnitBoardRef>();
+            if (cp.Selected != null)
+            {
+                foreach (var u in cp.Selected)
+                {
+                    var id = UnitBoardRef.From(u);
+                    if (id.IsValid)
+                        selectedRefs.Add(id);
+                }
+            }
+
+            cp.Selected = RemapCasualtySelection(selectedRefs, cp.Pool, cp.Required);
+        }
+
+        static List<UnitBoardRef> CapturePoolIdentity(List<UnitInstance> pool)
+        {
+            var refs = new List<UnitBoardRef>();
+            if (pool == null)
+                return refs;
+            foreach (var u in pool)
+            {
+                var id = UnitBoardRef.From(u);
+                if (id.IsValid)
+                    refs.Add(id);
+            }
+
+            return refs;
+        }
+
+        static bool SameCasualtyPoolByIdentity(List<UnitBoardRef> a, List<UnitInstance> poolB)
+        {
+            if (a == null || poolB == null)
+                return false;
+
+            var setB = new HashSet<UnitBoardRef>(CapturePoolIdentity(poolB));
+            if (a.Count != setB.Count)
+                return false;
+
+            var setA = new HashSet<UnitBoardRef>(a);
+            return setA.SetEquals(setB);
+        }
+
+        static UnitInstance FindUnitInPool(UnitBoardRef id, List<UnitInstance> pool)
+        {
+            if (!id.IsValid || pool == null)
+                return null;
+
+            foreach (var u in pool)
+            {
+                if (u == null || u.Owner == null || u.Definition == null || u.Tile == null)
+                    continue;
+                if (u.Owner.PlayerIndex == id.OwnerSeat &&
+                    u.Definition.Type == id.Type &&
+                    u.Tile.Q == id.Q &&
+                    u.Tile.R == id.R)
+                    return u;
+            }
+
+            return null;
+        }
+
+        static List<UnitInstance> RemapCasualtySelection(List<UnitBoardRef> selectedRefs, List<UnitInstance> pool,
+            int required)
+        {
+            var selected = new List<UnitInstance>();
+            if (selectedRefs == null || pool == null)
+                return selected;
+
+            foreach (var id in selectedRefs)
+            {
+                if (selected.Count >= required)
+                    break;
+                var match = FindUnitInPool(id, pool);
+                if (match != null && !selected.Contains(match))
+                    selected.Add(match);
+            }
+
+            return selected;
+        }
+
         internal void WriteOnlineBattleExtension(BinaryWriter w)
         {
             w.Write(BattleExtensionMagic);
@@ -129,7 +302,8 @@ namespace NexusGame
             ClearBattleCasualtyDeathFx();
         }
 
-        internal void ReadOnlineBattleExtension(BinaryReader r, bool battleBlocking)
+        internal void ReadOnlineBattleExtension(BinaryReader r, bool battleBlocking,
+            CasualtyPickRemapState casualtyRemap = default)
         {
             if (r.BaseStream.Position >= r.BaseStream.Length)
             {
@@ -146,6 +320,7 @@ namespace NexusGame
                 return;
             }
 
+            // Preserve the local player's in-progress casualty selection across snapshot unit rebuilds.
             ClearOnlineBattleUiState();
 
             int planCount = r.ReadInt32();
@@ -204,9 +379,18 @@ namespace NexusGame
                         selected.Add(pool[idx]);
                 }
 
+                var owner = PlayerByIndex(ownerIdx);
+
+                if (owner != null && CanLocalPlayerActFor(owner) &&
+                    casualtyRemap.Valid && casualtyRemap.OwnerSeat == owner.PlayerIndex &&
+                    SameCasualtyPoolByIdentity(casualtyRemap.PoolRefs, pool))
+                {
+                    selected = RemapCasualtySelection(casualtyRemap.SelectedRefs, pool, required);
+                }
+
                 CasualtyPick = new CasualtyPickState
                 {
-                    Owner = PlayerByIndex(ownerIdx),
+                    Owner = owner,
                     Pool = pool,
                     Required = required,
                     Selected = selected
@@ -345,8 +529,8 @@ namespace NexusGame
 
             CasualtyPick.Pool.RemoveAll(u => u == null);
             var pool = BuildDeterministicCasualtyPool(CasualtyPick.Pool);
-            CasualtyPick.Pool = pool;
-            CasualtyPick.Selected.Clear();
+            int required = Mathf.Clamp(CasualtyPick.Required, 0, pool.Count);
+            var newSelected = new List<UnitInstance>();
 
             if (types != null && counts != null)
             {
@@ -358,14 +542,20 @@ namespace NexusGame
                     for (int k = 0; k < want; k++)
                     {
                         var next = pool.FirstOrDefault(u =>
-                            u != null && u.Definition.Type == type && !CasualtyPick.Selected.Contains(u));
+                            u != null && u.Definition.Type == type && !newSelected.Contains(u));
                         if (next == null)
                             return false;
-                        CasualtyPick.Selected.Add(next);
+                        newSelected.Add(next);
                     }
                 }
             }
 
+            if (newSelected.Count != required)
+                return false;
+
+            CasualtyPick.Pool = pool;
+            CasualtyPick.Required = required;
+            CasualtyPick.Selected = newSelected;
             SubmitCasualtyPick();
             return true;
         }

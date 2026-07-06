@@ -175,10 +175,11 @@ namespace NexusGame
                     }
                 }
 
+                var casualtyRemap = CaptureCasualtyPickRemapState();
                 RebuildUnitsFromSnapshot(r);
 
                 _currentPlayerIndex = SeatToListIndex(currentPlayerSeat);
-                ReadOnlineBattleExtension(r, BattlePhaseBlockingPlay);
+                ReadOnlineBattleExtension(r, BattlePhaseBlockingPlay, casualtyRemap);
 
                 if (isGameOver && !IsGameOver)
                 {

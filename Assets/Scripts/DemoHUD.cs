@@ -4551,6 +4551,7 @@ namespace NexusGame
             bool prevEnabled = GUI.enabled;
             GUI.enabled = canAct;
 
+            GameController.RemapCasualtyPickInPlace(cp);
             cp.Pool.RemoveAll(u => u == null);
             cp.Selected.RemoveAll(u => u == null || !cp.Pool.Contains(u));
             cp.Required = Mathf.Clamp(cp.Required, 0, cp.Pool.Count);
@@ -5754,6 +5755,7 @@ namespace NexusGame
                 return;
             }
 
+            GameController.RemapCasualtyPickInPlace(cp);
             cp.Pool.RemoveAll(u => u == null);
             cp.Selected.RemoveAll(u => u == null || !cp.Pool.Contains(u));
             cp.Required = Mathf.Clamp(cp.Required, 0, cp.Pool.Count);

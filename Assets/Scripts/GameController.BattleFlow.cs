@@ -167,6 +167,10 @@ namespace NexusGame
         public const float BattleDiceRollHoldSeconds = 0.5f;
 
         const float BattleClashIntroSeconds = 0.55f;
+        const float BattlePromptTimeoutCasualtySeconds = 75f;
+        const float BattlePromptTimeoutEnergizeSeconds = 40f;
+        const float BattlePromptTimeoutSecretMissionSeconds = 35f;
+        const float BattlePromptTimeoutFocusFireSeconds = 30f;
         const float DragonImpactShakeSeconds = 0.25f;
         const float DragonImpactShakeDistance = 0.14f;
         const float DragonImpactShakeFrequencyHz = 20f;
@@ -644,8 +648,7 @@ namespace NexusGame
 
             if (BattlePlan.Count == 0)
             {
-                BattlePhaseBlockingPlay = false;
-                _battleCoroutine = null;
+                FinishBattlePhase(attacker, log);
                 yield break;
             }
 
@@ -655,7 +658,7 @@ namespace NexusGame
             foreach (var entry in BattlePlan)
             {
                 if (IsGameOver)
-                    yield break;
+                    break;
 
                 var hex = entry.Hex;
                 var defender = Players.Find(p => p.PlayerIndex == entry.DefenderPlayerIndex);
@@ -731,8 +734,7 @@ namespace NexusGame
                     {
                         SecretMissionOffer = BuildSecretOffer(attacker, defCasualties, defStart, defLostDragon);
                         BattleUiStateChanged();
-                        while (SecretMissionOffer != null && SecretMissionOffer.Waiting)
-                            yield return null;
+                        yield return WaitForSecretMissionResolved();
                         SecretMissionOffer = null;
                         if (IsGameOver)
                         {
@@ -755,14 +757,29 @@ namespace NexusGame
                 log.AppendLine("---");
             }
 
+            FinishBattlePhase(attacker, log);
+        }
+
+        void FinishBattlePhase(PlayerState attacker, StringBuilder log)
+        {
             LastBattlePhaseLog = log.ToString().TrimEnd();
             BattlePlan.Clear();
             BattlePhaseBlockingPlay = false;
             _battleHex = null;
+            _battleAttacker = null;
+            _battleDefender = null;
             ClearBattleCasualtyDeathFx();
             HasActiveBattleStep = false;
             ActiveBattleHitsOnAttacker = 0;
             ActiveBattleHitsOnDefender = 0;
+            EnergizePromptPlayer = null;
+            EnergizeBattleContext = null;
+            _energizeRoundActive = false;
+            FocusFirePicker = null;
+            _pendingFocusFireCard = false;
+            SecretMissionOffer = null;
+            _battleClashIntroActive = false;
+            _lastBattleUiDiceRoll = null;
             _battleCoroutine = null;
             Debug.Log("[Battle] --- Phase complete ---");
             NotifyOnlineStateChanged();
@@ -866,10 +883,38 @@ namespace NexusGame
                 foreach (var p in EnergizePlayerOrder(attacker, defender))
                 {
                     EnergizePromptPlayer = p;
+                    if (p.BattleEnergize == null || p.BattleEnergize.Count == 0)
+                    {
+                        _lastEnergizePlayed = EnergizeBattleId.None;
+                        _energizeRoundActive = false;
+                        BattleUiStateChanged();
+                        continue;
+                    }
+
                     _energizeRoundActive = true;
                     BattleUiStateChanged();
+                    float promptStart = Time.unscaledTime;
                     while (_energizeRoundActive)
+                    {
+                        if (FocusFirePicker != null &&
+                            Time.unscaledTime - promptStart >= BattlePromptTimeoutFocusFireSeconds)
+                        {
+                            Debug.LogWarning(
+                                $"[Battle] Focus Fire timed out for P{FocusFirePicker.PlayerIndex + 1} — refunding card.");
+                            CancelFocusFireRefund();
+                            break;
+                        }
+
+                        if (Time.unscaledTime - promptStart >= BattlePromptTimeoutEnergizeSeconds)
+                        {
+                            Debug.LogWarning(
+                                $"[Battle] Energize timed out for P{p.PlayerIndex + 1} — auto-pass.");
+                            SubmitEnergizePass();
+                            break;
+                        }
+
                         yield return null;
+                    }
 
                     if (_lastEnergizePlayed != EnergizeBattleId.None)
                     {
@@ -886,6 +931,8 @@ namespace NexusGame
             Debug.Log("[Battle] Energize: both sides done (pass chain complete)");
             EnergizePromptPlayer = null;
             EnergizeBattleContext = null;
+            FocusFirePicker = null;
+            _pendingFocusFireCard = false;
             BattleUiStateChanged();
         }
 
@@ -1174,8 +1221,7 @@ namespace NexusGame
                                 }
                             };
                             BattleUiStateChanged();
-                            while (CasualtyPick != null)
-                                yield return null;
+                            yield return WaitForCasualtyPickResolved();
                         }
                     }
                 }
@@ -1229,8 +1275,7 @@ namespace NexusGame
                                 }
                             };
                             BattleUiStateChanged();
-                            while (CasualtyPick != null)
-                                yield return null;
+                            yield return WaitForCasualtyPickResolved();
                         }
                     }
                 }
@@ -1262,6 +1307,7 @@ namespace NexusGame
             if (CasualtyPick.Required == 0)
             {
                 CasualtyPick = null;
+                BattleUiStateChanged();
                 return;
             }
             if (CasualtyPick.Selected.Count != CasualtyPick.Required)
@@ -1278,6 +1324,61 @@ namespace NexusGame
 
             CasualtyPick = null;
             BattleUiStateChanged();
+        }
+
+        IEnumerator WaitForCasualtyPickResolved()
+        {
+            float start = Time.unscaledTime;
+            while (CasualtyPick != null)
+            {
+                if (Time.unscaledTime - start >= BattlePromptTimeoutCasualtySeconds)
+                {
+                    Debug.LogWarning("[Battle] Casualty pick timed out — auto-selecting weakest.");
+                    AutoResolveCasualtyPickWeakestFirst();
+                    yield break;
+                }
+
+                yield return null;
+            }
+        }
+
+        IEnumerator WaitForSecretMissionResolved()
+        {
+            float start = Time.unscaledTime;
+            while (SecretMissionOffer != null && SecretMissionOffer.Waiting)
+            {
+                if (Time.unscaledTime - start >= BattlePromptTimeoutSecretMissionSeconds)
+                {
+                    Debug.LogWarning("[Battle] Secret mission offer timed out — skipping.");
+                    SkipSecretMissionPlay();
+                    yield break;
+                }
+
+                yield return null;
+            }
+        }
+
+        void AutoResolveCasualtyPickWeakestFirst()
+        {
+            if (CasualtyPick == null)
+                return;
+
+            CasualtyPick.Pool.RemoveAll(u => u == null);
+            var pool = BuildDeterministicCasualtyPool(CasualtyPick.Pool);
+            CasualtyPick.Pool = pool;
+            int required = Mathf.Clamp(CasualtyPick.Required, 0, pool.Count);
+            CasualtyPick.Required = required;
+            if (required <= 0)
+            {
+                CasualtyPick = null;
+                BattleUiStateChanged();
+                return;
+            }
+
+            var victims = BattleResolver.PickCasualtiesWeakestFirst(pool, required);
+            CasualtyPick.Selected.Clear();
+            CasualtyPick.Selected.AddRange(victims);
+            SubmitCasualtyPick();
         }
 
         public void ToggleCasualtyUnit(UnitInstance u)

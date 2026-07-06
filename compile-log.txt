@@ -1,0 +1,26 @@
+[Licensing::Module] Trying to connect to existing licensing client channel...
+Built from '6000.3/staging' branch; Version is '6000.3.11f1 (3000ef702840) revision 3145967'; Using compiler version '194234433'; Build Type 'Release'
+OS: 'Windows 11  (10.0.22631) Professional' Language: 'en' Physical Memory: 65349 MB
+[Licensing::IpcConnector] Successfully connected to: "LicenseClient-Stefa" at "2026-07-06T22:13:45.0300081Z"
+BatchMode: 1, IsHumanControllingUs: 0, StartBugReporterOnCrash: 0, Is64bit: 1
+System  architecture: x64
+Process architecture: x64
+Date: 2026-07-06T22:13:45Z
+[Licensing::Client] Error: HandshakeResponse reported an error:
+	ResponseCode: 505
+	ResponseStatus: Unsupported protocol version '1.18.0'.
+[Licensing::Module] Error: Failed to handshake to channel: "LicenseClient-Stefa"
+[Licensing::IpcConnector] LicenseClient-Stefa channel disconnected successfully.
+[Licensing::IpcConnector] Successfully connected to: "LicenseClient-Stefa-6000.3.11" at "2026-07-06T22:13:45.9034139Z"
+
+COMMAND LINE ARGUMENTS:
+D:\Program Files\Unity\6000.3.11f1\Editor\Unity.exe
+-batchmode
+-quit
+-projectPath
+d:\Repos\GitHub\nexus-game
+-logFile
+d:\Repos\GitHub\nexus-game\compile-log.txt
+Successfully changed project path to: d:\Repos\GitHub\nexus-game
+D:/Repos/GitHub/nexus-game
+Exiting without the bug reporter. Application will terminate with return code 1
