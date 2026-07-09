@@ -488,8 +488,9 @@ namespace NexusGame
             if (legacyRefinery != null)
                 Destroy(legacyRefinery.gameObject);
 
+            var img = NexusGuiArt.LoadTerrainForTile(type);
             var mat = NexusGuiArt.GetTerrainOverlayMaterial(type);
-            if (mat == null)
+            if (img.IsEmpty || mat == null)
                 return;
 
             Transform quadTf = tileView.Find("TerrainQuad");
@@ -502,17 +503,26 @@ namespace NexusGame
 
             if (quadTf == null)
             {
-                var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                quad.name = "TerrainQuad";
-                Destroy(quad.GetComponent<Collider>());
-                quadTf = quad.transform;
+                var go = new GameObject("TerrainQuad");
+                go.AddComponent<MeshFilter>();
+                go.AddComponent<MeshRenderer>();
+                quadTf = go.transform;
             }
 
             quadTf.SetParent(tileView, worldPositionStays: false);
             quadTf.SetAsFirstSibling();
             quadTf.localPosition = new Vector3(0f, TerrainOverlayLocalY, 0f);
             quadTf.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            quadTf.localScale = Vector3.one * (HexRadius * 1.92f);
+            // Mesh radius is 0.5 local — scale 2× hex radius so vertices match the board hex outline.
+            quadTf.localScale = Vector3.one * (HexRadius * 2f);
+
+            var mf = quadTf.GetComponent<MeshFilter>();
+            if (mf != null)
+                mf.sharedMesh = NexusGuiArt.GetTerrainHexMesh(img.AspectRatio);
+
+            var col = quadTf.GetComponent<Collider>();
+            if (col != null)
+                Destroy(col);
 
             var rend = quadTf.GetComponent<Renderer>();
             if (rend != null)

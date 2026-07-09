@@ -53,6 +53,7 @@ namespace NexusGame
             PlaySecretMissionAtIndex = 14,
             SkipSecretMissionPlay = 15,
             PickBattleAsNext = 16,
+            StartBattleFromArrangement = 17,
         }
 
         static bool _syncHandlerRegistered;
@@ -224,6 +225,11 @@ namespace NexusGame
                     reader.ReadValueSafe(out int pickPlanIndex);
                     ProcessPickBattleAsNext(pickSeat, pickPlanIndex);
                     break;
+                case OnlineIntentType.StartBattleFromArrangement:
+                    reader.ReadValueSafe(out int startSeat);
+                    reader.ReadValueSafe(out int startPlanIndex);
+                    ProcessStartBattleFromArrangement(startSeat, startPlanIndex);
+                    break;
                 case OnlineIntentType.SubmitEnergizePass:
                     reader.ReadValueSafe(out int energizePassSeat);
                     ProcessSubmitEnergizePass(energizePassSeat);
@@ -351,6 +357,13 @@ namespace NexusGame
                 w.WriteValueSafe(planIndex);
             });
 
+        public static bool SendStartBattleFromArrangementIntent(int seat, int planIndex) =>
+            SendIntentToHost(OnlineIntentType.StartBattleFromArrangement, w =>
+            {
+                w.WriteValueSafe(seat);
+                w.WriteValueSafe(planIndex);
+            });
+
         public static bool SendSubmitEnergizePassIntent(int seat) =>
             SendIntentToHost(OnlineIntentType.SubmitEnergizePass, w => w.WriteValueSafe(seat));
 
@@ -435,6 +448,16 @@ namespace NexusGame
             if (game == null || game.CurrentPlayer == null || game.CurrentPlayer.PlayerIndex != requestingSeat)
                 return;
             game.PickBattleAsNext(planIndex);
+            BroadcastAfterHostAction(game);
+        }
+
+        static void ProcessStartBattleFromArrangement(int requestingSeat, int planIndex)
+        {
+            var game = NexusGameCommands.Game;
+            if (game == null || !game.PendingBattleArrangement || game.CurrentPlayer == null ||
+                game.CurrentPlayer.PlayerIndex != requestingSeat)
+                return;
+            game.StartBattleFromArrangement(planIndex);
             BroadcastAfterHostAction(game);
         }
 
@@ -899,6 +922,13 @@ namespace NexusGame
             ServerRpcParams rpcParams = default)
         {
             ProcessPickBattleAsNext(requestingSeat, planIndex);
+        }
+
+        [ServerRpc(RequireOwnership = false)]
+        public void RequestStartBattleFromArrangementServerRpc(int requestingSeat, int planIndex,
+            ServerRpcParams rpcParams = default)
+        {
+            ProcessStartBattleFromArrangement(requestingSeat, planIndex);
         }
 
         [ServerRpc(RequireOwnership = false)]

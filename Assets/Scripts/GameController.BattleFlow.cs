@@ -149,7 +149,7 @@ namespace NexusGame
 
         /// <summary>True while the full-screen battle modal should stay visible for every seat (view-only when not acting).</summary>
         public bool IsBattleScreenActive =>
-            BattlePhaseBlockingPlay ||
+            (BattlePhaseBlockingPlay && !PendingBattleArrangement) ||
             BattleClashIntroActive ||
             HasActiveBattleStep ||
             EnergizePromptPlayer != null ||
@@ -571,9 +571,33 @@ namespace NexusGame
                 }
             }
 
-            _battleArrangementPickCount = BattlePlan.Count == 1 ? 1 : 0;
+            _battleArrangementPickCount = 0;
             PendingBattleArrangement = true;
             BattlePhaseBlockingPlay = true;
+            BattleUiStateChanged();
+        }
+
+        /// <summary>Start fighting the contested hex chosen on the arrangement screen (one battle at a time).</summary>
+        public void StartBattleFromArrangement(int planIndex)
+        {
+            if (!PendingBattleArrangement || planIndex < 0 || planIndex >= BattlePlan.Count)
+                return;
+
+            var attacker = CurrentPlayer;
+            if (attacker == null)
+                return;
+
+            var entry = BattlePlan[planIndex];
+            if (entry?.Hex == null)
+                return;
+
+            BattlePlan.Clear();
+            BattlePlan.Add(entry);
+            PendingBattleArrangement = false;
+            _battleArrangementPickCount = 0;
+            Debug.Log(
+                $"[Battle] Fighting selected hex ({entry.Hex.Q},{entry.Hex.R}) vs P{entry.DefenderPlayerIndex + 1}");
+            StartBattleCoroutine(attacker);
             BattleUiStateChanged();
         }
 

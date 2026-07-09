@@ -122,7 +122,8 @@ namespace NexusGame
             var refs = new List<UnitBoardRef>();
             if (pool == null)
                 return refs;
-            foreach (var u in pool)
+            foreach (var u in pool.Where(u => u != null).OrderBy(u => (int)u.Definition.Type)
+                         .ThenBy(u => u.GetInstanceID()))
             {
                 var id = UnitBoardRef.From(u);
                 if (id.IsValid)
@@ -137,27 +138,54 @@ namespace NexusGame
             if (a == null || poolB == null)
                 return false;
 
-            var setB = new HashSet<UnitBoardRef>(CapturePoolIdentity(poolB));
-            if (a.Count != setB.Count)
+            var listB = CapturePoolIdentity(poolB);
+            if (a.Count != listB.Count)
                 return false;
 
-            var setA = new HashSet<UnitBoardRef>(a);
-            return setA.SetEquals(setB);
+            var sortedA = new List<UnitBoardRef>(a);
+            var sortedB = new List<UnitBoardRef>(listB);
+            sortedA.Sort(CompareUnitBoardRef);
+            sortedB.Sort(CompareUnitBoardRef);
+            for (int i = 0; i < sortedA.Count; i++)
+            {
+                if (!sortedA[i].Equals(sortedB[i]))
+                    return false;
+            }
+
+            return true;
         }
 
-        static UnitInstance FindUnitInPool(UnitBoardRef id, List<UnitInstance> pool)
+        static int CompareUnitBoardRef(UnitBoardRef a, UnitBoardRef b)
+        {
+            int c = a.OwnerSeat.CompareTo(b.OwnerSeat);
+            if (c != 0) return c;
+            c = ((int)a.Type).CompareTo((int)b.Type);
+            if (c != 0) return c;
+            c = a.Q.CompareTo(b.Q);
+            return c != 0 ? c : a.R.CompareTo(b.R);
+        }
+
+        static bool UnitMatchesBoardRef(UnitInstance u, UnitBoardRef id)
+        {
+            if (u == null || u.Owner == null || u.Definition == null || u.Tile == null || !id.IsValid)
+                return false;
+            return u.Owner.PlayerIndex == id.OwnerSeat &&
+                   u.Definition.Type == id.Type &&
+                   u.Tile.Q == id.Q &&
+                   u.Tile.R == id.R;
+        }
+
+        static UnitInstance FindUnitInPool(UnitBoardRef id, List<UnitInstance> pool,
+            ICollection<UnitInstance> exclude = null)
         {
             if (!id.IsValid || pool == null)
                 return null;
 
             foreach (var u in pool)
             {
-                if (u == null || u.Owner == null || u.Definition == null || u.Tile == null)
+                if (u == null || exclude != null && exclude.Contains(u))
                     continue;
-                if (u.Owner.PlayerIndex == id.OwnerSeat &&
-                    u.Definition.Type == id.Type &&
-                    u.Tile.Q == id.Q &&
-                    u.Tile.R == id.R)
+                if (UnitMatchesBoardRef(u, id))
                     return u;
             }
 
@@ -171,13 +199,16 @@ namespace NexusGame
             if (selectedRefs == null || pool == null)
                 return selected;
 
+            var used = new HashSet<UnitInstance>();
             foreach (var id in selectedRefs)
             {
                 if (selected.Count >= required)
                     break;
-                var match = FindUnitInPool(id, pool);
-                if (match != null && !selected.Contains(match))
-                    selected.Add(match);
+                var match = FindUnitInPool(id, pool, used);
+                if (match == null)
+                    continue;
+                selected.Add(match);
+                used.Add(match);
             }
 
             return selected;

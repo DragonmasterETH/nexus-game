@@ -663,9 +663,116 @@ namespace NexusGame
         static readonly System.Collections.Generic.Dictionary<TileType, Material> _terrainOverlayMats =
             new System.Collections.Generic.Dictionary<TileType, Material>();
 
+        static readonly System.Collections.Generic.Dictionary<TileType, Material> _terrainModalMats =
+            new System.Collections.Generic.Dictionary<TileType, Material>();
+
+        static readonly System.Collections.Generic.Dictionary<int, Mesh> _terrainHexMeshes =
+            new System.Collections.Generic.Dictionary<int, Mesh>();
+
+        static Material _terrainHexMaskedTemplate;
+        static Shader _hexMaskedShader;
+
+        /// <summary>Pointy-top hex overlay mesh (radius 0.5 local) with cover UVs baked for <paramref name="aspect"/>.</summary>
+        public static Mesh GetTerrainHexMesh(float aspect)
+        {
+            int key = Mathf.Max(1, Mathf.RoundToInt(Mathf.Max(0.01f, aspect) * 1000f));
+            if (!_terrainHexMeshes.TryGetValue(key, out var mesh) || mesh == null)
+            {
+                mesh = BuildTerrainHexMesh(0.5f, aspect);
+                _terrainHexMeshes[key] = mesh;
+            }
+
+            return mesh;
+        }
+
+        static Mesh BuildTerrainHexMesh(float radius, float aspect)
+        {
+            var mesh = new Mesh { name = "TerrainHexOverlay" };
+            var verts = new Vector3[7];
+            var uvs = new Vector2[7];
+            var tris = new int[18];
+
+            verts[0] = Vector3.zero;
+            uvs[0] = CoverUv01(0.5f, 0.5f, aspect);
+
+            for (int i = 0; i < 6; i++)
+            {
+                float angle = Mathf.Deg2Rad * (60f * i + 30f);
+                float x = Mathf.Cos(angle) * radius;
+                float y = Mathf.Sin(angle) * radius;
+                verts[i + 1] = new Vector3(x, y, 0f);
+                float u01 = x / (radius * 2f) + 0.5f;
+                float v01 = y / (radius * 2f) + 0.5f;
+                uvs[i + 1] = CoverUv01(u01, v01, aspect);
+            }
+
+            for (int i = 0; i < 6; i++)
+            {
+                int tri = i * 3;
+                tris[tri] = 0;
+                tris[tri + 1] = i + 1;
+                tris[tri + 2] = i == 5 ? 1 : i + 2;
+            }
+
+            mesh.vertices = verts;
+            mesh.uv = uvs;
+            mesh.triangles = tris;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        static Vector2 CoverUv01(float u, float v, float aspect)
+        {
+            float cx = u - 0.5f;
+            float cy = v - 0.5f;
+            float sx = aspect > 1f ? aspect : 1f;
+            float sy = aspect > 1f ? 1f : 1f / Mathf.Max(0.01f, aspect);
+            return new Vector2(cx / sx + 0.5f, cy / sy + 0.5f);
+        }
+
+        static Shader GetHexMaskedShader()
+        {
+            if (_hexMaskedShader != null)
+                return _hexMaskedShader;
+
+            if (_terrainHexMaskedTemplate == null)
+                _terrainHexMaskedTemplate = Resources.Load<Material>("Nexus/TerrainHexMasked");
+
+            if (_terrainHexMaskedTemplate != null && _terrainHexMaskedTemplate.shader != null &&
+                _terrainHexMaskedTemplate.shader.name != "Hidden/InternalErrorShader")
+                _hexMaskedShader = _terrainHexMaskedTemplate.shader;
+
+            if (_hexMaskedShader == null)
+                _hexMaskedShader = Shader.Find("Nexus/HexMaskedSprite");
+
+            return _hexMaskedShader;
+        }
+
+        static bool TerrainMaterialUsesHexMask(Material mat) =>
+            mat != null && mat.shader != null && mat.shader.name == "Nexus/HexMaskedSprite";
+
         /// <summary>Terrain imprint for board hexes (Resources/Sprites/Terrain/*.png).</summary>
         public static NexusGuiImage LoadTerrainForTile(TileType type)
         {
+            string path = type switch
+            {
+                TileType.Lava => "Sprites/Terrain/Magma",
+                TileType.CrystalField => "Sprites/Terrain/Crystals",
+                TileType.Forest => "Sprites/Terrain/Fungal",
+                TileType.Plains => "Sprites/Terrain/Vortex",
+                TileType.Monolith => "Sprites/Terrain/Monolith",
+                TileType.Rock => "Sprites/Terrain/Rocks",
+                _ => null
+            };
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                var tex = Resources.Load<Texture2D>(path);
+                if (tex != null)
+                    return new NexusGuiImage(tex);
+            }
+
             return type switch
             {
                 TileType.Lava => Load("Sprites/Terrain/Magma"),
@@ -678,7 +785,19 @@ namespace NexusGame
             };
         }
 
-        /// <summary>Shared hex-masked material per terrain type (same opacity as refinery overlays).</summary>
+        static Material CreateTerrainMaterial(Shader shader, NexusGuiImage img)
+        {
+            var m = new Material(shader);
+            ApplyImageToMaterial(m, img, Color.white);
+            m.color = new Color(1f, 1f, 1f, RefineryOverlayAlpha);
+            if (m.HasProperty("_Aspect"))
+                m.SetFloat("_Aspect", img.AspectRatio);
+            if (m.HasProperty("_HexRadius"))
+                m.SetFloat("_HexRadius", 0.5f);
+            return m;
+        }
+
+        /// <summary>World-board terrain material (hex mesh supplies the silhouette).</summary>
         public static Material GetTerrainOverlayMaterial(TileType type)
         {
             if (type == TileType.HomeBase)
@@ -694,19 +813,40 @@ namespace NexusGame
             if (img.IsEmpty)
                 return null;
 
-            var shader = Shader.Find("Nexus/HexMaskedSprite");
+            var shader = Shader.Find("Sprites/Default");
+            if (shader == null)
+                shader = Shader.Find("Unlit/Transparent");
+
+            var m = CreateTerrainMaterial(shader, img);
+            SetWorldBoardRenderLayer(m, WorldBoardRenderLayer.Terrain);
+            _terrainOverlayMats[type] = m;
+            return m;
+        }
+
+        /// <summary>IMGUI terrain draw inside a hex rect (hex-mask shader on a square draw region).</summary>
+        public static Material GetTerrainModalDrawMaterial(TileType type)
+        {
+            if (type == TileType.HomeBase)
+                return null;
+
+            if (_terrainModalMats.TryGetValue(type, out var cached) && cached != null)
+            {
+                if (!TerrainMaterialUsesHexMask(cached) && GetHexMaskedShader() != null)
+                    cached = null;
+                else
+                    return cached;
+            }
+
+            var img = LoadTerrainForTile(type);
+            if (img.IsEmpty)
+                return null;
+
+            var shader = GetHexMaskedShader();
             if (shader == null)
                 shader = Shader.Find("Sprites/Default");
 
-            var m = new Material(shader);
-            ApplyImageToMaterial(m, img, Color.white);
-            m.color = new Color(1f, 1f, 1f, RefineryOverlayAlpha);
-            if (m.HasProperty("_Aspect"))
-                m.SetFloat("_Aspect", img.AspectRatio);
-            if (m.HasProperty("_HexRadius"))
-                m.SetFloat("_HexRadius", 0.46f);
-            SetWorldBoardRenderLayer(m, WorldBoardRenderLayer.Terrain);
-            _terrainOverlayMats[type] = m;
+            var m = CreateTerrainMaterial(shader, img);
+            _terrainModalMats[type] = m;
             return m;
         }
 

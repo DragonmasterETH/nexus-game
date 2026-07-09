@@ -571,6 +571,9 @@ namespace NexusGame
 
         Vector2 _scrollBattle;
         Vector2 _scrollBattleMainLog;
+        int _battleArrangementSelectedPlan = -1;
+        Vector2 _scrollBattleArrangement;
+        UnitType? _casualtyAdjustFocusType;
         Vector2 _scrollBattleLogPanel;
         int _lastBattleLogLen;
         Vector2 _scrollHandSecret;
@@ -1640,11 +1643,11 @@ namespace NexusGame
             DrawFlyingRubiumIncome();
             DrawFlyingVictoryPoints();
 
-            // Battle arrangement: tap contested hexes on the board to set order.
-            DrawBattleArrangementOverlay();
-
             // Battle modal above main HUD (clash intro is drawn inside the modal — no extra full-screen flash).
             DrawFullBattleOverlays(player);
+
+            // Arrangement picker must paint above the battle modal (both can share BattlePhaseBlockingPlay).
+            DrawBattleArrangementScreen();
 
             // Dragon's Breath casualty pick: full tile-style modal on top of the HUD.
             var dpEnd = Game.DragonPhase;
@@ -3215,11 +3218,14 @@ namespace NexusGame
             if (Event.current.type != EventType.Repaint)
                 return;
 
-            var mat = NexusGuiArt.GetTerrainOverlayMaterial(tile.Type);
+            var mat = NexusGuiArt.GetTerrainModalDrawMaterial(tile.Type);
             if (mat == null || mat.mainTexture == null)
                 return;
 
+            Color prev = GUI.color;
+            GUI.color = new Color(1f, 1f, 1f, NexusGuiArt.RefineryOverlayAlpha);
             Graphics.DrawTexture(hexR, mat.mainTexture, mat);
+            GUI.color = prev;
         }
 
         static bool TileHasRefineryOverlay(BoardTile tile)
@@ -4557,9 +4563,13 @@ namespace NexusGame
             cp.Required = Mathf.Clamp(cp.Required, 0, cp.Pool.Count);
             if (cp.Required == 0)
             {
+                _casualtyAdjustFocusType = null;
                 NexusGameCommands.RequestSubmitCasualtyPick();
                 return;
             }
+
+            if (cp.Selected.Count == 0)
+                _casualtyAdjustFocusType = null;
 
             var hex = Game.ActiveBattleHex;
             var owner = cp.Owner;
@@ -4596,7 +4606,7 @@ namespace NexusGame
             };
             ApplyTileInfoFont(summaryStyle);
             GUILayout.Label(
-                $"P{owner.PlayerIndex + 1} ({side})  ·  Tap a type to assign  ·  {cp.Selected.Count}/{cp.Required}",
+                $"P{owner.PlayerIndex + 1} ({side})  ·  Tap a unit to add  ·  {cp.Selected.Count}/{cp.Required}",
                 summaryStyle);
 
             var reqStyle = new GUIStyle(GUI.skin.label)
@@ -4617,15 +4627,17 @@ namespace NexusGame
             float boxWPre = cellOuterWPre - BattleS(2f);
             float boxHPre = Mathf.Clamp(boxWPre * 0.72f, BattleS(56f), BattleS(120f));
             float gridMinH = boxHPre * 2f + BattleS(8f) + BattleS(16f);
-            // Reserve room for AUTO/CLEAR + CONFIRM rows so controls don't collide on shorter screens.
-            float controlsReserve = BattleS(44f) + BattleS(12f) + BattleS(48f) + BattleS(36f);
+            // Reserve grid + AUTO/CLEAR + CONFIRM + fixed casualty-adjust slot (layout must not shift).
+            float adjustSlotH = BattleS(64f);
+            float controlsReserve = BattleS(44f) + BattleS(12f) + BattleS(48f) + BattleS(10f) + adjustSlotH +
+                                    BattleS(16f);
             float gridMaxH = Mathf.Max(BattleS(120f), content.height - controlsReserve);
             gridMinH = Mathf.Min(gridMinH, gridMaxH);
             GUILayout.BeginVertical(GUILayout.MinHeight(gridMinH));
             DrawCasualtyOverlaySixTypeGrid(cp, hex, owner);
             GUILayout.EndVertical();
 
-            GUILayout.Space(BattleS(18f));
+            GUILayout.Space(BattleS(12f));
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("AUTO-PICK", _battleSecondaryButtonStyleCached, GUILayout.ExpandWidth(true),
                     GUILayout.Height(BattleS(44f))))
@@ -4640,6 +4652,9 @@ namespace NexusGame
                     GUILayout.Height(BattleS(48f))))
                 NexusGameCommands.RequestSubmitCasualtyPick();
             GUI.enabled = prevEnabled;
+
+            GUILayout.Space(BattleS(10f));
+            DrawCasualtySelectedAdjustRow(cp, owner, canAct, adjustSlotH);
 
             GUILayout.EndVertical();
             GUILayout.EndArea();
@@ -4736,55 +4751,23 @@ namespace NexusGame
                     if (canPickHere && n > 0)
                     {
                         int selected = cp.Selected.Count(u => u != null && u.Definition.Type == unitType);
-                        string selText = $"{selected}/{n}";
                         if (selected > 0)
                         {
                             DrawTintedRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
-                                new Color(0.92f, 0.64f, 0.12f, 0.26f));
+                                new Color(0.92f, 0.64f, 0.12f, 0.22f));
                             DrawOutlineRect(new Rect(box.x + 1f, box.y + 1f, box.width - 2f, box.height - 2f),
-                                new Color(1f, 0.82f, 0.2f, 0.98f), BattleS(2f));
+                                new Color(1f, 0.82f, 0.2f, 0.85f), BattleS(2f));
                         }
-
-                        var badgeRect = new Rect(box.xMax - BattleS(46f), box.y + BattleS(2f), BattleS(44f), BattleS(18f));
-                        DrawTintedRect(badgeRect, selected > 0
-                            ? new Color(0.95f, 0.72f, 0.18f, 0.92f)
-                            : new Color(0.18f, 0.22f, 0.30f, 0.9f));
-                        GUI.Label(badgeRect, selText,
-                            new GUIStyle(GUI.skin.label)
-                            {
-                                fontSize = Mathf.Max(9, Mathf.RoundToInt(11f * fs)),
-                                fontStyle = FontStyle.Bold,
-                                alignment = TextAnchor.MiddleCenter,
-                                normal = { textColor = selected > 0 ? new Color(0.15f, 0.1f, 0.02f, 1f) : new Color(0.82f, 0.88f, 0.98f, 1f) }
-                            });
 
                         bool canAdd = canAct && cp.Selected.Count < cp.Required && selected < n;
-                        bool canSub = canAct && selected > 0;
                         bool prevEnabled = GUI.enabled;
-                        // Tap once to add, tap again to remove one casualty of this type.
-                        GUI.enabled = canAdd || canSub;
-                        if (GUI.Button(box, GUIContent.none, GUIStyle.none))
+                        GUI.enabled = canAdd;
+                        if (GUI.Button(box, GUIContent.none, GUIStyle.none) && canAdd)
                         {
-                            if (canSub)
-                                AdjustCasualtyTypeSelection(cp, unitType, -1);
-                            else if (canAdd)
-                                AdjustCasualtyTypeSelection(cp, unitType, +1);
+                            AdjustCasualtyTypeSelection(cp, unitType, +1);
+                            _casualtyAdjustFocusType = unitType;
                         }
                         GUI.enabled = prevEnabled;
-
-                        if (n > 1)
-                        {
-                            var plusRect = new Rect(box.x + BattleS(2f), box.y + BattleS(2f), BattleS(16f), BattleS(14f));
-                            prevEnabled = GUI.enabled;
-                    var prevColor = GUI.color;
-                            GUI.enabled = canAdd;
-                            if (!canAdd)
-                                GUI.color = new Color(0.55f, 0.55f, 0.6f, 0.9f);
-                            if (GUI.Button(plusRect, "+"))
-                                AdjustCasualtyTypeSelection(cp, unitType, +1);
-                            GUI.enabled = prevEnabled;
-                    GUI.color = prevColor;
-                }
                     }
 
                     GUILayout.EndVertical();
@@ -4795,6 +4778,144 @@ namespace NexusGame
                 if (row == 0 && unitOrder.Length > 3)
                     GUILayout.Space(BattleS(8f));
             }
+        }
+
+        /// <summary>Fixed slot under CONFIRM — selected types with − on the left, + on the right.</summary>
+        void DrawCasualtySelectedAdjustRow(CasualtyPickState cp, PlayerState owner, bool canAct, float slotHeight)
+        {
+            GUILayout.BeginVertical(GUILayout.MinHeight(slotHeight), GUILayout.MaxHeight(slotHeight));
+
+            if (cp == null || owner == null)
+            {
+                GUILayout.EndVertical();
+                return;
+            }
+
+            var typesWithSelection = new List<UnitType>();
+            foreach (var unitType in BattleResolver.BattleOrder)
+            {
+                int selected = cp.Selected.Count(u => u != null && u.Definition.Type == unitType);
+                if (selected > 0)
+                    typesWithSelection.Add(unitType);
+            }
+
+            float rowH = Mathf.Min(slotHeight, BattleS(56f));
+            var panelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Max(11, Mathf.RoundToInt(12f * _hudFontScale)),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(0.78f, 0.82f, 0.9f, 1f) }
+            };
+            ApplyTileInfoFont(panelStyle);
+
+            if (typesWithSelection.Count == 0)
+            {
+                var hintStyle = new GUIStyle(panelStyle)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = new Color(0.55f, 0.58f, 0.65f, 0.9f) }
+                };
+                GUILayout.Label("Selected casualties appear here.", hintStyle, GUILayout.Height(slotHeight));
+                GUILayout.EndVertical();
+                return;
+            }
+
+            EnsureMoveStackPlusMinusButtonTextures();
+            var btnFallback = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
+                fontSize = Mathf.Max(12, Mathf.RoundToInt(14f * _hudFontScale))
+            };
+            ApplyTileInfoFont(btnFallback);
+
+            // Show the type the player last tapped in the grid (or the first selected type).
+            UnitType unitTypeShow = typesWithSelection[0];
+            if (_casualtyAdjustFocusType.HasValue)
+            {
+                var focus = _casualtyAdjustFocusType.Value;
+                if (typesWithSelection.Contains(focus))
+                    unitTypeShow = focus;
+            }
+            int available = cp.Pool.Count(u => u != null && u.Definition.Type == unitTypeShow);
+            int selectedCount = cp.Selected.Count(u => u != null && u.Definition.Type == unitTypeShow);
+            bool canAdd = canAct && cp.Selected.Count < cp.Required && selectedCount < available;
+            bool canSub = canAct && selectedCount > 0;
+
+            GUILayout.BeginHorizontal(GUILayout.Height(rowH));
+            float iconSz = Mathf.Clamp(rowH - BattleS(8f), BattleS(32f), BattleS(44f));
+            var iconR = GUILayoutUtility.GetRect(iconSz, iconSz, GUILayout.Width(iconSz), GUILayout.Height(iconSz));
+            DrawUnitMiniIcon(iconR, unitTypeShow, TintedIconOwnerForUnitOnSide(unitTypeShow, owner));
+
+            GUILayout.Space(BattleS(6f));
+            var nameStyle = new GUIStyle(panelStyle)
+            {
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(0.94f, 0.96f, 1f, 1f) }
+            };
+            GUILayout.Label(UnitUiName(unitTypeShow), nameStyle, GUILayout.Width(BattleS(96f)));
+
+            GUILayout.FlexibleSpace();
+
+            float qtyBtnSz = BattleS(34f);
+            float countW = BattleS(56f);
+            var minusR = GUILayoutUtility.GetRect(qtyBtnSz, qtyBtnSz, GUILayout.Width(qtyBtnSz),
+                GUILayout.Height(qtyBtnSz));
+            DrawCasualtyQtyButton(minusR, _moveStackMinusButtonTex, "−", canSub, btnFallback,
+                () => AdjustCasualtyTypeSelection(cp, unitTypeShow, -1));
+
+            var countR = GUILayoutUtility.GetRect(countW, qtyBtnSz, GUILayout.Width(countW),
+                GUILayout.Height(qtyBtnSz));
+            var countStyle = new GUIStyle(panelStyle)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(1f, 0.9f, 0.35f, 1f) }
+            };
+            GUI.Label(countR, $"{selectedCount}/{available}", countStyle);
+
+            var plusR = GUILayoutUtility.GetRect(qtyBtnSz, qtyBtnSz, GUILayout.Width(qtyBtnSz),
+                GUILayout.Height(qtyBtnSz));
+            DrawCasualtyQtyButton(plusR, _moveStackPlusButtonTex, "+", canAdd, btnFallback,
+                () => AdjustCasualtyTypeSelection(cp, unitTypeShow, +1));
+
+            GUILayout.EndHorizontal();
+
+            if (typesWithSelection.Count > 1)
+            {
+                var multiStyle = new GUIStyle(panelStyle)
+                {
+                    fontSize = Mathf.Max(10, panelStyle.fontSize - 1),
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = new Color(0.65f, 0.68f, 0.75f, 1f) }
+                };
+                GUILayout.Label($"+{typesWithSelection.Count - 1} more type(s) selected — tap grid to switch focus",
+                    multiStyle);
+            }
+
+            GUILayout.EndVertical();
+        }
+
+        void DrawCasualtyQtyButton(Rect btnR, Texture2D tex, string fallback, bool enabled, GUIStyle fallbackStyle,
+            System.Action onClick)
+        {
+            Color prevCol = GUI.color;
+            if (!enabled)
+                GUI.color = new Color(prevCol.r, prevCol.g, prevCol.b, prevCol.a * 0.45f);
+            if (Event.current.type == EventType.Repaint)
+            {
+                if (tex != null)
+                    GUI.DrawTexture(btnR, tex, ScaleMode.ScaleToFit, true);
+                else
+                    GUI.Label(btnR, fallback, fallbackStyle);
+            }
+
+            bool prevEn = GUI.enabled;
+            GUI.enabled = enabled;
+            if (GUI.Button(btnR, GUIContent.none, TransparentHitButtonStyle()) && enabled)
+                onClick?.Invoke();
+            GUI.enabled = prevEn;
+            GUI.color = prevCol;
         }
 
         void BattleMainWindow(PlayerState currentPlayer, Rect panel)
@@ -5378,138 +5499,219 @@ namespace NexusGame
 
         void WindowBattleArrange(int id)
         {
-            // Arrangement UI is drawn on the board via <see cref="DrawBattleArrangementOverlay"/>.
+            // Arrangement UI is drawn via <see cref="DrawBattleArrangementScreen"/>.
         }
 
-        void DrawBattleArrangementOverlay()
+        void DrawBattleArrangementScreen()
         {
             if (Game == null || !Game.PendingBattleArrangement || Game.BattlePlan == null || Game.BattlePlan.Count == 0)
+            {
+                _battleArrangementSelectedPlan = -1;
                 return;
+            }
+
+            if (_battleArrangementSelectedPlan >= Game.BattlePlan.Count)
+                _battleArrangementSelectedPlan = -1;
+            if (_battleArrangementSelectedPlan < 0)
+                _battleArrangementSelectedPlan = 0;
 
             EnsureBattleHudStyles();
-            bool canAct = Game.CurrentPlayer != null && Game.CanLocalPlayerActFor(Game.CurrentPlayer);
-            int pickCount = Game.BattleArrangementPickCount;
-            int planCount = Game.BattlePlan.Count;
-            bool orderComplete = Game.BattleArrangementOrderComplete;
-            var cam = Camera.main;
-            if (cam == null)
-                return;
+            var panel = GetBattleScreenPanelGuiRect();
+            _battleFontReferencePanel = panel;
+            _battleHudUiScale = BattleHudUiScale(panel);
+            ApplyBattleHudScaledStyles();
 
-            DrawTintedRect(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0.02f, 0.03f, 0.06f, 0.42f));
+            bool canAct = Game.CurrentPlayer != null && Game.CanLocalPlayerActFor(Game.CurrentPlayer);
+            var attacker = Game.CurrentPlayer;
+            int planCount = Game.BattlePlan.Count;
 
             int prevDepth = GUI.depth;
-            GUI.depth = -40;
+            GUI.depth = -60;
 
-            for (int i = pickCount; i < planCount; i++)
+            DrawModalPerimeterClickBlockers(panel);
+            DrawTintedRect(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0.015f, 0.02f, 0.04f, 0.82f));
+            DrawBattleScreenModalBackground();
+
+            GUI.BeginGroup(panel);
+            var outer = new Rect(BattleS(14f), BattleS(10f), panel.width - BattleS(28f), panel.height - BattleS(20f));
+            GUILayout.BeginArea(outer);
+            GUILayout.BeginVertical(GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+
+            int titleFs = GameUiScale.FullBleedImGuiScaledFont(22f, _battleFontReferencePanel, 14, 34);
+            var titleStyle = new GUIStyle(GUI.skin.label)
             {
-                var e = Game.BattlePlan[i];
-                if (e?.Hex == null || !TryGetTileScreenHexRect(cam, e.Hex, 2.15f, out Rect hexR))
-                    continue;
-                DrawBattleArrangementHexMarker(hexR, e, 0, canAct, canAct, i);
+                fontSize = titleFs,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.95f, 0.97f, 1f, 1f) }
+            };
+            ApplyTileInfoFont(titleStyle);
+            GUILayout.Label("CHOOSE BATTLE", titleStyle);
+
+            int subFs = Mathf.Max(11, titleFs - 4);
+            var subStyle = new GUIStyle(titleStyle)
+            {
+                fontSize = subFs,
+                fontStyle = FontStyle.Normal,
+                normal = { textColor = new Color(0.78f, 0.82f, 0.9f, 1f) }
+            };
+            string subtitle = attacker != null
+                ? (planCount > 1
+                    ? $"P{attacker.PlayerIndex + 1} — {planCount} contested hexes. Pick one to fight now."
+                    : $"P{attacker.PlayerIndex + 1} — choose defender if needed, then fight.")
+                : "Contested battles";
+            GUILayout.Label(subtitle, subStyle);
+
+            if (!canAct && attacker != null)
+            {
+                var waitStyle = new GUIStyle(subStyle)
+                {
+                    normal = { textColor = new Color(0.72f, 0.75f, 0.82f, 1f) }
+                };
+                GUILayout.Label($"Waiting for P{attacker.PlayerIndex + 1}…", waitStyle);
             }
 
-            for (int i = 0; i < pickCount; i++)
+            GUILayout.Space(BattleS(10f));
+
+            float footerH = BattleS(58f);
+            float scrollH = Mathf.Max(BattleS(120f), outer.height - BattleS(88f) - footerH);
+            _scrollBattleArrangement = GUILayout.BeginScrollView(_scrollBattleArrangement,
+                GUILayout.ExpandWidth(true), GUILayout.Height(scrollH));
+
+            int cols = planCount <= 1 ? 1 : 2;
+            float gap = BattleS(10f);
+            float cardW = cols == 1
+                ? Mathf.Min(outer.width - BattleS(24f), BattleS(360f))
+                : Mathf.Max(BattleS(150f), (outer.width - gap * (cols - 1) - BattleS(8f)) / cols);
+            float cardH = BattleS(248f);
+
+            for (int i = 0; i < planCount; i += cols)
             {
-                var e = Game.BattlePlan[i];
-                if (e?.Hex == null || !TryGetTileScreenHexRect(cam, e.Hex, 2.15f, out Rect hexR))
-                    continue;
-                DrawBattleArrangementHexMarker(hexR, e, i + 1, false, canAct, i);
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                for (int c = 0; c < cols; c++)
+                {
+                    int planIndex = i + c;
+                    if (planIndex >= planCount)
+                    {
+                        GUILayout.Space(cardW);
+                        continue;
+                    }
+
+                    DrawBattleArrangementCard(planIndex, cardW, cardH, canAct, attacker);
+                    if (c + 1 < cols && planIndex + 1 < planCount)
+                        GUILayout.Space(gap);
+                }
+
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+                if (i + cols < planCount)
+                    GUILayout.Space(gap);
             }
 
-            DrawBattleArrangementBottomBar(canAct, pickCount, planCount, orderComplete);
+            GUILayout.EndScrollView();
+
+            GUILayout.FlexibleSpace();
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            bool prevEnabled = GUI.enabled;
+            GUI.enabled = canAct && _battleArrangementSelectedPlan >= 0 &&
+                          _battleArrangementSelectedPlan < planCount;
+            if (GUILayout.Button("BATTLE HERE", _battlePrimaryButtonStyleCached, GUILayout.Width(BattleS(220f)),
+                    GUILayout.Height(BattleS(48f))))
+                NexusGameCommands.RequestStartBattleFromArrangement(_battleArrangementSelectedPlan);
+            GUI.enabled = prevEnabled;
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+            GUILayout.Space(BattleS(6f));
+
+            GUILayout.EndVertical();
+            GUILayout.EndArea();
+            GUI.EndGroup();
             GUI.depth = prevDepth;
         }
 
-        bool TryGetTileScreenHexRect(Camera cam, BoardTile tile, float sizeMul, out Rect guiRect)
+        void DrawBattleArrangementCard(int planIndex, float cardW, float cardH, bool canAct, PlayerState attacker)
         {
-            guiRect = default;
-            if (tile?.View == null || cam == null)
-                return false;
+            var entry = Game.BattlePlan[planIndex];
+            var tile = entry?.Hex;
+            if (tile == null)
+            {
+                GUILayout.Space(cardW);
+                return;
+            }
 
-            var center = tile.View.transform.position;
-            float hexR = Game.Board != null ? Game.Board.HexRadius : 0.7f;
-            var spCenter = cam.WorldToScreenPoint(center);
-            var spEdge = cam.WorldToScreenPoint(center + cam.transform.right * hexR);
-            if (spCenter.z <= 0f)
-                return false;
+            bool selected = planIndex == _battleArrangementSelectedPlan;
+            Rect r = GUILayoutUtility.GetRect(cardW, cardH, GUILayout.Width(cardW), GUILayout.Height(cardH));
 
-            float screenR = Mathf.Abs(spEdge.x - spCenter.x);
-            float size = Mathf.Clamp(screenR * sizeMul, HudS(52f), HudS(128f));
-            float gx = spCenter.x - size * 0.5f;
-            float gy = Screen.height - spCenter.y - size * 0.5f;
-            guiRect = new Rect(gx, gy, size, size);
-            return true;
-        }
+            Color bg = selected
+                ? new Color(0.1f, 0.2f, 0.3f, 0.98f)
+                : new Color(0.06f, 0.08f, 0.13f, 0.96f);
+            DrawTintedRect(r, bg);
+            DrawOutlineRect(r,
+                selected ? new Color(1f, 0.55f, 0.12f, 1f) : new Color(0.42f, 0.48f, 0.58f, 0.88f),
+                selected ? BattleS(3f) : BattleS(1.5f));
 
-        void DrawBattleArrangementHexMarker(Rect hexR, PlannedBattleEntry entry, int orderNumber, bool canPick,
-            bool canInteract, int planIndex)
-        {
-            bool placed = orderNumber > 0;
-            Color fill = placed
-                ? new Color(0.18f, 0.72f, 0.38f, 0.62f)
-                : new Color(1f, 0.42f, 0.12f, 0.5f);
+            if (canAct && GUI.Button(r, GUIContent.none, GUIStyle.none))
+                _battleArrangementSelectedPlan = planIndex;
+
+            float pad = BattleS(8f);
+            float hexSz = Mathf.Min(r.width - pad * 2f, r.height * 0.38f);
+            var hexR = new Rect(r.x + (r.width - hexSz) * 0.5f, r.y + pad, hexSz, hexSz);
+            TileDefinition def = Game.Config != null ? Game.Config.GetTile(tile.Type) : null;
+            Color fill = def != null ? def.Color : new Color(0.45f, 0.45f, 0.48f);
             DrawModalHexPreview(hexR, fill);
-            DrawOutlineRect(hexR, placed
-                ? new Color(0.55f, 1f, 0.65f, 0.95f)
-                : new Color(1f, 0.62f, 0.2f, 0.9f), placed ? HudS(2.5f) : HudS(2f));
+            DrawTileTerrainOnModalHex(hexR, tile);
+            DrawTileBoardOverlayOnModalHex(hexR, tile);
 
-            int badgeFs = Mathf.RoundToInt(Mathf.Clamp(hexR.height * 0.34f, 16f, 34f));
-            var badgeStyle = new GUIStyle(GUI.skin.label)
+            int nameFs = Mathf.Max(11, Mathf.RoundToInt(BattleS(13f)));
+            var nameStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = badgeFs,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = Color.white }
-            };
-            ApplyTileInfoFont(badgeStyle);
-
-            if (placed)
-            {
-                GUI.Label(hexR, orderNumber.ToString(), badgeStyle);
-            }
-            else if (canPick)
-            {
-                bool prevEnabled = GUI.enabled;
-                GUI.enabled = true;
-                if (GUI.Button(hexR, GUIContent.none, GUIStyle.none))
-                    NexusGameCommands.RequestPickBattleAsNext(planIndex);
-                GUI.enabled = prevEnabled;
-
-                var hintStyle = new GUIStyle(badgeStyle) { fontSize = Mathf.Max(14, badgeFs - 4) };
-                GUI.Label(hexR, "?", hintStyle);
-            }
-
-            var opps = BattleResolver.OpponentsOnHex(entry.Hex, Game.CurrentPlayer);
-            int tagFs = Mathf.Max(10, Mathf.RoundToInt(hexR.height * 0.16f));
-            var tagStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = tagFs,
+                fontSize = nameFs,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.UpperCenter,
-                normal = { textColor = new Color(0.95f, 0.97f, 1f, 0.95f) }
+                clipping = TextClipping.Clip,
+                normal = { textColor = new Color(0.92f, 0.94f, 0.98f, 1f) }
             };
-            ApplyTileInfoFont(tagStyle);
+            ApplyTileInfoFont(nameStyle);
+            float nameY = hexR.yMax + BattleS(4f);
+            GUI.Label(new Rect(r.x + pad, nameY, r.width - pad * 2f, BattleS(20f)),
+                TileTypeDisplayName(tile.Type) + $"  ({tile.Q},{tile.R})", nameStyle);
 
-            var tagRect = new Rect(hexR.x, hexR.yMax + HudS(2f), hexR.width, HudS(18f));
+            var opps = BattleResolver.OpponentsOnHex(tile, attacker);
+            float rowY = nameY + BattleS(22f);
+            float rowH = BattleS(52f);
+            DrawBattleArrangementForcesRow(new Rect(r.x + pad, rowY, r.width - pad * 2f, rowH), tile, attacker,
+                true);
+
+            float vsY = rowY + rowH + BattleS(2f);
+            int vsFs = Mathf.Max(10, nameFs - 1);
+            var vsStyle = new GUIStyle(nameStyle)
+            {
+                fontSize = vsFs,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(1f, 0.62f, 0.28f, 1f) }
+            };
+
             if (opps.Count <= 1)
             {
                 string vs = opps.Count == 1 ? "vs P" + (opps[0].PlayerIndex + 1) : "contested";
-                GUI.Label(tagRect, vs, tagStyle);
+                GUI.Label(new Rect(r.x + pad, vsY, r.width - pad * 2f, BattleS(18f)), vs, vsStyle);
             }
             else
             {
                 bool prevEnabled = GUI.enabled;
-                GUI.enabled = canInteract;
-                float btnW = Mathf.Max(HudS(34f), (hexR.width - HudS(4f)) / opps.Count);
+                GUI.enabled = canAct;
+                float btnW = Mathf.Max(BattleS(40f), (r.width - pad * 2f - BattleS(4f)) / opps.Count);
                 for (int oi = 0; oi < opps.Count; oi++)
                 {
                     var o = opps[oi];
-                    var br = new Rect(hexR.x + oi * (btnW + HudS(2f)), tagRect.y, btnW, HudS(20f));
-                    bool selected = entry.DefenderPlayerIndex == o.PlayerIndex;
+                    var br = new Rect(r.x + pad + oi * (btnW + BattleS(2f)), vsY, btnW, BattleS(22f));
+                    bool defSelected = entry.DefenderPlayerIndex == o.PlayerIndex;
                     var prev = GUI.backgroundColor;
-                    GUI.backgroundColor = selected
+                    GUI.backgroundColor = defSelected
                         ? new Color(0.35f, 0.75f, 1f, 0.95f)
-                        : new Color(0.2f, 0.24f, 0.32f, 0.92f);
+                        : new Color(0.18f, 0.22f, 0.3f, 0.92f);
                     if (GUI.Button(br, "P" + (o.PlayerIndex + 1), _battleSecondaryButtonStyleCached) &&
                         entry.DefenderPlayerIndex != o.PlayerIndex)
                         NexusGameCommands.RequestSetBattleDefender(planIndex, o.PlayerIndex);
@@ -5518,55 +5720,85 @@ namespace NexusGame
 
                 GUI.enabled = prevEnabled;
             }
+
+            var defender = Game.Players.Find(p => p.PlayerIndex == entry.DefenderPlayerIndex);
+            float defY = vsY + BattleS(24f);
+            DrawBattleArrangementForcesRow(new Rect(r.x + pad, defY, r.width - pad * 2f, rowH), tile, defender,
+                false);
         }
 
-        void DrawBattleArrangementBottomBar(bool canAct, int pickCount, int planCount, bool orderComplete)
+        void DrawBattleArrangementForcesRow(Rect row, BoardTile hex, PlayerState owner, bool isAttackerSide)
         {
-            float barH = Mathf.Clamp(HudS(118f), 96f, 150f);
-            var bar = new Rect(HudS(12f), Screen.height - barH - HudS(12f), Screen.width - HudS(24f), barH);
-            DrawTintedRect(bar, new Color(0.05f, 0.07f, 0.12f, 0.94f));
-            DrawOutlineRect(bar, new Color(0.45f, 0.5f, 0.58f, 0.75f), HudS(1f));
+            if (hex == null || owner == null)
+                return;
 
-            float pad = HudS(14f);
-            var inner = new Rect(bar.x + pad, bar.y + pad, bar.width - pad * 2f, bar.height - pad * 2f);
-            int titleFs = Mathf.RoundToInt(Mathf.Clamp(HudS(18f), 14f, 22f));
-            var titleStyle = new GUIStyle(GUI.skin.label)
+            var counts = new Dictionary<UnitType, int>();
+            foreach (var u in FindObjectsOfType<UnitInstance>())
             {
-                fontSize = titleFs,
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = new Color(0.92f, 0.94f, 0.98f, 1f) }
-            };
-            ApplyTileInfoFont(titleStyle);
-
-            string title = planCount > 1
-                ? "Pick battle order — tap contested hexes (1st tap fights first)"
-                : "Choose defender, then confirm";
-            GUI.Label(new Rect(inner.x, inner.y, inner.width, HudS(24f)), title, titleStyle);
-
-            string progress = planCount > 1
-                ? pickCount + " / " + planCount + " battles ordered"
-                : "1 battle ready";
-            int subFs = Mathf.Max(11, titleFs - 3);
-            var subStyle = new GUIStyle(titleStyle) { fontSize = subFs, fontStyle = FontStyle.Normal };
-            GUI.Label(new Rect(inner.x, inner.y + HudS(26f), inner.width, HudS(20f)), progress, subStyle);
-
-            if (!canAct && Game.CurrentPlayer != null)
-            {
-                var waitStyle = new GUIStyle(subStyle)
-                {
-                    normal = { textColor = new Color(0.75f, 0.78f, 0.85f, 1f) }
-                };
-                GUI.Label(new Rect(inner.x, inner.y + HudS(48f), inner.width, HudS(20f)),
-                    "Waiting for P" + (Game.CurrentPlayer.PlayerIndex + 1) + "…", waitStyle);
+                if (u == null || u.Tile != hex || u.Owner != owner)
+                    continue;
+                var t = u.Definition.Type;
+                counts.TryGetValue(t, out int n);
+                counts[t] = n + 1;
             }
 
-            float btnH = HudS(40f);
-            var btnRect = new Rect(inner.xMax - HudS(160f), inner.yMax - btnH, HudS(160f), btnH);
-            bool prevEnabled = GUI.enabled;
-            GUI.enabled = canAct && orderComplete;
-            if (GUI.Button(btnRect, "CONFIRM", _battlePrimaryButtonStyleCached))
-                NexusGameCommands.RequestConfirmBattleArrangement();
-            GUI.enabled = prevEnabled;
+            int labelFs = Mathf.Max(9, Mathf.RoundToInt(BattleS(10f)));
+            var labelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = labelFs,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                normal =
+                {
+                    textColor = isAttackerSide
+                        ? new Color(0.55f, 0.88f, 1f, 1f)
+                        : new Color(1f, 0.72f, 0.55f, 1f)
+                }
+            };
+            ApplyTileInfoFont(labelStyle);
+            string side = isAttackerSide ? "You" : "P" + (owner.PlayerIndex + 1);
+            GUI.Label(new Rect(row.x, row.y, row.width * 0.22f, BattleS(16f)), side, labelStyle);
+
+            float iconSz = Mathf.Clamp(row.height - BattleS(4f), BattleS(28f), BattleS(44f));
+            float x = row.x + row.width * 0.2f;
+            float iconY = row.y + (row.height - iconSz) * 0.5f;
+            int shown = 0;
+            const int maxIcons = 5;
+            foreach (var unitType in BattleResolver.BattleOrder)
+            {
+                if (!counts.TryGetValue(unitType, out int n) || n <= 0)
+                    continue;
+                if (shown >= maxIcons)
+                    break;
+
+                var iconR = new Rect(x, iconY, iconSz, iconSz);
+                DrawUnitMiniIcon(iconR, unitType, TintedIconOwnerForUnitOnSide(unitType, owner));
+                if (n > 1)
+                {
+                    int badgeFs = Mathf.Max(9, labelFs);
+                    var badgeStyle = new GUIStyle(GUI.skin.label)
+                    {
+                        fontSize = badgeFs,
+                        fontStyle = FontStyle.Bold,
+                        alignment = TextAnchor.LowerRight,
+                        normal = { textColor = new Color(1f, 0.9f, 0.35f, 1f) }
+                    };
+                    ApplyTileInfoFont(badgeStyle);
+                    GUI.Label(iconR, "x" + n, badgeStyle);
+                }
+
+                x += iconSz + BattleS(4f);
+                shown++;
+            }
+
+            if (shown == 0)
+            {
+                var emptyStyle = new GUIStyle(labelStyle)
+                {
+                    normal = { textColor = new Color(0.55f, 0.58f, 0.65f, 1f) }
+                };
+                GUI.Label(new Rect(x, row.y, row.width * 0.75f, row.height), "(no units)", emptyStyle);
+            }
         }
 
         void WindowEnergizeBattle(int id)
@@ -5775,7 +6007,7 @@ namespace NexusGame
             GUI.color = prev;
 
             GUILayout.Label(
-                $"Tap unit cards above to add casualties. Use the small '-' on a card to subtract.",
+                "Tap unit cards above to add casualties. Use −/+ on each selected type to adjust.",
                 new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold });
             GUILayout.Label(
                 $"P{cp.Owner.PlayerIndex + 1} pick {cp.Required}  ·  {cp.Selected.Count}/{cp.Required}",
@@ -5891,14 +6123,10 @@ namespace NexusGame
             if (cp == null)
                 return;
 
-            cp.Selected.RemoveAll(u => u == null || !cp.Pool.Contains(u));
-            while (cp.Selected.Count < cp.Required)
-            {
-                var next = cp.Pool.FirstOrDefault(u => u != null && !cp.Selected.Contains(u));
-                if (next == null)
-                    break;
-                cp.Selected.Add(next);
-            }
+            cp.Pool.RemoveAll(u => u == null);
+            cp.Selected.Clear();
+            var victims = BattleResolver.PickCasualtiesWeakestFirst(cp.Pool, cp.Required);
+            cp.Selected.AddRange(victims);
         }
 
         void SecretMissionWindow()

@@ -121,6 +121,18 @@ namespace NexusGame
             return NexusOnlineBridge.SendPickBattleAsNextIntent(seat, planIndex);
         }
 
+        static bool SendStartBattleFromArrangementToHost(int seat, int planIndex)
+        {
+            var bridge = ResolveBridge();
+            if (bridge != null)
+            {
+                bridge.RequestStartBattleFromArrangementServerRpc(seat, planIndex);
+                return true;
+            }
+
+            return NexusOnlineBridge.SendStartBattleFromArrangementIntent(seat, planIndex);
+        }
+
         static bool SendSubmitEnergizePassToHost(int seat)
         {
             var bridge = ResolveBridge();
@@ -340,6 +352,23 @@ namespace NexusGame
             }
 
             Game.PickBattleAsNext(planIndex);
+        }
+
+        public static void RequestStartBattleFromArrangement(int planIndex)
+        {
+            if (Game == null || !Game.PendingBattleArrangement || Game.CurrentPlayer == null)
+                return;
+            if (!Game.CanLocalPlayerActFor(Game.CurrentPlayer))
+                return;
+
+            if (ShouldRouteOnlineIntentToHost())
+            {
+                if (!SendStartBattleFromArrangementToHost(NexusSession.LocalPlayerIndex, planIndex))
+                    Debug.LogWarning("[Net] RequestStartBattleFromArrangement — not connected to host.");
+                return;
+            }
+
+            Game.StartBattleFromArrangement(planIndex);
         }
 
         public static void RequestSetBattleDefender(int planIndex, int defenderPlayerIndex)

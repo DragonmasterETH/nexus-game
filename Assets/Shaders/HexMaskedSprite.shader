@@ -42,7 +42,7 @@ Shader "Nexus/HexMaskedSprite"
             {
                 float4 pos : SV_POSITION;
                 float2 uv : TEXCOORD0;
-                float2 localXY : TEXCOORD1;
+                float2 rawUv : TEXCOORD1;
             };
 
             bool InsidePointyHex(float2 p, float r)
@@ -73,18 +73,18 @@ Shader "Nexus/HexMaskedSprite"
             {
                 v2f o;
                 o.pos = UnityObjectToClipPos(v.vertex);
+                o.rawUv = v.uv;
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
-                o.localXY = v.vertex.xy;
                 return o;
             }
 
             fixed4 frag(v2f i) : SV_Target
             {
-                float2 hexP = i.uv - 0.5;
+                float2 hexP = i.rawUv - 0.5;
                 if (!InsidePointyHex(hexP, _HexRadius))
                     discard;
 
-                float2 uv = CoverUv(i.uv, _Aspect);
+                float2 uv = CoverUv(i.rawUv, _Aspect);
                 fixed4 col = tex2D(_MainTex, uv) * _Color;
                 return col;
             }
