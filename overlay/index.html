@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scouter Readout — Sleep Through The Box</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-panel: rgba(6, 8, 12, 0.82);
+      --text: #e8ecf2;
+      --muted: #8a93a3;
+      --green: #3dff7a;
+      --green-dim: #1fa84a;
+      --lime: #b8ff3c;
+      --purple: #c084fc;
+      --purple-deep: #a855f7;
+      --blue: #5ec8ff;
+      --teal: #2dd4a8;
+      --orange: #ff9a3c;
+      --gold: #ffe566;
+      --gold-hot: #ffd000;
+      --danger: #ff4d4d;
+      --width: 440px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background: transparent !important;
+      width: 100%;
+      min-height: 100%;
+      overflow-x: hidden;
+      overflow-y: auto;
+      font-family: "Share Tech Mono", ui-monospace, monospace;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Local preview: open with ?preview=1 to see against a dark field */
+    html.preview, html.preview body {
+      background:
+        radial-gradient(ellipse at 30% 20%, #1a0a28 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, #0a1a12 0%, transparent 45%),
+        #050508 !important;
+    }
+
+    body {
+      display: flex;
+      justify-content: flex-start;
+      align-items: flex-start;
+      padding: 12px;
+    }
+
+    .scouter {
+      width: min(100%, var(--width));
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      position: relative;
+    }
+
+    .scouter::before {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      pointer-events: none;
+      background:
+        linear-gradient(var(--green), var(--green)) top left / 18px 2px no-repeat,
+        linear-gradient(var(--green), var(--green)) top left / 2px 18px no-repeat,
+        linear-gradient(var(--green), var(--green)) top right / 18px 2px no-repeat,
+        linear-gradient(var(--green), var(--green)) top right / 2px 18px no-repeat,
+        linear-gradient(var(--gold), var(--gold)) bottom left / 18px 2px no-repeat,
+        linear-gradient(var(--gold), var(--gold)) bottom left / 2px 18px no-repeat,
+        linear-gradient(var(--gold), var(--gold)) bottom right / 18px 2px no-repeat,
+        linear-gradient(var(--gold), var(--gold)) bottom right / 2px 18px no-repeat;
+      opacity: 0.85;
+    }
+
+    .header {
+      background: var(--bg-panel);
+      border: 1px solid rgba(61, 255, 122, 0.25);
+      border-left: 4px solid var(--green);
+      padding: 12px 14px 14px;
+      backdrop-filter: blur(8px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header::after {
+      content: "PWR 421000 · LOCK";
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      color: rgba(61, 255, 122, 0.55);
+    }
+
+    .eyebrow {
+      color: var(--green);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      text-shadow: 0 0 8px rgba(61, 255, 122, 0.45);
+      margin-bottom: 4px;
+    }
+
+    .title {
+      font-family: Orbitron, sans-serif;
+      font-weight: 800;
+      font-size: 20px;
+      line-height: 1.15;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #fff;
+      text-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.02em;
+    }
+
+    .live-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px dashed rgba(61, 255, 122, 0.25);
+      font-size: 11px;
+    }
+
+    .live-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--green);
+    }
+
+    .live-dot::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.85); }
+    }
+
+    .clock {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .blocks {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .block {
+      --accent: var(--green);
+      background: var(--bg-panel);
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+      border-left: 5px solid var(--accent);
+      padding: 9px 11px 10px;
+      backdrop-filter: blur(8px);
+      position: relative;
+      transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
+    }
+
+    .block.dashed {
+      border-top-style: dashed;
+      border-right-style: dashed;
+      border-bottom-style: dashed;
+    }
+
+    .block.active {
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
+        0 0 18px color-mix(in srgb, var(--accent) 28%, transparent);
+      transform: translateX(-2px);
+    }
+
+    .block.active::before {
+      content: "► NOW";
+      position: absolute;
+      top: 7px;
+      right: 9px;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+    }
+
+    .block.past {
+      opacity: 0.42;
+      filter: saturate(0.7);
+    }
+
+    .block-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px 10px;
+      margin-bottom: 3px;
+      padding-right: 48px;
+    }
+
+    .block-label {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+
+    .block-time {
+      color: color-mix(in srgb, var(--accent) 75%, white);
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    .block-note {
+      color: color-mix(in srgb, var(--accent) 55%, #c8d0dc);
+      font-size: 11px;
+      line-height: 1.35;
+      opacity: 0.92;
+    }
+
+    .block.sleep { --accent: var(--purple); }
+    .block.coffee { --accent: var(--green); }
+    .block.dominate { --accent: var(--lime); }
+    .block.swap { --accent: var(--blue); }
+    .block.work { --accent: var(--teal); }
+    .block.approach { --accent: var(--orange); }
+    .block.bed { --accent: var(--green); }
+
+    .wake-note {
+      color: var(--muted);
+      font-size: 11px;
+      padding: 2px 4px 2px 10px;
+      border-left: 2px solid rgba(138, 147, 163, 0.45);
+    }
+
+    .anchor {
+      --accent: var(--gold-hot);
+      background:
+        repeating-linear-gradient(
+          -45deg,
+          rgba(255, 208, 0, 0.92) 0 8px,
+          rgba(255, 230, 80, 0.98) 8px 16px
+        );
+      border: 2px solid #fff3a0;
+      border-left: 6px solid #fffbe6;
+      color: #1a1200;
+      box-shadow:
+        0 0 24px rgba(255, 208, 0, 0.55),
+        0 0 48px rgba(255, 170, 0, 0.28),
+        inset 0 0 20px rgba(255, 255, 255, 0.25);
+      padding: 12px 14px;
+      position: relative;
+      overflow: hidden;
+      animation: aura 2.8s ease-in-out infinite;
+    }
+
+    .anchor.past {
+      opacity: 1;
+      filter: none;
+    }
+
+    .anchor.active {
+      transform: none;
+      box-shadow:
+        0 0 28px rgba(255, 208, 0, 0.75),
+        0 0 60px rgba(255, 170, 0, 0.4),
+        inset 0 0 20px rgba(255, 255, 255, 0.3);
+    }
+
+    .anchor.active::before {
+      color: #1a1200;
+      text-shadow: none;
+      font-weight: 700;
+    }
+
+    @keyframes aura {
+      0%, 100% { filter: brightness(1); }
+      50% { filter: brightness(1.08); }
+    }
+
+    .anchor-meta {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+      color: rgba(26, 18, 0, 0.75);
+      margin-bottom: 2px;
+    }
+
+    .anchor-title {
+      font-family: Orbitron, sans-serif;
+      font-weight: 800;
+      font-size: 18px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #120e00;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+
+    .footer {
+      background: var(--bg-panel);
+      border: 1px solid rgba(61, 255, 122, 0.2);
+      border-left: 4px solid var(--green);
+      padding: 10px 12px;
+      backdrop-filter: blur(8px);
+      font-size: 11px;
+    }
+
+    .footer-pos {
+      color: var(--green);
+      text-shadow: 0 0 8px rgba(61, 255, 122, 0.35);
+      margin-bottom: 6px;
+      line-height: 1.35;
+    }
+
+    .footer-stats {
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 10px;
+    }
+
+    .scanlines {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0 2px,
+        rgba(0, 0, 0, 0.03) 2px 3px
+      );
+      z-index: 10;
+      mix-blend-mode: multiply;
+      opacity: 0.35;
+    }
+
+    /* Compact mode for shorter canvas heights */
+    @media (max-height: 900px) {
+      .scouter { gap: 5px; transform-origin: top right; }
+      .block { padding: 7px 10px 8px; }
+      .block-note { font-size: 10px; }
+      .title { font-size: 17px; }
+      .header { padding: 10px 12px; }
+      .anchor-title { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <aside class="scouter" id="scouter" aria-label="Dragon Ball Z marathon scouter overlay">
+    <header class="header">
+      <div class="eyebrow">Scouter Readout — Rebalanced</div>
+      <h1 class="title">Sleep Through The Box</h1>
+      <p class="subtitle">clock never stops · 8:00p start · gold fri 10:00a</p>
+      <div class="live-bar">
+        <span class="live-dot" id="liveStatus">STANDBY</span>
+        <span class="clock" id="clock">--:--:--</span>
+      </div>
+    </header>
+
+    <div class="blocks" id="blocks">
+      <!-- filled by JS -->
+    </div>
+
+    <footer class="footer">
+      <div class="footer-pos" id="footerPos">POSITION AT SLEEP TONIGHT: ep 2, saiyan saga, 8:48p</div>
+      <div class="footer-stats">
+        sleep runtime spent on filler: 40 eps · awake runtime on peaks: 26 eps<br />
+        gold anchor: fri 10:00a · 38h continuous · zero pauses
+      </div>
+    </footer>
+  </aside>
+
+  <script>
+    /**
+     * Schedule times are Eastern (local machine timezone).
+     * Anchor: Fri Jul 17, 2026 10:00 AM — EP 95 Super Saiyan
+     */
+    const YEAR = 2026;
+
+    const schedule = [
+      {
+        id: "bed",
+        className: "bed",
+        label: "EPS 1–2 · IN BED",
+        time: "wed 8:00p → 8:48p",
+        note: "raditz lands. goku dies. clean two-ep arc that ends exactly at lights-out.",
+        start: new Date(YEAR, 6, 15, 20, 0),
+        end: new Date(YEAR, 6, 15, 20, 48),
+      },
+      {
+        id: "sleep1",
+        className: "sleep dashed",
+        label: "SLEEP · EPS 3–22 RUN DARK",
+        time: "wed 9:00p → thu 5:00a · 8h",
+        note: "snake way + gohan in the wilderness. the 20 cheapest eps before namek, spent at $0. perfect alignment.",
+        start: new Date(YEAR, 6, 15, 21, 0),
+        end: new Date(YEAR, 6, 16, 5, 0),
+      },
+      {
+        id: "wake",
+        type: "wake",
+        text: "5:00a wake mid-ep 23. z fighters assembling.",
+        start: new Date(YEAR, 6, 16, 5, 0),
+        end: new Date(YEAR, 6, 16, 5, 0),
+      },
+      {
+        id: "coffee",
+        className: "coffee",
+        label: "EPS 23–25 · COFFEE",
+        time: "thu 5:00a → 6:00a",
+        note: "saibamen. yamcha does yamcha things.",
+        start: new Date(YEAR, 6, 16, 5, 0),
+        end: new Date(YEAR, 6, 16, 6, 0),
+      },
+      {
+        id: "dominate",
+        className: "dominate",
+        label: "EPS 26–35 · DOMINATE WINDOW",
+        time: "thu 6:00a → 10:00a · 4h",
+        note: "nappa rampage into goku vs vegeta. kaioken, spirit bomb, great ape. best 10 eps pre-namek, fully awake for it.",
+        start: new Date(YEAR, 6, 16, 6, 0),
+        end: new Date(YEAR, 6, 16, 10, 0),
+      },
+      {
+        id: "swap",
+        className: "swap dashed",
+        label: "SWAP WINDOW · EPS 39–43",
+        time: "thu 11:12a → 1:12p · fake namek filler",
+        note: "softest stretch in the series. discord, calls, errands, lunch. bounce back after.",
+        start: new Date(YEAR, 6, 16, 11, 12),
+        end: new Date(YEAR, 6, 16, 13, 12),
+      },
+      {
+        id: "work",
+        className: "work",
+        label: "EPS 44–62 · WORK DAY",
+        time: "thu 1:12p → 8:48p · namek + ginyu arrive",
+        note: "background mode. poses at ~6:24p.",
+        start: new Date(YEAR, 6, 16, 13, 12),
+        end: new Date(YEAR, 6, 16, 20, 48),
+      },
+      {
+        id: "sleep2",
+        className: "sleep dashed",
+        label: "SLEEP · EPS 63–82 RUN DARK",
+        time: "thu 9:00p → fri 5:00a · 8h",
+        note: "ginyu body-swap + frieza forms 1–2 play dark. real cost, but it buys you the entire endgame awake.",
+        start: new Date(YEAR, 6, 16, 21, 0),
+        end: new Date(YEAR, 6, 17, 5, 0),
+      },
+      {
+        id: "approach",
+        className: "approach",
+        label: "EPS 83–95 · FINAL APPROACH",
+        time: "fri 5:00a → 10:00a · wake into final form",
+        note: "planet cracking. krillin goes up ~9:12a. coffee in hand for the trigger.",
+        start: new Date(YEAR, 6, 17, 5, 0),
+        end: new Date(YEAR, 6, 17, 10, 0),
+      },
+      {
+        id: "anchor",
+        type: "anchor",
+        meta: "ANCHOR · FRI JUL 17 · 10:00 AM",
+        title: "EP 95 — SUPER SAIYAN",
+        start: new Date(YEAR, 6, 17, 10, 0),
+        end: new Date(YEAR, 6, 17, 10, 24),
+      },
+    ];
+
+    const blocksEl = document.getElementById("blocks");
+    const clockEl = document.getElementById("clock");
+    const liveEl = document.getElementById("liveStatus");
+    const footerPos = document.getElementById("footerPos");
+
+    function render() {
+      const html = schedule.map((item) => {
+        if (item.type === "wake") {
+          return `<div class="wake-note" data-id="${item.id}">${item.text}</div>`;
+        }
+        if (item.type === "anchor") {
+          return `
+            <div class="anchor block" data-id="${item.id}">
+              <div class="anchor-meta">${item.meta}</div>
+              <div class="anchor-title">${item.title}</div>
+            </div>`;
+        }
+        return `
+          <article class="block ${item.className}" data-id="${item.id}">
+            <div class="block-head">
+              <span class="block-label">${item.label}</span>
+              <span class="block-time">${item.time}</span>
+            </div>
+            <p class="block-note">${item.note}</p>
+          </article>`;
+      }).join("");
+      blocksEl.innerHTML = html;
+    }
+
+    function fmtClock(d) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    }
+
+    function update() {
+      const now = new Date();
+      clockEl.textContent = fmtClock(now);
+
+      let current = null;
+      for (const item of schedule) {
+        if (item.type === "wake") continue;
+        const el = blocksEl.querySelector(`[data-id="${item.id}"]`);
+        if (!el) continue;
+        el.classList.remove("active", "past");
+        if (now >= item.end) {
+          el.classList.add("past");
+        } else if (now >= item.start && now < item.end) {
+          el.classList.add("active");
+          current = item;
+        }
+      }
+
+      if (current) {
+        const label = current.type === "anchor" ? current.title : current.label;
+        liveEl.textContent = "TRACKING";
+        footerPos.textContent = `CURRENT WINDOW: ${label}`;
+      } else if (now < schedule[0].start) {
+        liveEl.textContent = "PRE-LAUNCH";
+        footerPos.textContent = "POSITION AT SLEEP TONIGHT: ep 2, saiyan saga, 8:48p";
+      } else if (now >= schedule[schedule.length - 1].end) {
+        liveEl.textContent = "OVER 9000";
+        footerPos.textContent = "ANCHOR HIT — EP 95 SUPER SAIYAN COMPLETE";
+      } else {
+        liveEl.textContent = "GAP / TRANSITION";
+        footerPos.textContent = "BETWEEN WINDOWS — HOLD COURSE";
+      }
+    }
+
+    if (new URLSearchParams(location.search).has("preview")) {
+      document.documentElement.classList.add("preview");
+    }
+
+    render();
+    update();
+    setInterval(update, 1000);
+  </script>
+</body>
+</html>

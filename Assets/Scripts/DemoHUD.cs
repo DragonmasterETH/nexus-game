@@ -6705,7 +6705,7 @@ namespace NexusGame
                         movableCounts.TryGetValue(unitType, out int movable);
                         if (movable > 0)
                         {
-                            InputController.SetMoveSelection(unitType, movable);
+                            InputController.AdjustMoveSelection(unitType, +1);
                             _moveAllChecked = false;
                         }
                     }
